@@ -1,0 +1,19 @@
+[data-theme="1"] {
+  --canvas:           #F2BDCD;
+  --panel-outer:      #ebb0c2;
+  --panel-input:      #dea193;
+  --panel-response:   #dea193;
+  --textbox-bg:       #ede8d0;
+  --response-box-bg:  #ede8d0;
+  --response-text:    #780606;
+}
+
+[data-theme="2"] {
+  --canvas:           #353839;
+  --panel-outer:      #2c2f30;
+  --panel-input:      #898989;
+  --panel-response:   #898989;
+  --textbox-bg:       #353e43;
+  --response-box-bg:  #353e43;
+  --response-text:    #FAEBD7;
+}
