@@ -1,3 +1,4 @@
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -8,8 +9,8 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 
-from config import HOST, MODEL, OLLAMA_BASE_URL, PORT
-from tools import TOOL_DEFINITIONS, clear_pending_writes, execute_tool, pending_writes
+from config import HOST, MODEL, OLLAMA_BASE_URL, PORT, TEMPERATURE
+from tools import TOOL_DEFINITIONS, clear_pending_writes, clear_read_files, execute_tool, pending_writes
 
 app = FastAPI()
 client = AsyncOpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
@@ -73,10 +74,105 @@ def get_pending():
     return JSONResponse({"writes": dict(pending_writes)})
 
 
+async def agent_loop(ws: WebSocket, user_content: str, messages: list):
+    tree_text = build_file_tree(project_dir)
+    prompt_template = Path("prompt.md").read_text(encoding="utf-8")
+    system_prompt = prompt_template.replace("{project_dir}", str(project_dir)).replace("{file_tree}", tree_text)
+    loop_messages = [{"role": "system", "content": system_prompt}] + messages
+    usage_tokens = None
+
+    while True:
+        stream = await client.chat.completions.create(
+            model=MODEL,
+            messages=loop_messages,
+            tools=TOOL_DEFINITIONS,
+            stream=True,
+            temperature=TEMPERATURE,
+            stream_options={"include_usage": True},
+        )
+
+        reasoning_buf = ""
+        content_buf = ""
+        tool_calls_buf: dict[int, dict] = {}
+
+        async for chunk in stream:
+            if chunk.usage:
+                usage_tokens = chunk.usage.total_tokens
+            delta = chunk.choices[0].delta if chunk.choices else None
+            if delta is None:
+                continue
+
+            raw_extra = getattr(delta, "model_extra", None) or {}
+            reasoning_chunk = raw_extra.get("reasoning") or ""
+            if reasoning_chunk:
+                reasoning_buf += reasoning_chunk
+                await ws.send_json({"type": "thinking", "content": reasoning_chunk})
+
+            if delta.content:
+                content_buf += delta.content
+                await ws.send_json({"type": "text", "content": delta.content})
+
+            if delta.tool_calls:
+                for tc_chunk in delta.tool_calls:
+                    i = tc_chunk.index
+                    if i not in tool_calls_buf:
+                        tool_calls_buf[i] = {"id": "", "name": "", "arguments": ""}
+                    if tc_chunk.id:
+                        tool_calls_buf[i]["id"] += tc_chunk.id
+                    if tc_chunk.function.name:
+                        tool_calls_buf[i]["name"] += tc_chunk.function.name
+                    if tc_chunk.function.arguments:
+                        tool_calls_buf[i]["arguments"] += tc_chunk.function.arguments
+
+        if not tool_calls_buf:
+            messages.append({"role": "assistant", "content": content_buf})
+            break
+
+        assembled_tool_calls = [
+            {
+                "id": tc["id"],
+                "type": "function",
+                "function": {"name": tc["name"], "arguments": tc["arguments"]},
+            }
+            for tc in tool_calls_buf.values()
+        ]
+        loop_messages.append({
+            "role": "assistant",
+            "content": content_buf or None,
+            "tool_calls": assembled_tool_calls,
+        })
+
+        for tc in tool_calls_buf.values():
+            name = tc["name"]
+            try:
+                args = json.loads(tc["arguments"])
+            except json.JSONDecodeError:
+                args = {}
+
+            await ws.send_json({"type": "tool_call", "name": name, "args": args})
+            result = execute_tool(name, args, project_dir)
+            await ws.send_json({"type": "tool_result", "name": name, "content": result})
+
+            loop_messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": f"{result}\n\n[Original task: {user_content}]",
+            })
+
+    if pending_writes:
+        await ws.send_json({"type": "pending_writes", "writes": dict(pending_writes)})
+
+    if usage_tokens:
+        await ws.send_json({"type": "usage", "total": usage_tokens, "max": 131072})
+
+    await ws.send_json({"type": "done"})
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     messages: list[dict] = []
+    current_task: asyncio.Task | None = None
 
     try:
         while True:
@@ -91,6 +187,7 @@ async def websocket_endpoint(ws: WebSocket):
                 project_dir = new_dir
                 messages.clear()
                 clear_pending_writes()
+                clear_read_files()
                 await ws.send_json({"type": "info", "content": f"Project set to: {project_dir}"})
                 continue
 
@@ -110,70 +207,26 @@ async def websocket_endpoint(ws: WebSocket):
                 await ws.send_json({"type": "writes_rejected"})
                 continue
 
-            # Chat message — run agent loop
-            user_content = data["content"]
-            messages.append({"role": "user", "content": user_content})
-
-            tree_text = build_file_tree(project_dir)
-            system_prompt = f"""You are a coding assistant working on the project at: {project_dir}
-
-File tree:
-{tree_text}
-
-You have tools to read files, write files, list directories, and run allowed shell commands.
-Always use paths relative to the project root.
-When you write files, the changes are queued for user approval — tell the user when you've queued writes.
-Be concise."""
-
-            loop_messages = [{"role": "system", "content": system_prompt}] + messages
-
-            while True:
-                response = await client.chat.completions.create(
-                    model=MODEL,
-                    messages=loop_messages,
-                    tools=TOOL_DEFINITIONS,
-                )
-                msg = response.choices[0].message
-
-                if msg.content:
-                    await ws.send_json({"type": "text", "content": msg.content})
-
-                if not msg.tool_calls:
-                    messages.append({"role": "assistant", "content": msg.content or ""})
-                    break
-
-                # Append assistant message with tool calls to loop context
-                loop_messages.append(msg.model_dump(exclude_none=True))
-
-                for tc in msg.tool_calls:
-                    name = tc.function.name
-                    try:
-                        args = json.loads(tc.function.arguments)
-                    except json.JSONDecodeError:
-                        args = {}
-
-                    await ws.send_json({"type": "tool_call", "name": name, "args": args})
-
-                    result = execute_tool(name, args, project_dir)
-
-                    await ws.send_json({"type": "tool_result", "name": name, "content": result})
-
-                    loop_messages.append({
-                        "role": "tool",
-                        "tool_call_id": tc.id,
-                        "content": result,
-                    })
-
-            if pending_writes:
-                await ws.send_json({
-                    "type": "pending_writes",
-                    "writes": dict(pending_writes),
-                })
-
-            await ws.send_json({"type": "done"})
+            if data["type"] == "message":
+                if current_task and not current_task.done():
+                    current_task.cancel()
+                user_content = data["content"]
+                messages.append({"role": "user", "content": user_content})
+                current_task = asyncio.create_task(agent_loop(ws, user_content, messages))
 
     except WebSocketDisconnect:
-        pass
+        if current_task and not current_task.done():
+            current_task.cancel()
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        if current_task and not current_task.done():
+            current_task.cancel()
+        try:
+            await ws.send_json({"type": "error", "content": f"Server error: {e}"})
+            await ws.send_json({"type": "done"})
+        except Exception:
+            pass
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

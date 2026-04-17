@@ -5,10 +5,17 @@ from pathlib import Path
 from config import ALLOWED_COMMANDS
 
 pending_writes: dict[str, str] = {}
+read_files: list[str] = []
+
+MAX_READ_CHARS = 100_000
 
 
 def clear_pending_writes():
     pending_writes.clear()
+
+
+def clear_read_files():
+    read_files.clear()
 
 
 TOOL_DEFINITIONS = [
@@ -20,7 +27,9 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path relative to project root"}
+                    "path": {"type": "string", "description": "Path relative to project root"},
+                    "start_line": {"type": "integer", "description": "First line to read (1-indexed, inclusive). Omit to read from the beginning."},
+                    "end_line": {"type": "integer", "description": "Last line to read (inclusive). Omit to read to the end of the file."},
                 },
                 "required": ["path"],
             },
@@ -61,6 +70,18 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "list_context_files",
+            "description": "List all files you have already read in this session. Check this before reading a file to avoid re-reading something already in context.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "run_bash",
             "description": f"Run a shell command in the project directory. Allowed commands: {', '.join(ALLOWED_COMMANDS)}.",
             "parameters": {
@@ -77,13 +98,34 @@ TOOL_DEFINITIONS = [
 
 def execute_tool(name: str, args: dict, project_dir: Path) -> str:
     try:
+        if name == "list_context_files":
+            if not read_files:
+                return "No files read yet this session."
+            return "\n".join(read_files)
+
         if name == "read_file":
             path = (project_dir / args["path"]).resolve()
             if not path.is_relative_to(project_dir.resolve()):
                 return "Error: path escapes project directory"
             if not path.exists():
                 return f"Error: file not found: {args['path']}"
-            return path.read_text(encoding="utf-8", errors="replace")
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            start = args.get("start_line")
+            end = args.get("end_line")
+            if start is not None or end is not None:
+                s = max(0, (start or 1) - 1)
+                e = end if end is not None else len(lines)
+                lines = lines[s:e]
+                content = "\n".join(lines)
+                content = f"[lines {s+1}–{e} of {args['path']}]\n{content}"
+            else:
+                content = "\n".join(lines)
+            if len(content) > MAX_READ_CHARS:
+                content = content[:MAX_READ_CHARS] + f"\n\n[truncated: file exceeds {MAX_READ_CHARS} chars — re-read with start_line/end_line]"
+            rel = args["path"]
+            if rel not in read_files:
+                read_files.append(rel)
+            return content
 
         elif name == "write_file":
             rel_path = args["path"]
@@ -105,6 +147,8 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
 
         elif name == "run_bash":
             command = args["command"]
+            if any(ch in command for ch in ";&|`$><\n"):
+                return "Error: shell metacharacters (; & | ` $ > < newline) are not allowed"
             try:
                 parts = shlex.split(command)
             except ValueError as e:
@@ -113,8 +157,8 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
                 blocked = parts[0] if parts else "(empty)"
                 return f"Error: '{blocked}' is not in the allowed command list: {ALLOWED_COMMANDS}"
             result = subprocess.run(
-                command,
-                shell=True,
+                parts,
+                shell=False,
                 capture_output=True,
                 text=True,
                 cwd=str(project_dir),

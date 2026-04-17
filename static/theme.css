@@ -6,6 +6,7 @@
   --textbox-bg:       #ede8d0;
   --response-box-bg:  #ede8d0;
   --response-text:    #780606;
+  --divider:          #780606;
 }
 
 [data-theme="2"] {
@@ -16,4 +17,5 @@
   --textbox-bg:       #353e43;
   --response-box-bg:  #353e43;
   --response-text:    #FAEBD7;
+  --divider:          #FAEBD7;
 }

@@ -1,4 +1,4 @@
-* { margin: 0; padding: 0; box-sizing: border-box; }
+* { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Aptos', 'Segoe UI', sans-serif; }
 
 body {
   width: 100vw;
@@ -46,7 +46,7 @@ body {
   border: none;
   border-radius: 8px;
   padding: 10px 12px;
-  font-family: monospace;
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
   font-size: 13px;
   color: #2a2a2a;
   outline: none;
@@ -76,7 +76,7 @@ body {
 }
 
 .response-text {
-  font-family: 'Liberation Serif', 'Times New Roman', Georgia, serif;
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
   font-size: 14px;
   line-height: 1.7;
   color: var(--response-text);
@@ -84,18 +84,206 @@ body {
   word-break: break-word;
 }
 
-/* ── Theme toggle (top-right corner) ────────────── */
-.theme-toggle {
-  position: fixed;
-  top: 12px;
-  right: 16px;
-  background: none;
-  border: 1px solid #888;
-  border-radius: 6px;
-  color: #888;
+/* ── Dividers ────────────────────────────────────── */
+.response-divider {
+  border: none;
+  border-top: 1px solid var(--divider);
+  margin: 10px 0;
+  opacity: 0.5;
+}
+
+/* ── Thinking pulse ──────────────────────────────── */
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50%       { opacity: 0.15; }
+}
+
+/* ── Tool activity panel ─────────────────────────── */
+.tool-panel {
+  width: 520px;
+  flex-shrink: 0;
+  height: 260px;
+  background: var(--panel-outer);
+  border-radius: 16px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: flex-start;
+}
+
+.tool-panel-inner {
+  background: var(--response-box-bg);
+  border-radius: 8px;
+  padding: 10px 12px;
+  overflow-y: auto;
+  max-height: 220px;
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
   font-size: 11px;
-  padding: 4px 8px;
+  color: var(--response-text);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.tool-entry { display: flex; flex-direction: column; gap: 2px; }
+.tool-entry .tool-name { font-weight: bold; opacity: 0.9; }
+.tool-entry .tool-args { opacity: 0.55; white-space: pre-wrap; word-break: break-all; }
+.tool-entry .tool-result { opacity: 0.7; white-space: pre-wrap; word-break: break-all; border-left: 2px solid var(--divider); padding-left: 6px; margin-top: 2px; }
+
+/* ── File explorer panel ─────────────────────────── */
+.file-panel {
+  flex: 1;
+  min-width: 0;
+  height: 260px;
+  background: var(--panel-outer);
+  border-radius: 16px;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-self: flex-start;
+}
+
+.file-panel-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 11px;
+  color: var(--response-text);
+  opacity: 0.7;
+  padding: 0 2px;
+}
+
+.file-panel-header button {
+  background: none;
+  border: none;
   cursor: pointer;
-  font-family: monospace;
+  color: var(--response-text);
+  font-size: 13px;
+  opacity: 0.6;
+  line-height: 1;
+}
+
+.file-panel-header button:hover { opacity: 1; }
+
+.file-panel-inner {
+  background: var(--response-box-bg);
+  border-radius: 8px;
+  padding: 8px 10px;
+  overflow-y: auto;
+  flex: 1;
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 11px;
+  color: var(--response-text);
+}
+
+.file-node {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 0;
+  cursor: default;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.file-node.dir { opacity: 0.85; font-weight: bold; cursor: pointer; }
+.file-node.file { opacity: 0.65; }
+.file-node:hover { opacity: 1; }
+.file-children { padding-left: 14px; }
+
+/* ── Bottom-right stack ──────────────────────────── */
+.br-stack {
+  position: fixed;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   z-index: 100;
+}
+
+/* ── Context window panel ────────────────────────── */
+.ctx-panel {
+  background: var(--panel-outer);
+  border-radius: 12px;
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  z-index: 100;
+  min-width: 140px;
+}
+
+.ctx-label {
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 10px;
+  color: var(--response-text);
+  opacity: 0.7;
+  display: flex;
+  justify-content: space-between;
+}
+
+.ctx-bar-track {
+  width: 100%;
+  height: 4px;
+  background: var(--response-box-bg);
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.ctx-bar-fill {
+  height: 100%;
+  width: 0%;
+  background: var(--response-text);
+  border-radius: 2px;
+  transition: width 0.4s ease;
+}
+
+.ctx-tokens {
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 9px;
+  color: var(--response-text);
+  opacity: 0.45;
+}
+
+/* ── Theme picker ────────────────────────────────── */
+.theme-picker {
+  background: var(--panel-outer);
+  border-radius: 12px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.theme-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.theme-option:hover { opacity: 0.75; }
+
+.swatch-row { display: flex; gap: 3px; }
+
+.swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  display: inline-block;
+}
+
+.theme-name {
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 10px;
+  color: var(--response-text);
+  opacity: 0.7;
 }

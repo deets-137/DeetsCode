@@ -8,16 +8,55 @@
 </head>
 <body>
 
-  <button class="theme-toggle" onclick="toggleTheme()">theme</button>
+  <!-- Bottom-right stack -->
+  <div class="br-stack">
+    <div class="ctx-panel">
+      <div class="ctx-label">context <span id="ctx-pct">0%</span></div>
+      <div class="ctx-bar-track"><div class="ctx-bar-fill" id="ctx-bar"></div></div>
+      <div class="ctx-tokens" id="ctx-tokens">0 / 131072</div>
+    </div>
+    <div class="theme-picker">
+      <div class="theme-option" onclick="setTheme('1')">
+        <div class="swatch-row">
+          <span class="swatch" style="background:#F2BDCD"></span>
+          <span class="swatch" style="background:#dea193"></span>
+          <span class="swatch" style="background:#ede8d0"></span>
+          <span class="swatch" style="background:#780606"></span>
+        </div>
+        <span class="theme-name">rose</span>
+      </div>
+      <div class="theme-option" onclick="setTheme('2')">
+        <div class="swatch-row">
+          <span class="swatch" style="background:#353839"></span>
+          <span class="swatch" style="background:#898989"></span>
+          <span class="swatch" style="background:#353e43"></span>
+          <span class="swatch" style="background:#FAEBD7"></span>
+        </div>
+        <span class="theme-name">slate</span>
+      </div>
+    </div>
+  </div>
 
   <div class="canvas">
 
     <!-- Left 30%: chat panel -->
     <div class="left-panel">
 
+      <!-- Directory picker -->
+      <div class="chat-input-panel" style="display:flex;gap:6px;padding:8px 10px;">
+        <input id="dir-input" type="text" placeholder="Project path..." style="
+          flex:1; background:var(--textbox-bg); border:none; border-radius:6px;
+          padding:6px 10px; font-family:monospace; font-size:12px; color:#2a2a2a; outline:none;
+        "/>
+        <button onclick="setDir()" style="
+          background:var(--textbox-bg); border:none; border-radius:6px;
+          padding:6px 10px; font-family:monospace; font-size:12px; cursor:pointer; color:#2a2a2a;
+        ">set</button>
+      </div>
+
       <!-- Chat input -->
       <div class="chat-input-panel">
-        <textarea class="chat-textbox" placeholder="Message Gemma..."></textarea>
+        <textarea id="chat-textbox" class="chat-textbox" placeholder="Message Gemma... (Enter to send, Shift+Enter for newline)"></textarea>
       </div>
 
       <!-- Response -->
@@ -27,6 +66,33 @@
         </div>
       </div>
 
+    </div>
+
+    <!-- Tool activity panel -->
+    <div class="tool-panel" id="tool-panel">
+      <div class="file-panel-header">
+        <span>tools</span>
+        <button onclick="clearToolPanel()">✕</button>
+      </div>
+      <div class="tool-panel-inner" id="tool-panel-inner"></div>
+    </div>
+
+    <!-- Context files panel -->
+    <div class="file-panel" id="context-panel">
+      <div class="file-panel-header">
+        <span>in context</span>
+        <button onclick="clearContextFiles()">✕</button>
+      </div>
+      <div class="file-panel-inner" id="context-files"></div>
+    </div>
+
+    <!-- File explorer panel -->
+    <div class="file-panel">
+      <div class="file-panel-header">
+        <span>files</span>
+        <button onclick="refreshTree()">↺</button>
+      </div>
+      <div class="file-panel-inner" id="file-tree"></div>
     </div>
 
   </div>
