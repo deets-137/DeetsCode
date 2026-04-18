@@ -12,8 +12,9 @@ config.py
 # Claude Code session data
 .claude/
 
-# Task state (runtime, not source)
+# Runtime state
 task.md
+friction.md
 
 # Knowledge packs (user-local content)
 packs/

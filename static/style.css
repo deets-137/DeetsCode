@@ -121,7 +121,7 @@ body::after {
   padding: 10px 12px;
   font-family: 'Aptos', 'Segoe UI', sans-serif;
   font-size: 13px;
-  color: #2a2a2a;
+  color: var(--textbox-text, #2a2a2a);
   outline: none;
   line-height: 1.5;
 }
@@ -192,7 +192,7 @@ body::after {
   padding: 4px 10px;
   font-family: monospace;
   font-size: 11px;
-  color: #2a2a2a;
+  color: var(--textbox-text, #2a2a2a);
   cursor: pointer;
   opacity: 0.7;
 }

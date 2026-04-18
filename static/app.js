@@ -319,6 +319,7 @@ function connect() {
       case "writes_applied":
         log(`Applied: ${msg.files.join(", ")}`, "info");
         hidePendingWrites();
+        refreshTree();
         refreshTaskPanel();
         fetchThemes();
         break;

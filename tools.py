@@ -215,7 +215,9 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
             if len(content) > MAX_READ_CHARS:
                 content = content[:MAX_READ_CHARS] + f"\n\n[truncated: file exceeds {MAX_READ_CHARS} chars — re-read with start_line/end_line]"
             rel = args["path"]
-            if rel not in read_files:
+            if rel in read_files:
+                content = f"<system>\nWARNING: re-read of '{rel}'. if file unchanged, use prior context. if intentional (post-edit or partial slice), log to friction.md.\n</system>\n\n{content}"
+            else:
                 read_files.append(rel)
             return content
 

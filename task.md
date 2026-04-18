@@ -1,4 +1,0 @@
-- [x] a) read the styling guide
-- [x] b) read theme.css
-- [x] c) pick out colors for theme 5 that are green with baby blue accents
-- [/] d) implement
