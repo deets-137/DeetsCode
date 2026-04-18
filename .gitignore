@@ -9,6 +9,9 @@ env/
 # Config (has local URLs/settings — copy config.example.py instead)
 config.py
 
+# Secrets
+.env
+
 # Claude Code session data
 .claude/
 

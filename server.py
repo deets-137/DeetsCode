@@ -7,7 +7,7 @@ from pathlib import Path
 
 THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 
-DEFAULT_PROMPT = """You are a focused coding assistant working on the project at: {project_dir}
+DEFAULT_PROMPT = """You are working on the project at: {project_dir}
 
 File tree:
 {file_tree}
@@ -19,7 +19,15 @@ def strip_think(text: str) -> str:
     return THINK_BLOCK_RE.sub("", text).strip()
 
 
-def load_prompt_template() -> str:
+def load_prompt_template(name: str = "default") -> str:
+    prompts_dir = Path(__file__).parent / "prompts"
+    candidate = prompts_dir / f"{Path(name).name}.md"
+    if candidate.is_file():
+        try:
+            return candidate.read_text(encoding="utf-8")
+        except OSError:
+            pass
+    # fallback: legacy prompt.md in cwd
     try:
         return Path("prompt.md").read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
@@ -42,7 +50,7 @@ packs_dir: Path = Path(__file__).parent / "packs"
 auto_apply_enabled: bool = False
 current_model: str = MODEL
 current_temperature: float = TEMPERATURE
-current_context_length: int = 131072
+current_context_length: int = 262144
 
 SKIP_DIRS = {"__pycache__", "node_modules", ".git", ".venv", "venv", "dist", "build"}
 
@@ -219,14 +227,23 @@ def get_packs():
     return JSONResponse({"packs": list_packs()})
 
 
+@app.get("/api/prompts")
+def get_prompts():
+    prompts_dir = Path(__file__).parent / "prompts"
+    names = []
+    if prompts_dir.is_dir():
+        names = sorted(p.stem for p in prompts_dir.iterdir() if p.suffix == ".md")
+    return JSONResponse({"prompts": names})
+
+
 @app.get("/pending")
 def get_pending():
     return JSONResponse({"writes": dict(pending_writes)})
 
 
-async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, state: dict, selected_packs: list[str]):
+async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, state: dict, selected_packs: list[str], selected_prompt: str = "default"):
     tree_text = build_file_tree(project_dir)
-    prompt_template = load_prompt_template()
+    prompt_template = load_prompt_template(selected_prompt)
     system_prompt = prompt_template.replace("{project_dir}", str(project_dir)).replace("{file_tree}", tree_text)
     pack_block = load_packs(selected_packs)
     if pack_block:
@@ -248,6 +265,13 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
             stream=True,
             temperature=current_temperature,
             stream_options={"include_usage": True},
+            extra_body={
+                "options": {
+                    "num_ctx":262144,
+                    "num_predict":4096,
+                    "num_gpu": 99
+                }
+            }
         )
 
         reasoning_buf = ""
@@ -353,10 +377,10 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
         await ws.send_json({"type": "pending_writes", "writes": dict(pending_writes)})
 
 
-async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_packs: list[str]):
+async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_packs: list[str], selected_prompt: str = "default"):
     state = {"usage_tokens": None}
     try:
-        await _agent_loop_impl(ws, user_content, messages, state, selected_packs)
+        await _agent_loop_impl(ws, user_content, messages, state, selected_packs, selected_prompt)
     except asyncio.CancelledError:
         try:
             await ws.send_json({"type": "info", "content": "Cancelled."})
@@ -553,19 +577,52 @@ async def websocket_endpoint(ws: WebSocket):
                 except (TypeError, ValueError):
                     continue
                 current_temperature = max(0.0, min(2.0, t))
-                continue
-
             if data["type"] == "message":
                 if current_task and not current_task.done():
                     current_task.cancel()
-                user_content = data["content"]
-                # Downgrade any prior current_request tags so only the new message is "live".
+
+                # 1. Parse the JSON packet from discord_bot.py
+                import json
+                try:
+                    user_payload = json.loads(data["content"])
+                    user_name = user_payload["name"]
+                    user_text = user_payload["text"]
+                except:
+                    # Fallback if it's not JSON (e.g., from the web UI)
+                    user_name = "User"
+                    user_text = data["content"]
+
+                # 2. LOAD WORLD STATE (Recommendation #2)
+                world_state_path = project_dir / "campaign_state.json"
+                world_state = "{}"
+                if world_state_path.exists():
+                    world_state = world_state_path.read_text(encoding="utf-8")
+
+                # 3. TAGGING & INSTRUCTIONS (Recommendation #3)
+                # We replace your old 'wrapped' logic with structured XML
                 for m in messages:
-                    if m.get("role") == "user" and isinstance(m.get("content"), str) and m["content"].startswith("<current_request>"):
-                        m["content"] = m["content"].replace("<current_request>", "<prior_request>", 1).replace("</current_request>", "</prior_request>", 1)
-                wrapped = f"<current_request>\n{user_content}\n</current_request>"
-                messages.append({"role": "user", "content": wrapped})
-                current_task = asyncio.create_task(agent_loop(ws, user_content, messages, list(selected_packs)))
+                    if m.get("role") == "user" and isinstance(m.get("content"), str) and "<current_action>" in m["content"]:
+                        m["content"] = m["content"].replace("<current_action>", "<prior_action>").replace("</current_action>", "</prior_action>")
+
+                rich_prompt = f"""
+        <world_state>
+        {world_state}
+        </world_state>
+
+        <current_action>
+        Player: {user_name}
+        Action: {user_text}
+        </current_action>
+
+        <dm_instructions>
+        - You are the Dungeon Master. 
+        - Use the current_action to progress the story.
+        - If stats change, use write_file to update campaign_state.json.
+        - Maintain the 'vibe' of the current world_state.
+        </dm_instructions>
+        """
+            messages.append({"role": "user", "content": rich_prompt})
+            current_task = asyncio.create_task(agent_loop(ws, user_text, messages, list(selected_packs)))
 
     except WebSocketDisconnect:
         if current_task and not current_task.done():
