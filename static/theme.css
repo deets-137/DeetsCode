@@ -1,21 +1,33 @@
 [data-theme="1"] {
   --canvas:           #F2BDCD;
-  --panel-outer:      #ebb0c2;
-  --panel-input:      #dea193;
-  --panel-response:   #dea193;
+  --canvas-blob-1:    #dea193;
+  --canvas-blob-2:    #ede8d0;
+  --panel-outer:      rgba(235, 176, 194, 0.55);
+  --panel-input:      rgba(222, 161, 147, 0.72);
+  --panel-response:   rgba(222, 161, 147, 0.72);
   --textbox-bg:       #ede8d0;
   --response-box-bg:  #ede8d0;
   --response-text:    #780606;
   --divider:          #780606;
+  --glass-border:     rgba(255, 245, 230, 0.45);
+  --glass-highlight:  rgba(255, 255, 255, 0.35);
+  --glass-shadow:     0 10px 30px rgba(120, 6, 6, 0.10), 0 2px 6px rgba(120, 6, 6, 0.06);
+  --focus-glow:       0 0 0 1px rgba(255, 245, 230, 0.65), 0 0 24px 2px rgba(222, 161, 147, 0.45);
 }
 
 [data-theme="2"] {
   --canvas:           #353839;
-  --panel-outer:      #2c2f30;
-  --panel-input:      #898989;
-  --panel-response:   #898989;
-  --textbox-bg:       #353e43;
+  --canvas-blob-1:    #4a5f6b;
+  --canvas-blob-2:    #6b4c5c;
+  --panel-outer:      rgba(44, 47, 48, 0.55);
+  --panel-input:      rgba(137, 137, 137, 0.35);
+  --panel-response:   rgba(137, 137, 137, 0.35);
+  --textbox-bg:       #E0E0E0;
   --response-box-bg:  #353e43;
   --response-text:    #FAEBD7;
   --divider:          #FAEBD7;
+  --glass-border:     rgba(255, 255, 255, 0.08);
+  --glass-highlight:  rgba(255, 255, 255, 0.12);
+  --glass-shadow:     0 10px 40px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.25);
+  --focus-glow:       0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 28px 2px rgba(107, 76, 92, 0.6);
 }

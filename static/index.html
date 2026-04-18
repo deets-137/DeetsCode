@@ -57,6 +57,11 @@
       <!-- Chat input -->
       <div class="chat-input-panel">
         <textarea id="chat-textbox" class="chat-textbox" placeholder="Message Gemma... (Enter to send, Shift+Enter for newline)"></textarea>
+        <div class="chat-actions">
+          <button id="stop-btn" class="chat-action-btn" onclick="cancelRun()" disabled>stop</button>
+          <button class="chat-action-btn" onclick="compactConversation()" title="Summarize and trim the conversation">compact</button>
+          <button class="chat-action-btn" onclick="resetConversation()">reset</button>
+        </div>
       </div>
 
       <!-- Response -->
@@ -86,13 +91,27 @@
       <div class="file-panel-inner" id="context-files"></div>
     </div>
 
-    <!-- File explorer panel -->
-    <div class="file-panel">
-      <div class="file-panel-header">
-        <span>files</span>
-        <button onclick="refreshTree()">↺</button>
+    <!-- Right column: files + packs stacked -->
+    <div class="right-column">
+      <div class="file-panel">
+        <div class="file-panel-header">
+          <span>files</span>
+          <button onclick="refreshTree()">↺</button>
+        </div>
+        <div class="file-panel-inner" id="file-tree"></div>
       </div>
-      <div class="file-panel-inner" id="file-tree"></div>
+
+      <div class="file-panel packs-panel-side">
+        <div class="file-panel-header">
+          <span>knowledge packs</span>
+          <button onclick="refreshPacks()" title="Rescan packs">↺</button>
+        </div>
+        <div class="file-panel-inner packs-inner">
+          <div class="packs-chips" id="packs-chips">
+            <span class="packs-empty">no packs found</span>
+          </div>
+        </div>
+      </div>
     </div>
 
   </div>

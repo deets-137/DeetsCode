@@ -1,3 +1,4 @@
+import re
 import shlex
 import subprocess
 from pathlib import Path
@@ -8,6 +9,34 @@ pending_writes: dict[str, str] = {}
 read_files: list[str] = []
 
 MAX_READ_CHARS = 100_000
+MAX_SEARCH_MATCHES = 50
+SEARCH_SKIP_DIRS = {"__pycache__", "node_modules", ".git", ".venv", "venv", "dist", "build"}
+
+_SYMBOL_PATTERNS = {
+    "python": [
+        (re.compile(r"^\s*async\s+def\s+(\w+)"), "async def"),
+        (re.compile(r"^\s*def\s+(\w+)"), "def"),
+        (re.compile(r"^\s*class\s+(\w+)"), "class"),
+    ],
+    "js": [
+        (re.compile(r"^\s*(?:export\s+(?:default\s+)?)?(?:async\s+)?function\s+(\w+)"), "function"),
+        (re.compile(r"^\s*(?:export\s+)?class\s+(\w+)"), "class"),
+        (re.compile(r"^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s*)?(?:function|\()"), "const fn"),
+    ],
+    "css": [
+        (re.compile(r"^(\.[\w-]+|#[\w-]+|@[\w-]+|[\w-]+)\s*\{"), "rule"),
+    ],
+    "markdown": [
+        (re.compile(r"^(#+\s+.+)$"), "heading"),
+    ],
+}
+
+_EXT_LANG = {
+    ".py": "python",
+    ".js": "js", ".ts": "js", ".jsx": "js", ".tsx": "js", ".mjs": "js",
+    ".css": "css",
+    ".md": "markdown",
+}
 
 
 def clear_pending_writes():
@@ -47,6 +76,52 @@ TOOL_DEFINITIONS = [
                     "content": {"type": "string", "description": "Full file content to write"},
                 },
                 "required": ["path", "content"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "edit_file",
+            "description": "Queue an edit to an existing file by replacing an exact string. old_string must match exactly once in the file. Prefer this over write_file for small changes. Changes are held for user approval.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path relative to project root"},
+                    "old_string": {"type": "string", "description": "Exact text to find. Must match exactly once — include surrounding context to disambiguate if needed."},
+                    "new_string": {"type": "string", "description": "Replacement text."},
+                },
+                "required": ["path", "old_string", "new_string"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": f"Search project files for a regex pattern. Returns up to {MAX_SEARCH_MATCHES} matches as 'path:line: snippet'. Skips binaries, node_modules, .git, etc.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Python regex pattern"},
+                    "path": {"type": "string", "description": "Optional subdirectory to limit search (relative to project root). Default: entire project."},
+                    "glob": {"type": "string", "description": "Optional filename glob to filter (e.g. '*.py', '*.js'). Default: all files."},
+                },
+                "required": ["pattern"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_symbols",
+            "description": "List function/class definitions and their line numbers in a source file. Much cheaper than reading the whole file — use to skim a large file before reading the relevant section with read_file(start_line, end_line).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path relative to project root"},
+                },
+                "required": ["path"],
             },
         },
     },
@@ -131,6 +206,96 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
             rel_path = args["path"]
             pending_writes[rel_path] = args["content"]
             return f"Queued write: {rel_path}"
+
+        elif name == "edit_file":
+            rel_path = args["path"]
+            old = args["old_string"]
+            new = args["new_string"]
+            if old == new:
+                return "Error: old_string and new_string are identical"
+            if rel_path in pending_writes:
+                content = pending_writes[rel_path]
+                source = "pending write"
+            else:
+                path = (project_dir / rel_path).resolve()
+                if not path.is_relative_to(project_dir.resolve()):
+                    return "Error: path escapes project directory"
+                if not path.exists():
+                    return f"Error: file not found: {rel_path}"
+                content = path.read_text(encoding="utf-8", errors="replace")
+                source = "disk"
+            count = content.count(old)
+            if count == 0:
+                return f"Error: old_string not found in {rel_path} (searched {source})"
+            if count > 1:
+                return f"Error: old_string matches {count} times in {rel_path} — include more surrounding context to make it unique"
+            pending_writes[rel_path] = content.replace(old, new, 1)
+            return f"Queued edit: {rel_path}"
+
+        elif name == "search":
+            pattern = args["pattern"]
+            try:
+                regex = re.compile(pattern)
+            except re.error as e:
+                return f"Error: invalid regex: {e}"
+            sub = args.get("path", ".") or "."
+            search_root = (project_dir / sub).resolve()
+            if not search_root.is_relative_to(project_dir.resolve()):
+                return "Error: path escapes project directory"
+            if not search_root.exists():
+                return f"Error: path not found: {sub}"
+            glob_pat = args.get("glob") or "*"
+            matches = []
+            iterator = search_root.rglob(glob_pat) if search_root.is_dir() else [search_root]
+            for entry in iterator:
+                if not entry.is_file():
+                    continue
+                rel_parts = entry.relative_to(project_dir).parts
+                if any(p in SEARCH_SKIP_DIRS or p.startswith(".") for p in rel_parts):
+                    continue
+                try:
+                    text = entry.read_text(encoding="utf-8", errors="strict")
+                except (UnicodeDecodeError, OSError):
+                    continue
+                for i, line in enumerate(text.splitlines(), 1):
+                    if regex.search(line):
+                        rel = entry.relative_to(project_dir).as_posix()
+                        matches.append(f"{rel}:{i}: {line.strip()[:200]}")
+                        if len(matches) >= MAX_SEARCH_MATCHES:
+                            break
+                if len(matches) >= MAX_SEARCH_MATCHES:
+                    break
+            if not matches:
+                return f"No matches for /{pattern}/"
+            header = f"{len(matches)} match{'es' if len(matches) != 1 else ''}"
+            if len(matches) >= MAX_SEARCH_MATCHES:
+                header += f" (truncated at {MAX_SEARCH_MATCHES})"
+            return header + "\n" + "\n".join(matches)
+
+        elif name == "list_symbols":
+            rel = args["path"]
+            path = (project_dir / rel).resolve()
+            if not path.is_relative_to(project_dir.resolve()):
+                return "Error: path escapes project directory"
+            if not path.is_file():
+                return f"Error: file not found: {rel}"
+            lang = _EXT_LANG.get(path.suffix.lower(), "markdown")
+            patterns = _SYMBOL_PATTERNS.get(lang, _SYMBOL_PATTERNS["markdown"])
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError as e:
+                return f"Error reading {rel}: {e}"
+            symbols = []
+            for i, line in enumerate(text.splitlines(), 1):
+                for regex, kind in patterns:
+                    m = regex.match(line)
+                    if m:
+                        symbols.append(f"{i}: {kind} {m.group(1)}")
+                        break
+            if not symbols:
+                return f"No symbols found in {rel} (detected lang: {lang})"
+            header = f"{len(symbols)} symbols in {rel} ({lang}):"
+            return header + "\n" + "\n".join(symbols)
 
         elif name == "list_dir":
             path = (project_dir / args["path"]).resolve()
