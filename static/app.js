@@ -730,5 +730,21 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  const tempSlider = document.getElementById("temp-slider");
+  const tempValue = document.getElementById("temp-value");
+  if (tempSlider) {
+    tempSlider.addEventListener("input", (e) => {
+      const val = (parseInt(e.target.value) / 100).toFixed(2);
+      if (tempValue) tempValue.textContent = val;
+    });
+    tempSlider.addEventListener("change", (e) => {
+      const val = (parseInt(e.target.value) / 100).toFixed(2);
+      if (tempValue) tempValue.textContent = val;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_temperature", temperature: parseFloat(val) }));
+      }
+    });
+  }
+
   connect();
 });

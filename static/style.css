@@ -360,6 +360,102 @@ body::after {
   opacity: 0.6;
 }
 
+/* ── Config Row (file click action + temp slider) ── */
+.config-row {
+  display: flex;
+  flex-direction: row;
+  gap: 10px;
+  width: 100%;
+}
+
+.config-row > .config-panel {
+  flex: 1;
+  min-width: 0;
+}
+
+/* ── Temperature Slider ──────────────────────────── */
+.temp-slider-panel {
+  width: 48px;
+  flex-shrink: 0;
+  background: var(--panel-outer);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+  border-radius: 12px;
+  padding: 8px 4px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  transition: background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+}
+
+.temp-label {
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 9px;
+  color: var(--response-text);
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.temp-value {
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 11px;
+  font-weight: bold;
+  color: var(--response-text);
+  opacity: 0.85;
+}
+
+.temp-track {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.temp-range {
+  writing-mode: vertical-lr;
+  direction: rtl;
+  -webkit-appearance: none;
+  appearance: none;
+  width: 6px;
+  height: 100%;
+  background: var(--response-box-bg);
+  border-radius: 3px;
+  outline: none;
+  cursor: pointer;
+}
+
+.temp-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--response-text);
+  opacity: 0.8;
+  cursor: pointer;
+  transition: opacity 0.2s, box-shadow 0.2s;
+}
+
+.temp-range::-webkit-slider-thumb:hover {
+  opacity: 1;
+  box-shadow: 0 0 8px rgba(140, 224, 164, 0.5);
+}
+
+.temp-range::-moz-range-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--response-text);
+  opacity: 0.8;
+  cursor: pointer;
+  border: none;
+}
+
 /* ── Right column (files + packs + tasks stacked) ── */
 .right-column {
   flex: 1;
@@ -554,8 +650,8 @@ body::after {
 /* Toggle Switch */
 .toggle-wrapper {
   position: relative;
-  width: 24px;
-  height: 40px;
+  width: 40px;
+  height: 22px;
 }
 
 .toggle-wrapper input {
@@ -574,15 +670,15 @@ body::after {
   bottom: 0;
   background-color: var(--response-box-bg);
   transition: .3s;
-  border-radius: 12px;
+  border-radius: 11px;
   border: 1px solid var(--glass-border);
 }
 
 .toggle-slider:before {
   position: absolute;
   content: "";
-  height: 18px;
-  width: 18px;
+  height: 16px;
+  width: 16px;
   left: 2px;
   bottom: 2px;
   background-color: var(--response-text);
@@ -596,7 +692,7 @@ input:checked + .toggle-slider {
 }
 
 input:checked + .toggle-slider:before {
-  transform: translateY(-18px);
+  transform: translateX(18px);
   opacity: 1;
   background-color: #8ce0a4;
   box-shadow: 0 0 8px rgba(140, 224, 164, 0.6);

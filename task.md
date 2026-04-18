@@ -1,0 +1,4 @@
+- [ ] read the styling guide
+- [ ] read theme.css
+- [ ] pick out colors for theme 4 that are black heavy with yellow accents
+- [ ] implement

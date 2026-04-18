@@ -83,13 +83,22 @@
         <div class="tool-panel-inner" id="tool-panel-inner"></div>
       </div>
 
-      <!-- Config panel -->
-      <div class="tool-panel config-panel" id="config-panel">
-        <div class="file-panel-header">
-          <span>file click action</span>
+      <!-- Config row: file click action + temperature slider -->
+      <div class="config-row">
+        <div class="tool-panel config-panel" id="config-panel">
+          <div class="file-panel-header">
+            <span>file click action</span>
+          </div>
+          <div class="config-panel-inner">
+            <textarea id="file-click-template" class="config-textarea" placeholder="Template for clicking a file. Use {path} for the file path."></textarea>
+          </div>
         </div>
-        <div class="config-panel-inner">
-          <textarea id="file-click-template" class="config-textarea" placeholder="Template for clicking a file. Use {path} for the file path."></textarea>
+        <div class="temp-slider-panel">
+          <div class="temp-label">temp</div>
+          <div class="temp-track">
+            <input type="range" id="temp-slider" class="temp-range" min="0" max="100" value="30" orient="vertical">
+          </div>
+          <div class="temp-value" id="temp-value">0.3</div>
         </div>
       </div>
     </div>
