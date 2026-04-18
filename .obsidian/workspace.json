@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "prompts/dnd.md",
+                "file": "manual/architecture.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "dnd"
+              "title": "architecture"
             }
           }
         ]
@@ -94,7 +94,7 @@
             "state": {
               "type": "backlink",
               "state": {
-                "file": "prompts/dnd.md",
+                "file": "manual/architecture.md",
                 "collapseAll": false,
                 "extraContext": false,
                 "sortOrder": "alphabetical",
@@ -104,7 +104,7 @@
                 "unlinkedCollapsed": true
               },
               "icon": "links-coming-in",
-              "title": "Backlinks for dnd"
+              "title": "Backlinks for architecture"
             }
           },
           {
@@ -113,12 +113,12 @@
             "state": {
               "type": "outgoing-link",
               "state": {
-                "file": "prompts/dnd.md",
+                "file": "manual/architecture.md",
                 "linksCollapsed": false,
                 "unlinkedCollapsed": true
               },
               "icon": "links-going-out",
-              "title": "Outgoing links from dnd"
+              "title": "Outgoing links from architecture"
             }
           },
           {
@@ -156,13 +156,13 @@
             "state": {
               "type": "outline",
               "state": {
-                "file": "prompts/dnd.md",
+                "file": "manual/architecture.md",
                 "followCursor": false,
                 "showSearch": false,
                 "searchQuery": ""
               },
               "icon": "lucide-list",
-              "title": "Outline of dnd"
+              "title": "Outline of architecture"
             }
           }
         ]
@@ -185,9 +185,9 @@
   },
   "active": "3765c684a16d5241",
   "lastOpenFiles": [
-    "manual/architecture.md",
     "prompts/dnd.md",
     "prompts",
+    "manual/architecture.md",
     "manual/writing_prompts.md",
     "manual/friction.md",
     "manual/ui.md",
