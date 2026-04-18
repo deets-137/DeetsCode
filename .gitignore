@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Config (has local URLs/settings — copy config.example.py instead)
+config.py
+
+# Claude Code session data
+.claude/
+
+# Task state (runtime, not source)
+task.md
+
+# Knowledge packs (user-local content)
+packs/
+manual/
+
+# OS
+.DS_Store
+Thumbs.db

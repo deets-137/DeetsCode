@@ -1,0 +1,5 @@
+MODEL = "qwen3:8b"
+OLLAMA_BASE_URL = "http://localhost:11434/v1"
+TEMPERATURE = 0.3
+HOST = "127.0.0.1"
+PORT = 8000

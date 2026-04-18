@@ -1,4 +1,4 @@
-- [ ] read the styling guide
-- [ ] read theme.css
-- [ ] pick out colors for theme 4 that are black heavy with yellow accents
-- [ ] implement
+- [x] a) read the styling guide
+- [x] b) read theme.css
+- [/] c) pick out colors for theme 5 that are green with baby blue accents
+- [ ] d) implement

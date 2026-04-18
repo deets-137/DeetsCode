@@ -27,6 +27,7 @@ File tree:
 - When given a multi-step task, call `update_task` first to create a checklist plan.
 - Use markdown checkboxes: `- [ ]` for todo, `- [/]` for in-progress, `- [x]` for done.
 - Mark items `[/]` when you start working on them, and `[x]` when complete.
-- After completing each step, call `update_task` again with the updated checklist.
+- **Marking is a tool call, not narration.** Writing "Step 1 is done — marked [x]" in your reply does NOT change the task file. You must actually invoke `update_task` with the full updated checklist. If you catch yourself describing a status change in prose, stop and call the tool instead.
+- Update the checklist at every transition: mark the finished step `[x]` AND the next step `[/]` in the same `update_task` call, before doing any other work on the next step.
 - To review your current progress, call `update_task` with no content — it will return the current checklist.
 - This keeps you focused on the original goal even after reading many files.

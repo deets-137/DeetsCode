@@ -275,6 +275,7 @@ let lastMsgType = null;
 
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
+  window.__ws = ws;
 
   ws.onopen = () => { log("connected to harness", "info"); refreshTree(); refreshPacks(); fetchModels(); refreshTaskPanel(); fetchThemes(); };
   ws.onclose = () => {
@@ -285,6 +286,7 @@ function connect() {
 
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
+    if (window.__agentLog) window.__agentLog.push({t: Date.now(), ...msg});
 
     switch (msg.type) {
       case "thinking":
@@ -365,6 +367,10 @@ function connect() {
         updateContextBar(msg.total, msg.max);
         break;
 
+      case "ctx_length":
+        updateContextBar(0, msg.max);
+        break;
+
       case "done":
         addDivider();
         busy = false;
@@ -400,6 +406,55 @@ function sendMessage() {
   busy = true;
   setInputEnabled(false);
   showThinking();
+}
+
+// ── Slash commands panel ─────────────────────────
+const SLASH_DEFAULTS = [
+  "/read <path> [N-M]         — read file, optional line range",
+  "/search <pattern> [glob=X] [path=Y] — regex search",
+  "/symbols <path>            — list defs/classes with line numbers",
+  "/ls [path]                 — list a directory",
+  "/tree                      — refresh the file tree panel",
+  "/compact                   — summarize + trim conversation",
+  "/help                      — this list",
+].join("\n");
+
+function renderSlashPanel() {
+  const inner = document.getElementById("slash-inner");
+  if (!inner) return;
+  const raw = localStorage.getItem("harness-slash-commands") || SLASH_DEFAULTS;
+  inner.innerHTML = "";
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    const div = document.createElement("div");
+    div.className = "slash-cmd-row";
+    const m = line.match(/^(.+?)\s*—\s*(.+)$/);
+    if (m) {
+      div.innerHTML = `<span class="slash-cmd-name">${escapeHtml(m[1].trim())}</span><span class="slash-cmd-sep"> — </span><span class="slash-cmd-desc">${escapeHtml(m[2].trim())}</span>`;
+    } else {
+      div.innerHTML = `<span class="slash-cmd-name">${escapeHtml(line)}</span>`;
+    }
+    inner.appendChild(div);
+  }
+}
+
+function toggleSlashEdit() {
+  const inner = document.getElementById("slash-inner");
+  const editor = document.getElementById("slash-editor");
+  const btn = document.getElementById("slash-edit-btn");
+  if (editor.style.display !== "none") {
+    localStorage.setItem("harness-slash-commands", editor.value);
+    editor.style.display = "none";
+    inner.style.display = "";
+    btn.textContent = "✎";
+    renderSlashPanel();
+  } else {
+    editor.value = localStorage.getItem("harness-slash-commands") || SLASH_DEFAULTS;
+    inner.style.display = "none";
+    editor.style.display = "";
+    btn.textContent = "✓";
+    editor.focus();
+  }
 }
 
 // ── Slash commands ────────────────────────────────
@@ -640,10 +695,45 @@ function renderEditArgs(args) {
 }
 
 function renderToolArgs(name, args) {
-  if (name === "edit_file" && args && typeof args === "object") {
-    return renderEditArgs(args);
+  if (!args) return "";
+  switch (name) {
+    case "edit_file":
+      return renderEditArgs(args);
+    case "read_file": {
+      let s = escapeHtml(args.path ?? "");
+      if (args.start_line || args.end_line) s += `:${args.start_line ?? ""}–${args.end_line ?? ""}`;
+      return `<span class="tool-args">${s}</span>`;
+    }
+    case "write_file":
+      return `<span class="tool-args">${escapeHtml(args.path ?? "")}</span>`;
+    case "search": {
+      let s = escapeHtml(args.pattern ?? "");
+      if (args.glob) s += `  <span style="opacity:0.45">${escapeHtml(args.glob)}</span>`;
+      if (args.path) s += `  <span style="opacity:0.45">in ${escapeHtml(args.path)}</span>`;
+      return `<span class="tool-args">${s}</span>`;
+    }
+    case "list_symbols":
+    case "list_dir":
+      return `<span class="tool-args">${escapeHtml(args.path ?? "")}</span>`;
+    case "run_command":
+      return `<span class="tool-args">${escapeHtml(args.command ?? "")}</span>`;
+    case "update_task": {
+      const content = (args.content ?? "").trim();
+      if (!content) return `<span class="tool-args" style="opacity:0.4">(read)</span>`;
+      return `<pre class="tool-args tool-args-task">${escapeHtml(content)}</pre>`;
+    }
+    case "list_context_files":
+      return "";
+    default: {
+      const keys = Object.keys(args);
+      if (keys.length === 0) return "";
+      const summary = keys.map(k => {
+        const v = String(args[k]);
+        return `<span style="opacity:0.5">${escapeHtml(k)}</span> ${escapeHtml(v.length > 60 ? v.slice(0, 60) + "…" : v)}`;
+      }).join("  ");
+      return `<span class="tool-args">${summary}</span>`;
+    }
   }
-  return `<span class="tool-args">${escapeHtml(JSON.stringify(args, null, 2))}</span>`;
 }
 
 function addToolEntry(name, args) {
@@ -746,5 +836,6 @@ document.addEventListener("DOMContentLoaded", () => {
     });
   }
 
+  renderSlashPanel();
   connect();
 });

@@ -103,13 +103,24 @@
       </div>
     </div>
 
-    <!-- Context files panel -->
-    <div class="file-panel" id="context-panel">
-      <div class="file-panel-header">
-        <span>in context</span>
-        <button onclick="clearContextFiles()">✕</button>
+    <!-- Context column: in-context + slash commands -->
+    <div class="context-column">
+      <div class="file-panel" id="context-panel">
+        <div class="file-panel-header">
+          <span>in context</span>
+          <button onclick="clearContextFiles()">✕</button>
+        </div>
+        <div class="file-panel-inner" id="context-files"></div>
       </div>
-      <div class="file-panel-inner" id="context-files"></div>
+
+      <div class="file-panel slash-panel" id="slash-panel">
+        <div class="file-panel-header">
+          <span>slash commands</span>
+          <button id="slash-edit-btn" onclick="toggleSlashEdit()" title="Edit">✎</button>
+        </div>
+        <div class="file-panel-inner slash-inner" id="slash-inner"></div>
+        <textarea id="slash-editor" class="slash-editor" style="display:none"></textarea>
+      </div>
     </div>
 
     <!-- Right column: files + packs stacked -->
