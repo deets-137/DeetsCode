@@ -10,30 +10,29 @@
 
   <!-- Bottom-right stack -->
   <div class="br-stack">
-    <div class="ctx-panel">
-      <div class="ctx-label">context <span id="ctx-pct">0%</span></div>
+    <div class="br-left">
+      <div class="auto-apply-panel">
+        <div class="toggle-wrapper">
+          <input type="checkbox" id="auto-apply-toggle">
+          <label for="auto-apply-toggle" class="toggle-slider"></label>
+        </div>
+        <span class="auto-apply-label">auto apply</span>
+      </div>
+      <div class="model-picker-panel">
+        <select id="model-select" class="model-select">
+          <option value="" disabled selected>loading...</option>
+        </select>
+      </div>
+    </div>
+    <div class="br-right">
+      <div class="ctx-panel">
+        <div class="ctx-label">context <span id="ctx-pct">0%</span></div>
       <div class="ctx-bar-track"><div class="ctx-bar-fill" id="ctx-bar"></div></div>
       <div class="ctx-tokens" id="ctx-tokens">0 / 131072</div>
     </div>
-    <div class="theme-picker">
-      <div class="theme-option" onclick="setTheme('1')">
-        <div class="swatch-row">
-          <span class="swatch" style="background:#F2BDCD"></span>
-          <span class="swatch" style="background:#dea193"></span>
-          <span class="swatch" style="background:#ede8d0"></span>
-          <span class="swatch" style="background:#780606"></span>
-        </div>
-        <span class="theme-name">rose</span>
-      </div>
-      <div class="theme-option" onclick="setTheme('2')">
-        <div class="swatch-row">
-          <span class="swatch" style="background:#353839"></span>
-          <span class="swatch" style="background:#898989"></span>
-          <span class="swatch" style="background:#353e43"></span>
-          <span class="swatch" style="background:#FAEBD7"></span>
-        </div>
-        <span class="theme-name">slate</span>
-      </div>
+    <div class="theme-picker" id="theme-picker">
+      <!-- dynamically populated by fetchThemes() -->
+    </div>
     </div>
   </div>
 
@@ -73,13 +72,26 @@
 
     </div>
 
-    <!-- Tool activity panel -->
-    <div class="tool-panel" id="tool-panel">
-      <div class="file-panel-header">
-        <span>tools</span>
-        <button onclick="clearToolPanel()">✕</button>
+    <!-- Middle column: Tools + Config stacked -->
+    <div class="middle-column">
+      <!-- Tool activity panel -->
+      <div class="tool-panel" id="tool-panel">
+        <div class="file-panel-header">
+          <span>tools</span>
+          <button onclick="clearToolPanel()">✕</button>
+        </div>
+        <div class="tool-panel-inner" id="tool-panel-inner"></div>
       </div>
-      <div class="tool-panel-inner" id="tool-panel-inner"></div>
+
+      <!-- Config panel -->
+      <div class="tool-panel config-panel" id="config-panel">
+        <div class="file-panel-header">
+          <span>file click action</span>
+        </div>
+        <div class="config-panel-inner">
+          <textarea id="file-click-template" class="config-textarea" placeholder="Template for clicking a file. Use {path} for the file path."></textarea>
+        </div>
+      </div>
     </div>
 
     <!-- Context files panel -->
@@ -110,6 +122,16 @@
           <div class="packs-chips" id="packs-chips">
             <span class="packs-empty">no packs found</span>
           </div>
+        </div>
+      </div>
+
+      <div class="file-panel task-panel" id="task-panel">
+        <div class="file-panel-header">
+          <span>task list</span>
+          <button onclick="refreshTaskPanel()" title="Refresh task list">↺</button>
+        </div>
+        <div class="file-panel-inner task-inner" id="task-inner">
+          <span class="task-empty">no task.md found</span>
         </div>
       </div>
     </div>

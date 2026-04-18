@@ -2,6 +2,7 @@ import asyncio
 import json
 import re
 import sys
+import uuid
 from pathlib import Path
 
 THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
@@ -38,6 +39,8 @@ client = AsyncOpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
 project_dir: Path = Path(".").resolve()
 packs_dir: Path = Path(__file__).parent / "packs"
+auto_apply_enabled: bool = False
+current_model: str = MODEL
 
 SKIP_DIRS = {"__pycache__", "node_modules", ".git", ".venv", "venv", "dist", "build"}
 
@@ -168,7 +171,7 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
             messages.append({"role": "assistant", "content": "[stopped: iteration cap reached]"})
             break
         stream = await client.chat.completions.create(
-            model=MODEL,
+            model=current_model,
             messages=loop_messages,
             tools=TOOL_DEFINITIONS,
             stream=True,
@@ -208,12 +211,16 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
                         tool_calls_buf[i]["name"] += tc_chunk.function.name
                     if tc_chunk.function.arguments:
                         tool_calls_buf[i]["arguments"] += tc_chunk.function.arguments
-
         if not tool_calls_buf:
             stripped = strip_think(content_buf)
             if stripped:
                 messages.append({"role": "assistant", "content": stripped})
             break
+
+        # Ensure all tool calls have an ID (some models/Ollama streams omit them)
+        for tc in tool_calls_buf.values():
+            if not tc["id"]:
+                tc["id"] = "call_" + uuid.uuid4().hex[:8]
 
         assembled_tool_calls = [
             {
@@ -240,11 +247,30 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
             result = execute_tool(name, args, project_dir)
             await ws.send_json({"type": "tool_result", "name": name, "content": result})
 
+            # Auto-refresh the task panel in the UI when update_task writes
+            if name == "update_task" and args.get("content", "").strip():
+                await ws.send_json({"type": "task_updated"})
+
             loop_messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
-                "content": result,
+                "content": f"[Tool Result]\n{result}\n\n[System Directive: Continue the user's original task based on this tool result. Do not hallucinate or invent new user requests. If the original task is complete, stop.]",
             })
+
+        if pending_writes and auto_apply_enabled:
+            applied = []
+            for rel_path, content in pending_writes.items():
+                full_path = project_dir / rel_path
+                full_path.parent.mkdir(parents=True, exist_ok=True)
+                full_path.write_text(content, encoding="utf-8")
+                applied.append(rel_path)
+            clear_pending_writes()
+            await ws.send_json({"type": "writes_applied", "files": applied})
+            loop_messages.append({
+                "role": "system",
+                "content": f"[System: The queued files ({', '.join(applied)}) have been automatically written to disk. Proceed with the next step of the task.]"
+            })
+            continue
 
     if pending_writes:
         await ws.send_json({"type": "pending_writes", "writes": dict(pending_writes)})
@@ -269,8 +295,65 @@ async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_
             pass
 
 
+@app.get("/models")
+async def get_models():
+    import urllib.request
+    try:
+        url = OLLAMA_BASE_URL.replace("/v1", "/api/tags")
+        req = urllib.request.urlopen(url, timeout=5)
+        data = json.loads(req.read())
+        models = [m["name"] for m in data.get("models", [])]
+        return JSONResponse({"models": models, "current": current_model})
+    except Exception as e:
+        return JSONResponse({"models": [], "current": current_model, "error": str(e)})
+
+
+@app.get("/api/task")
+async def get_task():
+    task_path = project_dir / "task.md"
+    try:
+        if task_path.is_file():
+            content = task_path.read_text(encoding="utf-8", errors="replace")
+            return JSONResponse({"content": content})
+        return JSONResponse({"content": ""})
+    except Exception as e:
+        return JSONResponse({"content": "", "error": str(e)})
+
+
+@app.get("/api/themes")
+async def get_themes():
+    """Parse theme.css and return all discovered themes with their swatch colors."""
+    import re as _re
+    theme_css = Path(__file__).parent / "static" / "theme.css"
+    themes = []
+    try:
+        if not theme_css.is_file():
+            return JSONResponse({"themes": themes})
+        text = theme_css.read_text(encoding="utf-8", errors="replace")
+        # Find each [data-theme="X"] block
+        blocks = _re.findall(r'\[data-theme=["\'](\d+)["\']\]\s*\{([^}]+)\}', text)
+        for theme_id, body in blocks:
+            colors = {}
+            for line in body.splitlines():
+                m = _re.match(r'\s*--([\w-]+)\s*:\s*([^;]+);', line)
+                if m:
+                    colors[m.group(1)] = m.group(2).strip()
+            swatches = [
+                colors.get("canvas", "#888"),
+                colors.get("canvas-blob-1", "#888"),
+                colors.get("canvas-blob-2", "#888"),
+                colors.get("response-text", "#888"),
+            ]
+            # Derive a name from the dominant color feel
+            themes.append({"id": theme_id, "swatches": swatches})
+        return JSONResponse({"themes": themes})
+    except Exception as e:
+        return JSONResponse({"themes": [], "error": str(e)})
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
+    global current_model, auto_apply_enabled
     await ws.accept()
     messages: list[dict] = []
     current_task: asyncio.Task | None = None
@@ -323,7 +406,7 @@ async def websocket_endpoint(ws: WebSocket):
                 await ws.send_json({"type": "info", "content": "Compacting conversation..."})
                 try:
                     resp = await client.chat.completions.create(
-                        model=MODEL,
+                        model=current_model,
                         messages=messages + [{
                             "role": "user",
                             "content": "Summarize our conversation above in 5-10 concise bullets. Focus on: user intent, decisions made, files changed or in progress, and any open questions. Output only the bullets, no preamble.",
@@ -371,6 +454,17 @@ async def websocket_endpoint(ws: WebSocket):
             if data["type"] == "reject_writes":
                 clear_pending_writes()
                 await ws.send_json({"type": "writes_rejected"})
+                continue
+
+            if data["type"] == "set_auto_apply":
+                auto_apply_enabled = bool(data.get("enabled", False))
+                continue
+
+            if data["type"] == "set_model":
+                new_model = data.get("model")
+                if new_model:
+                    current_model = new_model
+                    await ws.send_json({"type": "info", "content": f"Switched model to {current_model}"})
                 continue
 
             if data["type"] == "message":

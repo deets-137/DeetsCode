@@ -10,6 +10,104 @@ async function refreshTree() {
   } catch (e) { /* server not up yet */ }
 }
 
+// ── Models ────────────────────────────────────────
+async function fetchModels() {
+  try {
+    const res = await fetch("/models");
+    const data = await res.json();
+    const select = document.getElementById("model-select");
+    if (!select) return;
+    select.innerHTML = "";
+    if (data.models && data.models.length > 0) {
+      data.models.forEach(m => {
+        const opt = document.createElement("option");
+        opt.value = m;
+        opt.textContent = m;
+        if (m === data.current) opt.selected = true;
+        select.appendChild(opt);
+      });
+    } else {
+      const opt = document.createElement("option");
+      opt.textContent = "No models found";
+      opt.disabled = true;
+      select.appendChild(opt);
+    }
+  } catch (e) {
+    console.error("Failed to fetch models:", e);
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const modelSelect = document.getElementById("model-select");
+  if (modelSelect) {
+    modelSelect.addEventListener("change", (e) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_model", model: e.target.value }));
+      }
+    });
+  }
+});
+
+// ── Task Panel ────────────────────────────────────
+async function refreshTaskPanel() {
+  try {
+    const res = await fetch("/api/task");
+    const data = await res.json();
+    const inner = document.getElementById("task-inner");
+    if (!inner) return;
+    if (!data.content || data.content.trim() === "") {
+      inner.innerHTML = '<span class="task-empty">no task.md found</span>';
+      return;
+    }
+    inner.innerHTML = renderTaskMarkdown(data.content);
+  } catch (e) {
+    console.error("Failed to fetch task:", e);
+  }
+}
+
+function renderTaskMarkdown(md) {
+  const lines = md.split("\n");
+  let html = "";
+  for (const line of lines) {
+    const trimmed = line.trimStart();
+    const indent = line.length - trimmed.length;
+    const pad = Math.floor(indent / 2) * 12;
+    // Checked: [x]
+    const doneMatch = trimmed.match(/^[-*]\s*\[x\]\s*(.*)$/i);
+    if (doneMatch) {
+      html += `<div class="task-item" style="padding-left:${pad}px"><span class="task-check done">✓</span><span style="opacity:0.5;text-decoration:line-through">${esc(doneMatch[1])}</span></div>`;
+      continue;
+    }
+    // In-progress: [/]
+    const progMatch = trimmed.match(/^[-*]\s*\[\/\]\s*(.*)$/i);
+    if (progMatch) {
+      html += `<div class="task-item" style="padding-left:${pad}px"><span class="task-check in-progress">◉</span><span>${esc(progMatch[1])}</span></div>`;
+      continue;
+    }
+    // Unchecked: [ ]
+    const todoMatch = trimmed.match(/^[-*]\s*\[\s?\]\s*(.*)$/);
+    if (todoMatch) {
+      html += `<div class="task-item" style="padding-left:${pad}px"><span class="task-check">○</span><span>${esc(todoMatch[1])}</span></div>`;
+      continue;
+    }
+    // Heading
+    const headMatch = trimmed.match(/^(#{1,3})\s+(.*)$/);
+    if (headMatch) {
+      html += `<div style="font-weight:bold;opacity:0.85;padding:4px 0 2px;padding-left:${pad}px">${esc(headMatch[2])}</div>`;
+      continue;
+    }
+    // Blank or other
+    if (trimmed.length > 0) {
+      html += `<div style="padding-left:${pad}px">${esc(trimmed)}</div>`;
+    }
+  }
+  return html;
+}
+
+function esc(s) {
+  return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
 // ── Knowledge packs ───────────────────────────────
 const activePacks = new Set();
 
@@ -109,7 +207,13 @@ function renderNodes(nodes, container, parentPath = "") {
 function requestRead(path) {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   if (busy) { log("busy — wait for current turn to finish", "info"); return; }
-  const text = `Read \`${path}\` and reply with only the single word: ready`;
+  
+  const templateBox = document.getElementById("file-click-template");
+  let template = templateBox ? templateBox.value.trim() : "";
+  if (!template) {
+    template = "Read `{path}` and reply with only the single word: ready";
+  }
+  const text = template.replace(/{path}/g, path);
 
   clearResponse();
   clearToolPanel();
@@ -133,6 +237,37 @@ function loadTheme() {
   if (saved) document.documentElement.dataset.theme = saved;
 }
 
+async function fetchThemes() {
+  try {
+    const res = await fetch("/api/themes");
+    const data = await res.json();
+    const picker = document.getElementById("theme-picker");
+    if (!picker || !data.themes || data.themes.length === 0) return;
+    picker.innerHTML = "";
+    for (const theme of data.themes) {
+      const opt = document.createElement("div");
+      opt.className = "theme-option";
+      opt.onclick = () => setTheme(theme.id);
+      const row = document.createElement("div");
+      row.className = "swatch-row";
+      for (const color of theme.swatches) {
+        const s = document.createElement("span");
+        s.className = "swatch";
+        s.style.background = color;
+        row.appendChild(s);
+      }
+      opt.appendChild(row);
+      const name = document.createElement("span");
+      name.className = "theme-name";
+      name.textContent = `theme ${theme.id}`;
+      opt.appendChild(name);
+      picker.appendChild(opt);
+    }
+  } catch (e) {
+    console.error("Failed to fetch themes:", e);
+  }
+}
+
 // ── WebSocket ─────────────────────────────────────
 let ws = null;
 let busy = false;
@@ -141,7 +276,7 @@ let lastMsgType = null;
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
 
-  ws.onopen = () => { log("connected to harness", "info"); refreshTree(); refreshPacks(); };
+  ws.onopen = () => { log("connected to harness", "info"); refreshTree(); refreshPacks(); fetchModels(); refreshTaskPanel(); fetchThemes(); };
   ws.onclose = () => {
     log("disconnected — retrying in 3s...", "info");
     setTimeout(connect, 3000);
@@ -182,6 +317,8 @@ function connect() {
       case "writes_applied":
         log(`Applied: ${msg.files.join(", ")}`, "info");
         hidePendingWrites();
+        refreshTaskPanel();
+        fetchThemes();
         break;
 
       case "writes_rejected":
@@ -232,6 +369,10 @@ function connect() {
         addDivider();
         busy = false;
         setInputEnabled(true);
+        break;
+
+      case "task_updated":
+        refreshTaskPanel();
         break;
     }
   };
@@ -566,5 +707,28 @@ document.addEventListener("DOMContentLoaded", () => {
       cancelRun();
     }
   });
+
+  const autoApplyToggle = document.getElementById("auto-apply-toggle");
+  if (autoApplyToggle) {
+    autoApplyToggle.addEventListener("change", (e) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_auto_apply", enabled: e.target.checked }));
+      }
+    });
+  }
+
+  const templateBox = document.getElementById("file-click-template");
+  if (templateBox) {
+    const savedTemplate = localStorage.getItem("harness-click-template");
+    if (savedTemplate !== null) {
+      templateBox.value = savedTemplate;
+    } else {
+      templateBox.value = "Read `{path}` and reply with only the single word: ready";
+    }
+    templateBox.addEventListener("input", (e) => {
+      localStorage.setItem("harness-click-template", e.target.value);
+    });
+  }
+
   connect();
 });

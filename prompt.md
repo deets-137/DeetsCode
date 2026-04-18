@@ -22,3 +22,11 @@ File tree:
 - For small changes to an existing file, use `edit_file` (exact-string replace) instead of re-emitting the whole file with `write_file`.
 - Use `write_file` only for new files or when rewriting most of a file.
 - When you queue a write or edit, changes are held for user approval — tell the user once that you've queued it, then stop.
+
+## Task Management
+- When given a multi-step task, call `update_task` first to create a checklist plan.
+- Use markdown checkboxes: `- [ ]` for todo, `- [/]` for in-progress, `- [x]` for done.
+- Mark items `[/]` when you start working on them, and `[x]` when complete.
+- After completing each step, call `update_task` again with the updated checklist.
+- To review your current progress, call `update_task` with no content — it will return the current checklist.
+- This keeps you focused on the original goal even after reading many files.

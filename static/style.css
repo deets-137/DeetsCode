@@ -248,10 +248,19 @@ body::after {
   50%       { opacity: 0.15; }
 }
 
-/* ── Tool activity panel ─────────────────────────── */
-.tool-panel {
+/* ── Middle Column ───────────────────────────────── */
+.middle-column {
   width: 520px;
   flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  align-self: flex-start;
+}
+
+/* ── Tool & Config Panels ────────────────────────── */
+.tool-panel {
+  width: 100%;
   height: 260px;
   background: var(--panel-outer);
   backdrop-filter: blur(24px) saturate(140%);
@@ -318,15 +327,48 @@ body::after {
 .tool-diff .diff-old { color: #b33; opacity: 0.85; }
 .tool-diff .diff-new { color: #186; opacity: 0.9; }
 
-/* ── Right column (files + packs stacked) ─────────── */
+/* ── Config Panel ────────────────────────────────── */
+.config-panel {
+  height: 260px;
+}
+
+.config-panel-inner {
+  background: var(--response-box-bg);
+  border-radius: 8px;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+}
+
+.config-textarea {
+  width: 100%;
+  flex: 1;
+  background: transparent;
+  border: none;
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 13px;
+  color: var(--response-text);
+  resize: none;
+  outline: none;
+  line-height: 1.4;
+  min-height: 80px;
+}
+
+.config-textarea::placeholder {
+  color: var(--placeholder-text);
+  opacity: 0.6;
+}
+
+/* ── Right column (files + packs + tasks stacked) ── */
 .right-column {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 10px;
   align-self: flex-start;
-  max-height: 100%;
+  height: 536px;
 }
 
 .right-column > .file-panel {
@@ -337,9 +379,54 @@ body::after {
 
 .right-column > .packs-panel-side {
   height: auto;
-  max-height: 240px;
+  max-height: 160px;
   flex: 0 1 auto;
+  min-height: 60px;
+}
+
+/* ── Task panel ──────────────────────────────────── */
+.right-column > .task-panel {
+  flex: 1 1 auto;
   min-height: 80px;
+  height: auto;
+}
+
+.task-inner {
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 12px;
+  color: var(--response-text);
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  line-height: 1.5;
+  overflow-y: auto;
+}
+
+.task-empty {
+  opacity: 0.4;
+  font-style: italic;
+  font-size: 11px;
+}
+
+.task-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.task-check {
+  flex-shrink: 0;
+  opacity: 0.6;
+}
+
+.task-check.done {
+  opacity: 1;
+  color: #8ce0a4;
+}
+
+.task-check.in-progress {
+  opacity: 1;
+  color: #f0c674;
 }
 
 /* ── File explorer panel ─────────────────────────── */
@@ -417,9 +504,137 @@ body::after {
   bottom: 16px;
   right: 16px;
   display: flex;
-  flex-direction: column;
+  flex-direction: row;
+  align-items: flex-end;
   gap: 8px;
   z-index: 100;
+}
+
+.br-left {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
+.br-right {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* ── Auto-Apply panel ────────────────────────────── */
+.auto-apply-panel {
+  background: var(--panel-outer);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+  border-radius: 12px;
+  padding: 6px 10px;
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  height: 40px;
+  transition: background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+}
+
+.auto-apply-label {
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 9px;
+  color: var(--response-text);
+  opacity: 0.6;
+  text-align: center;
+  line-height: 1.2;
+}
+
+/* Toggle Switch */
+.toggle-wrapper {
+  position: relative;
+  width: 24px;
+  height: 40px;
+}
+
+.toggle-wrapper input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+  position: absolute;
+}
+
+.toggle-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--response-box-bg);
+  transition: .3s;
+  border-radius: 12px;
+  border: 1px solid var(--glass-border);
+}
+
+.toggle-slider:before {
+  position: absolute;
+  content: "";
+  height: 18px;
+  width: 18px;
+  left: 2px;
+  bottom: 2px;
+  background-color: var(--response-text);
+  opacity: 0.7;
+  transition: .3s;
+  border-radius: 50%;
+}
+
+input:checked + .toggle-slider {
+  background-color: rgba(120, 180, 140, 0.4);
+}
+
+input:checked + .toggle-slider:before {
+  transform: translateY(-18px);
+  opacity: 1;
+  background-color: #8ce0a4;
+  box-shadow: 0 0 8px rgba(140, 224, 164, 0.6);
+}
+
+/* ── Model Picker ────────────────────────────────── */
+.model-picker-panel {
+  background: var(--panel-outer);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+  border-radius: 12px;
+  padding: 4px 8px;
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  transition: background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+}
+
+.model-select {
+  width: 100%;
+  background: transparent;
+  border: none;
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 10px;
+  color: var(--response-text);
+  opacity: 0.8;
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.model-select option {
+  background: var(--panel-outer);
+  color: #2a2a2a;
 }
 
 /* ── Context window panel ────────────────────────── */

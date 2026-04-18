@@ -3,8 +3,6 @@ import shlex
 import subprocess
 from pathlib import Path
 
-from config import ALLOWED_COMMANDS
-
 pending_writes: dict[str, str] = {}
 read_files: list[str] = []
 
@@ -157,14 +155,31 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "run_bash",
-            "description": f"Run a shell command in the project directory. Allowed commands: {', '.join(ALLOWED_COMMANDS)}.",
+            "name": "run_command",
+            "description": "Run a shell command in the project directory. Use this to run tests, execute scripts, and verify your own work.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "command": {"type": "string", "description": "Shell command to run"}
                 },
                 "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "update_task",
+            "description": "Create or update the task checklist (task.md). Use markdown checkboxes: - [ ] todo, - [/] in-progress, - [x] done. If content is empty, returns the current checklist without modifying it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "content": {
+                        "type": "string",
+                        "description": "Full markdown content for task.md. Use - [ ] for todo, - [/] for in-progress, - [x] for done. Leave empty to read the current checklist.",
+                    }
+                },
+                "required": [],
             },
         },
     },
@@ -179,6 +194,8 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
             return "\n".join(read_files)
 
         if name == "read_file":
+            if "path" not in args:
+                return "Error: Missing required argument 'path'"
             path = (project_dir / args["path"]).resolve()
             if not path.is_relative_to(project_dir.resolve()):
                 return "Error: path escapes project directory"
@@ -203,11 +220,15 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
             return content
 
         elif name == "write_file":
+            if "path" not in args or "content" not in args:
+                return "Error: Missing required arguments 'path' or 'content'"
             rel_path = args["path"]
             pending_writes[rel_path] = args["content"]
             return f"Queued write: {rel_path}"
 
         elif name == "edit_file":
+            if "path" not in args or "old_string" not in args or "new_string" not in args:
+                return "Error: Missing required arguments 'path', 'old_string', or 'new_string'"
             rel_path = args["path"]
             old = args["old_string"]
             new = args["new_string"]
@@ -233,6 +254,8 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
             return f"Queued edit: {rel_path}"
 
         elif name == "search":
+            if "pattern" not in args:
+                return "Error: Missing required argument 'pattern'"
             pattern = args["pattern"]
             try:
                 regex = re.compile(pattern)
@@ -273,6 +296,8 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
             return header + "\n" + "\n".join(matches)
 
         elif name == "list_symbols":
+            if "path" not in args:
+                return "Error: Missing required argument 'path'"
             rel = args["path"]
             path = (project_dir / rel).resolve()
             if not path.is_relative_to(project_dir.resolve()):
@@ -298,6 +323,8 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
             return header + "\n" + "\n".join(symbols)
 
         elif name == "list_dir":
+            if "path" not in args:
+                return "Error: Missing required argument 'path'"
             path = (project_dir / args["path"]).resolve()
             if not path.is_relative_to(project_dir.resolve()):
                 return "Error: path escapes project directory"
@@ -310,27 +337,36 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
                 if not e.name.startswith(".")
             )
 
-        elif name == "run_bash":
+        elif name == "run_command":
+            if "command" not in args:
+                return "Error: Missing required argument 'command'"
             command = args["command"]
-            if any(ch in command for ch in ";&|`$><\n"):
-                return "Error: shell metacharacters (; & | ` $ > < newline) are not allowed"
             try:
-                parts = shlex.split(command)
-            except ValueError as e:
-                return f"Error parsing command: {e}"
-            if not parts or parts[0] not in ALLOWED_COMMANDS:
-                blocked = parts[0] if parts else "(empty)"
-                return f"Error: '{blocked}' is not in the allowed command list: {ALLOWED_COMMANDS}"
-            result = subprocess.run(
-                parts,
-                shell=False,
-                capture_output=True,
-                text=True,
-                cwd=str(project_dir),
-                timeout=30,
-            )
-            output = (result.stdout + result.stderr).strip()
-            return output[:5000] if output else "(no output)"
+                result = subprocess.run(
+                    command,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    cwd=str(project_dir),
+                    timeout=30,
+                )
+                output = (result.stdout + result.stderr).strip()
+                if result.returncode != 0:
+                    output = f"Command failed with exit code {result.returncode}\n" + output
+                return output[:5000] if output else "(no output)"
+            except Exception as e:
+                return f"Error executing command: {e}"
+
+        elif name == "update_task":
+            task_path = project_dir / "task.md"
+            content = args.get("content", "").strip()
+            if content:
+                task_path.write_text(content, encoding="utf-8")
+                return f"task.md updated:\n{content}"
+            else:
+                if task_path.is_file():
+                    return f"Current task.md:\n{task_path.read_text(encoding='utf-8', errors='replace')}"
+                return "No task.md found. Call update_task with content to create one."
 
         return f"Unknown tool: {name}"
 

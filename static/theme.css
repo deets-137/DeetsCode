@@ -31,3 +31,20 @@
   --glass-shadow:     0 10px 40px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.25);
   --focus-glow:       0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 28px 2px rgba(107, 76, 92, 0.6);
 }
+
+[data-theme="3"] {
+  --canvas:           #fdf6e3;
+  --canvas-blob-1:    #2aa198;
+  --canvas-blob-2:    #b58900;
+  --panel-outer:      rgba(238, 232, 213, 0.55);
+  --panel-input:      rgba(238, 232, 213, 0.72);
+  --panel-response:   rgba(238, 232, 213, 0.72);
+  --textbox-bg:       #eee8d5;
+  --response-box-bg:  #eee8d5;
+  --response-text:    #657b83;
+  --divider:          #657b83;
+  --glass-border:     rgba(253, 246, 227, 0.45);
+  --glass-highlight:  rgba(255, 255, 255, 0.35);
+  --glass-shadow:     0 10px 30px rgba(0, 43, 54, 0.10), 0 2px 6px rgba(0, 43, 54, 0.06);
+  --focus-glow:       0 0 0 1px rgba(253, 246, 227, 0.65), 0 0 24px 2px rgba(42, 161, 152, 0.45);
+}
