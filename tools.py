@@ -1,3 +1,4 @@
+import random
 import re
 import shlex
 import subprocess
@@ -163,6 +164,24 @@ TOOL_DEFINITIONS = [
                     "command": {"type": "string", "description": "Shell command to run"}
                 },
                 "required": ["command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "roll_dice",
+            "description": "Roll dice. Use this instead of run_command for any dice roll — it's instant and cannot be hallucinated. Returns individual rolls, the total, and the expression for narration.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sides": {"type": "integer", "description": "Number of sides on each die (e.g. 20 for d20, 6 for d6). Must be >= 2."},
+                    "count": {"type": "integer", "description": "How many dice to roll. Default 1."},
+                    "modifier": {"type": "integer", "description": "Flat modifier to add to the total (e.g. +3 for a Strength bonus). Default 0."},
+                    "advantage": {"type": "string", "enum": ["none", "advantage", "disadvantage"], "description": "For a single die: roll twice and keep higher (advantage) or lower (disadvantage). Ignored when count > 1."},
+                    "label": {"type": "string", "description": "Optional short label for narration (e.g. 'attack', 'persuasion', 'damage')."},
+                },
+                "required": ["sides"],
             },
         },
     },
@@ -336,7 +355,7 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
             return "\n".join(
                 f"{'[dir] ' if e.is_dir() else '[file]'} {e.name}"
                 for e in entries
-                if not e.name.startswith(".")
+                if not e.name.startswith(".") and e.name not in SEARCH_SKIP_DIRS
             )
 
         elif name == "run_command":
@@ -350,7 +369,7 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
                     capture_output=True,
                     text=True,
                     cwd=str(project_dir),
-                    timeout=30,
+                    timeout=120,
                 )
                 output = (result.stdout + result.stderr).strip()
                 if result.returncode != 0:
@@ -358,6 +377,42 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
                 return output[:5000] if output else "(no output)"
             except Exception as e:
                 return f"Error executing command: {e}"
+
+        elif name == "roll_dice":
+            try:
+                sides = int(args.get("sides", 0))
+            except (TypeError, ValueError):
+                return "Error: 'sides' must be an integer"
+            if sides < 2:
+                return "Error: 'sides' must be >= 2"
+            try:
+                count = int(args.get("count", 1) or 1)
+            except (TypeError, ValueError):
+                return "Error: 'count' must be an integer"
+            if count < 1 or count > 100:
+                return "Error: 'count' must be between 1 and 100"
+            try:
+                modifier = int(args.get("modifier", 0) or 0)
+            except (TypeError, ValueError):
+                return "Error: 'modifier' must be an integer"
+            adv = (args.get("advantage") or "none").lower()
+            label = (args.get("label") or "").strip()
+
+            if count == 1 and adv in ("advantage", "disadvantage"):
+                a, b = random.randint(1, sides), random.randint(1, sides)
+                kept = max(a, b) if adv == "advantage" else min(a, b)
+                total = kept + modifier
+                rolls_str = f"[{a}, {b}] → kept {kept} ({adv})"
+                expr = f"1d{sides}{'+' if modifier >= 0 else ''}{modifier or ''} with {adv}"
+            else:
+                rolls = [random.randint(1, sides) for _ in range(count)]
+                total = sum(rolls) + modifier
+                rolls_str = "[" + ", ".join(str(r) for r in rolls) + "]"
+                mod_str = f"{'+' if modifier >= 0 else ''}{modifier}" if modifier else ""
+                expr = f"{count}d{sides}{mod_str}"
+
+            head = f"{label}: " if label else ""
+            return f"{head}{expr} = {rolls_str}" + (f" + {modifier}" if modifier and count > 1 else "") + f" → **{total}**"
 
         elif name == "update_task":
             task_path = project_dir / "task.md"

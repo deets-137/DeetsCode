@@ -6,6 +6,62 @@ import uuid
 from pathlib import Path
 
 THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+TOOL_CODE_RE = re.compile(r"<tool_code>.*?</tool_code>", re.DOTALL)
+
+
+class ThinkStreamFilter:
+    """Strip <think>...</think> blocks from a streaming text channel.
+
+    Handles tags split across chunks. Safe to feed partial content; call flush()
+    at the end to release any held suffix.
+    """
+
+    OPEN = "<think>"
+    CLOSE = "</think>"
+
+    def __init__(self):
+        self.in_think = False
+        self.buf = ""
+
+    def feed(self, chunk: str) -> str:
+        self.buf += chunk
+        out = []
+        while self.buf:
+            if self.in_think:
+                i = self.buf.find(self.CLOSE)
+                if i < 0:
+                    # hold enough suffix to detect a straddling close tag
+                    keep = len(self.CLOSE) - 1
+                    if len(self.buf) > keep:
+                        self.buf = self.buf[-keep:]
+                    return "".join(out)
+                self.buf = self.buf[i + len(self.CLOSE):]
+                self.in_think = False
+            else:
+                i = self.buf.find(self.OPEN)
+                if i < 0:
+                    hold = 0
+                    for n in range(min(len(self.buf), len(self.OPEN) - 1), 0, -1):
+                        if self.OPEN.startswith(self.buf[-n:]):
+                            hold = n
+                            break
+                    if hold:
+                        out.append(self.buf[:-hold])
+                        self.buf = self.buf[-hold:]
+                    else:
+                        out.append(self.buf)
+                        self.buf = ""
+                    return "".join(out)
+                out.append(self.buf[:i])
+                self.buf = self.buf[i + len(self.OPEN):]
+                self.in_think = True
+        return "".join(out)
+
+    def flush(self) -> str:
+        if self.in_think:
+            return ""
+        out, self.buf = self.buf, ""
+        return out
 
 DEFAULT_PROMPT = """You are working on the project at: {project_dir}
 
@@ -16,7 +72,9 @@ Do exactly what the user asks. Use the provided tools. Keep responses short."""
 
 
 def strip_think(text: str) -> str:
-    return THINK_BLOCK_RE.sub("", text).strip()
+    text = THINK_BLOCK_RE.sub("", text)
+    text = TOOL_CODE_RE.sub("", text)
+    return text.strip()
 
 
 def load_prompt_template(name: str = "default") -> str:
@@ -50,7 +108,9 @@ packs_dir: Path = Path(__file__).parent / "packs"
 auto_apply_enabled: bool = False
 current_model: str = MODEL
 current_temperature: float = TEMPERATURE
-current_context_length: int = 262144
+current_context_length: int = 32768
+DEFAULT_NUM_CTX = 32768
+DEFAULT_NUM_PREDICT = 8192
 
 SKIP_DIRS = {"__pycache__", "node_modules", ".git", ".venv", "venv", "dist", "build"}
 
@@ -267,9 +327,10 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
             stream_options={"include_usage": True},
             extra_body={
                 "options": {
-                    "num_ctx":262144,
-                    "num_predict":4096,
-                    "num_gpu": 99
+                    "num_ctx": DEFAULT_NUM_CTX,
+                    "num_predict": DEFAULT_NUM_PREDICT,
+                    "num_gpu": 99,
+                    "presence_penalty": 0,
                 }
             }
         )
@@ -277,6 +338,7 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
         reasoning_buf = ""
         content_buf = ""
         tool_calls_buf: dict[int, dict] = {}
+        think_filter = ThinkStreamFilter()
 
         async for chunk in stream:
             if chunk.usage:
@@ -293,7 +355,9 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
 
             if delta.content:
                 content_buf += delta.content
-                await ws.send_json({"type": "text", "content": delta.content})
+                visible = think_filter.feed(delta.content)
+                if visible:
+                    await ws.send_json({"type": "text", "content": visible})
 
             if delta.tool_calls:
                 for tc_chunk in delta.tool_calls:
@@ -306,6 +370,9 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
                         tool_calls_buf[i]["name"] += tc_chunk.function.name
                     if tc_chunk.function.arguments:
                         tool_calls_buf[i]["arguments"] += tc_chunk.function.arguments
+        tail = think_filter.flush()
+        if tail:
+            await ws.send_json({"type": "text", "content": tail})
         if not tool_calls_buf:
             stripped = strip_think(content_buf)
             if stripped:
@@ -359,13 +426,19 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
             messages.append(tool_msg_history)
 
         if pending_writes and auto_apply_enabled:
-            applied = []
+            applied, rejected = [], []
+            root = project_dir.resolve()
             for rel_path, content in pending_writes.items():
-                full_path = project_dir / rel_path
+                full_path = (project_dir / rel_path).resolve()
+                if not full_path.is_relative_to(root):
+                    rejected.append(rel_path)
+                    continue
                 full_path.parent.mkdir(parents=True, exist_ok=True)
                 full_path.write_text(content, encoding="utf-8")
                 applied.append(rel_path)
             clear_pending_writes()
+            if rejected:
+                await ws.send_json({"type": "error", "content": f"Blocked writes escaping project dir: {', '.join(rejected)}"})
             await ws.send_json({"type": "writes_applied", "files": applied})
             loop_messages.append({
                 "role": "system",
@@ -454,15 +527,29 @@ async def get_themes():
 
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
-    global current_model, auto_apply_enabled, current_temperature
+    global current_model, auto_apply_enabled, current_temperature, current_context_length
     await ws.accept()
     messages: list[dict] = []
     current_task: asyncio.Task | None = None
     selected_packs: list[str] = []
+    selected_prompt: str = "default"
+
+    # Emit ctx length on connect so the bar isn't stuck on the HTML fallback.
+    try:
+        current_context_length = await fetch_context_length(current_model)
+        await ws.send_json({"type": "ctx_length", "max": current_context_length})
+    except Exception:
+        pass
 
     try:
         while True:
-            data = await ws.receive_json()
+            try:
+                data = await ws.receive_json()
+            except WebSocketDisconnect:
+                raise
+            except Exception as e:
+                await ws.send_json({"type": "error", "content": f"Malformed message: {e}"})
+                continue
 
             if data["type"] == "set_dir":
                 global project_dir
@@ -532,6 +619,10 @@ async def websocket_endpoint(ws: WebSocket):
                     selected_packs = [str(n) for n in incoming if isinstance(n, str)]
                 continue
 
+            if data["type"] == "set_prompt":
+                selected_prompt = data.get("prompt", "default")
+                continue
+
             if data["type"] == "reset":
                 if current_task and not current_task.done():
                     current_task.cancel()
@@ -542,14 +633,20 @@ async def websocket_endpoint(ws: WebSocket):
                 continue
 
             if data["type"] == "apply_writes":
-                applied = []
+                applied, rejected = [], []
+                root = project_dir.resolve()
                 for rel_path, content in pending_writes.items():
-                    full_path = project_dir / rel_path
+                    full_path = (project_dir / rel_path).resolve()
+                    if not full_path.is_relative_to(root):
+                        rejected.append(rel_path)
+                        continue
                     full_path.parent.mkdir(parents=True, exist_ok=True)
                     full_path.write_text(content, encoding="utf-8")
                     applied.append(rel_path)
                 clear_pending_writes()
                 await ws.send_json({"type": "writes_applied", "files": applied})
+                if rejected:
+                    await ws.send_json({"type": "error", "content": f"Blocked writes escaping project dir: {', '.join(rejected)}"})
                 continue
 
             if data["type"] == "reject_writes":
@@ -564,7 +661,6 @@ async def websocket_endpoint(ws: WebSocket):
             if data["type"] == "set_model":
                 new_model = data.get("model")
                 if new_model:
-                    global current_context_length
                     current_model = new_model
                     current_context_length = await fetch_context_length(current_model)
                     await ws.send_json({"type": "info", "content": f"Switched model to {current_model} (ctx: {current_context_length:,})"})
@@ -577,52 +673,51 @@ async def websocket_endpoint(ws: WebSocket):
                 except (TypeError, ValueError):
                     continue
                 current_temperature = max(0.0, min(2.0, t))
+                continue
+
             if data["type"] == "message":
                 if current_task and not current_task.done():
                     current_task.cancel()
 
-                # 1. Parse the JSON packet from discord_bot.py
-                import json
                 try:
                     user_payload = json.loads(data["content"])
                     user_name = user_payload["name"]
                     user_text = user_payload["text"]
-                except:
-                    # Fallback if it's not JSON (e.g., from the web UI)
+                except Exception:
                     user_name = "User"
                     user_text = data["content"]
 
-                # 2. LOAD WORLD STATE (Recommendation #2)
-                world_state_path = project_dir / "campaign_state.json"
-                world_state = "{}"
-                if world_state_path.exists():
-                    world_state = world_state_path.read_text(encoding="utf-8")
+                if selected_prompt == "dnd":
+                    dnd_dir = project_dir / "dnd"
+                    world_state_path = dnd_dir / "campaign_state.json"
+                    # Back-compat: migrate an old root-level campaign_state.json.
+                    legacy = project_dir / "campaign_state.json"
+                    if not world_state_path.exists() and legacy.exists():
+                        dnd_dir.mkdir(exist_ok=True)
+                        world_state_path.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
+                    world_state = "{}"
+                    if world_state_path.exists():
+                        world_state = world_state_path.read_text(encoding="utf-8")
 
-                # 3. TAGGING & INSTRUCTIONS (Recommendation #3)
-                # We replace your old 'wrapped' logic with structured XML
-                for m in messages:
-                    if m.get("role") == "user" and isinstance(m.get("content"), str) and "<current_action>" in m["content"]:
-                        m["content"] = m["content"].replace("<current_action>", "<prior_action>").replace("</current_action>", "</prior_action>")
+                    for m in messages:
+                        if m.get("role") == "user" and isinstance(m.get("content"), str) and "<current_action>" in m["content"]:
+                            m["content"] = m["content"].replace("<current_action>", "<prior_action>").replace("</current_action>", "</prior_action>")
 
-                rich_prompt = f"""
-        <world_state>
-        {world_state}
-        </world_state>
+                    user_content = (
+                        f"<world_state>\n{world_state}\n</world_state>\n\n"
+                        f"<current_action>\nPlayer: {user_name}\nAction: {user_text}\n</current_action>\n\n"
+                        f"<dm_instructions>\n"
+                        f"- You are the Dungeon Master.\n"
+                        f"- Use the current_action to progress the story.\n"
+                        f"- If stats change, use write_file to update campaign_state.json.\n"
+                        f"- Maintain the 'vibe' of the current world_state.\n"
+                        f"</dm_instructions>"
+                    )
+                else:
+                    user_content = user_text
 
-        <current_action>
-        Player: {user_name}
-        Action: {user_text}
-        </current_action>
-
-        <dm_instructions>
-        - You are the Dungeon Master. 
-        - Use the current_action to progress the story.
-        - If stats change, use write_file to update campaign_state.json.
-        - Maintain the 'vibe' of the current world_state.
-        </dm_instructions>
-        """
-            messages.append({"role": "user", "content": rich_prompt})
-            current_task = asyncio.create_task(agent_loop(ws, user_text, messages, list(selected_packs)))
+                messages.append({"role": "user", "content": user_content})
+                current_task = asyncio.create_task(agent_loop(ws, user_text, messages, list(selected_packs), selected_prompt))
 
     except WebSocketDisconnect:
         if current_task and not current_task.done():

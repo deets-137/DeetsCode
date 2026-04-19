@@ -1,0 +1,21 @@
+FROM C:\Users\Aditya Sundaram\.ollama\models\blobs\sha256-f5ee307a2982106a6eb82b62b2c00b575c9072145a759ae4660378acda8dcf2d
+
+TEMPLATE """{{- if .System }}<|im_start|>system
+{{ .System }}<|im_end|>
+{{ end }}
+{{- range .Messages }}<|im_start|>{{ .Role }}
+{{ .Content }}<|im_end|>
+{{ end }}<|im_start|>assistant
+"""
+
+RENDERER qwen3.5
+PARSER qwen3.5
+
+PARAMETER presence_penalty 0
+PARAMETER repeat_penalty 1
+PARAMETER temperature 0.6
+PARAMETER top_k 20
+PARAMETER top_p 0.95
+PARAMETER min_p 0
+PARAMETER stop "<|im_start|>"
+PARAMETER stop "<|im_end|>"

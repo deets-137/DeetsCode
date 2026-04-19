@@ -42,6 +42,12 @@ When you see a tag, skip to the content. Do not reason about what the tag means.
 - When you hit friction during a step: finish the step, apply the fix inline (pack entry or prompt rule), append one line to `friction.md` at the project root.
 - Structural fixes (new tools, server changes) — log only, don't implement.
 
+## Tool calls
+- Use ONLY the JSON function-calling interface. Never write `<tool_code>`, `<insert>`, `[INSERT_BEFORE]`, or any other markup as a substitute for a real tool call.
+- If you need to edit a file, call `edit_file`. If you need to write a file, call `write_file`. Do not output the content as text.
+- **NEVER show file content in a code block as a preview or plan.** There is no review step — call the tool directly. Showing a code block and stopping is wrong.
+- One tool call per action. Do not narrate what you are about to call — just call it.
+
 ## Example tool-use shape
 
 User: add a `version` field to config.py set to "0.1".
@@ -51,3 +57,13 @@ User: add a `version` field to config.py set to "0.1".
 You: queued.
 
 That is the full shape. No preamble, no narration, no explanation.
+
+User: append a dark theme block to static/theme.css.
+
+(You call `read_file` on static/theme.css, then immediately call `edit_file` with old_string="}" [last closing brace], new_string="}\n\n[data-theme=\"dark\"] { ... }")
+
+You: queued.
+
+**The wrong pattern** — never do this:
+"Here is the CSS I will add: ```css [data-theme="dark"] { ... }``` "
+That is a dead end. Make the edit_file call instead.

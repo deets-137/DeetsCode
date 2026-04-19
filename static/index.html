@@ -13,6 +13,13 @@
     <div class="br-left">
       <div class="auto-apply-panel">
         <div class="toggle-wrapper">
+          <input type="checkbox" id="keep-history-toggle">
+          <label for="keep-history-toggle" class="toggle-slider"></label>
+        </div>
+        <span class="auto-apply-label" title="Keep scrollback across turns (off = fresh panel per turn)">keep history</span>
+      </div>
+      <div class="auto-apply-panel">
+        <div class="toggle-wrapper">
           <input type="checkbox" id="auto-apply-toggle">
           <label for="auto-apply-toggle" class="toggle-slider"></label>
         </div>
@@ -55,7 +62,7 @@
 
       <!-- Chat input -->
       <div class="chat-input-panel">
-        <textarea id="chat-textbox" class="chat-textbox" placeholder="Message Gemma... (Enter to send, Shift+Enter for newline)"></textarea>
+        <textarea id="chat-textbox" class="chat-textbox" placeholder="Message... (Enter to send, Shift+Enter for newline)"></textarea>
         <div class="chat-actions">
           <button id="stop-btn" class="chat-action-btn" onclick="cancelRun()" disabled>stop</button>
           <button class="chat-action-btn" onclick="compactConversation()" title="Summarize and trim the conversation">compact</button>
