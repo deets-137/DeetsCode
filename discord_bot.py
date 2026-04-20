@@ -2,9 +2,15 @@
 Discord bot that bridges Discord messages to the harness WebSocket.
 
 Setup:
-  pip install discord.py websockets
+  pip install discord.py websockets python-dotenv
   set DISCORD_TOKEN=your_bot_token_here  (or put it in .env)
   python discord_bot.py
+
+Usage:
+  - In a game channel (listed in GAME_CHANNEL_IDS), type normally.
+  - In any other channel, @mention the bot to get its attention.
+  - All control actions use Discord slash commands: /reset, /compact, /cancel,
+    /apply, /reject, /setdir, /mode, /fastmode, /save, /load, /saves.
 
 Config (edit the block below):
   GAME_CHANNEL_IDS  — channel IDs where the bot responds to every message
@@ -15,8 +21,13 @@ Config (edit the block below):
 import asyncio
 import json
 import os
+import platform
+import subprocess
+import sys
+from datetime import datetime
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 import websockets
 from dotenv import load_dotenv
@@ -85,6 +96,17 @@ async def _get_ws(channel_id: int) -> websockets.ClientConnection:
                 pass
 
         ws = await websockets.connect(HARNESS_WS)
+        # Identify this session so the server can restore conversation state
+        # from sessions/<id>.json. On a fresh install nothing is restored; on
+        # a server restart or bot reconnect, the prior messages come back.
+        await ws.send(json.dumps({"type": "hello", "session_id": f"discord-{channel_id}"}))
+        try:
+            raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
+            ack = json.loads(raw)
+            if ack.get("type") == "hello_ack" and ack.get("restored"):
+                print(f"DEBUG: Session restored for channel {channel_id} ({ack.get('messages', 0)} messages)")
+        except Exception:
+            pass  # ack is best-effort; fall through
         if AUTO_APPLY:
             await ws.send(json.dumps({"type": "set_auto_apply", "enabled": True}))
         await ws.send(json.dumps({"type": "set_prompt", "prompt": PROMPT_MODE}))
@@ -113,37 +135,6 @@ def _get_lock(channel_id: int) -> asyncio.Lock:
     return _locks[channel_id]
 
 
-async def _ask(channel_id: int, prompt: str) -> tuple[str, list[str]]:
-    """
-    Send a prompt and collect the full streamed response.
-    Returns (reply_text, pending_file_list).
-    Pending files are non-empty only when AUTO_APPLY=False and the AI wrote files.
-    """
-    async with _get_lock(channel_id):
-        ws = await _get_ws(channel_id)
-        await ws.send(json.dumps({"type": "message", "content": prompt}))
-
-        chunks: list[str] = []
-        pending: list[str] = []
-
-        while True:
-            raw = await asyncio.wait_for(ws.recv(), timeout=RECV_TIMEOUT)
-            msg = json.loads(raw)
-            t = msg.get("type")
-
-            if t == "text":
-                chunks.append(msg.get("content", ""))
-            elif t == "pending_writes":
-                pending = list(msg.get("writes", {}).keys())
-            elif t == "error":
-                chunks.append(f"\n⚠️ {msg.get('content', 'Unknown error')}")
-            elif t == "done":
-                break
-            # "thinking", "tool_call", "tool_result", "usage", "writes_applied" → silently skip
-
-        return "".join(chunks).strip(), pending
-
-
 def _split(text: str, limit: int = 1990) -> list[str]:
     """Split long text into Discord-safe chunks, preferring newline boundaries."""
     if len(text) <= limit:
@@ -166,7 +157,7 @@ def _split(text: str, limit: int = 1990) -> list[str]:
 async def on_ready():
     print(f"Logged in as {bot.user}  (id: {bot.user.id})")
     print(f"Harness: {HARNESS_WS}")
-    print(f"Game channels: {GAME_CHANNEL_IDS or '(none — use @mention or !ask)'}")
+    print(f"Game channels: {GAME_CHANNEL_IDS or '(none — use @mention)'}")
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} slash command(s).")
@@ -184,16 +175,12 @@ async def on_message(message: discord.Message):
 
     mentioned = bot.user in message.mentions
     in_game_channel = cid in GAME_CHANNEL_IDS
-    ask_prefix = content.startswith("!ask ")
 
-    if not (mentioned or in_game_channel or ask_prefix):
-        await bot.process_commands(message)
+    if not (mentioned or in_game_channel):
         return
 
-    # Strip prefix / mention to isolate the prompt
-    if ask_prefix:
-        prompt = content[5:].strip()
-    elif mentioned:
+    # Strip mention to isolate the prompt
+    if mentioned:
         prompt = content.replace(f"<@{bot.user.id}>", "").replace(f"<@!{bot.user.id}>", "").strip()
     else:
         prompt = content.strip()
@@ -212,13 +199,30 @@ async def on_message(message: discord.Message):
     }
     final_prompt = json.dumps(user_payload)
 
-    async with message.channel.typing():
-        try:
-            reply, pending = await _ask(cid, final_prompt)
-        except Exception as e:
-            _connections.pop(cid, None)  # drop bad connection; next message reconnects
-            await message.channel.send(f"❌ Harness error: `{e}`")
-            return
+    try:
+        async with _get_lock(cid):
+            async with message.channel.typing():
+                ws = await _get_ws(cid)
+                await ws.send(json.dumps({"type": "message", "content": final_prompt}))
+                chunks: list[str] = []
+                pending: list[str] = []
+                while True:
+                    raw = await asyncio.wait_for(ws.recv(), timeout=RECV_TIMEOUT)
+                    msg = json.loads(raw)
+                    t = msg.get("type")
+                    if t == "text":
+                        chunks.append(msg.get("content", ""))
+                    elif t == "pending_writes":
+                        pending = list(msg.get("writes", {}).keys())
+                    elif t == "error":
+                        chunks.append(f"\n⚠️ {msg.get('content', 'Unknown error')}")
+                    elif t == "done":
+                        break
+                reply = "".join(chunks).strip()
+    except Exception as e:
+        _connections.pop(cid, None)  # drop bad connection; next message reconnects
+        await message.channel.send(f"❌ Harness error: `{e}`")
+        return
 
     for chunk in _split(reply or "(no response)"):
         await message.channel.send(chunk)
@@ -229,114 +233,6 @@ async def on_message(message: discord.Message):
             f"**Pending file writes:**\n{listing}\n"
             "Reply `!apply` to write them or `!reject` to discard."
         )
-
-# ─── Commands ────────────────────────────────────────────────────────────────
-
-@bot.command(name="apply")
-async def cmd_apply(ctx):
-    """Apply pending file writes queued by the AI."""
-    async with _get_lock(ctx.channel.id):
-        try:
-            ws = await _get_ws(ctx.channel.id)
-            await ws.send(json.dumps({"type": "apply_writes"}))
-            msg = await _recv_until(ws, {"writes_applied"})
-            files = ", ".join(f"`{f}`" for f in msg.get("files", []))
-            await ctx.send(f"✅ Written: {files}" if files else "✅ No pending files.")
-        except Exception as e:
-            await ctx.send(f"❌ {e}")
-
-
-@bot.command(name="reject")
-async def cmd_reject(ctx):
-    """Discard pending file writes."""
-    async with _get_lock(ctx.channel.id):
-        try:
-            ws = await _get_ws(ctx.channel.id)
-            await ws.send(json.dumps({"type": "reject_writes"}))
-            await _recv_until(ws, {"writes_rejected"})
-            await ctx.send("🗑️ Writes discarded.")
-        except Exception as e:
-            await ctx.send(f"❌ {e}")
-
-
-@bot.command(name="reset")
-async def cmd_reset(ctx):
-    """Clear conversation history for this channel."""
-    async with _get_lock(ctx.channel.id):
-        try:
-            ws = await _get_ws(ctx.channel.id)
-            await ws.send(json.dumps({"type": "reset"}))
-            await _recv_until(ws, {"reset_complete"})
-            await ctx.send("🔄 Conversation reset.")
-        except Exception as e:
-            await ctx.send(f"❌ {e}")
-
-
-@bot.command(name="compact")
-async def cmd_compact(ctx):
-    """Summarize and compress the conversation to free context."""
-    async with _get_lock(ctx.channel.id):
-        try:
-            ws = await _get_ws(ctx.channel.id)
-            await ws.send(json.dumps({"type": "compact"}))
-            msg = await _recv_until(ws, {"compacted", "info", "error"}, timeout=180.0)
-            t = msg.get("type")
-            if t == "compacted":
-                prior = msg.get("prior", "?")
-                await ctx.send(f"🗜️ Compacted {prior} messages into a summary.")
-            elif t == "error":
-                await ctx.send(f"❌ {msg.get('content', 'compact failed')}")
-            else:
-                await ctx.send(msg.get("content", "Nothing to compact."))
-        except Exception as e:
-            await ctx.send(f"❌ {e}")
-
-
-@bot.command(name="cancel")
-async def cmd_cancel(ctx):
-    """Interrupt the in-progress generation for this channel."""
-    try:
-        ws = _connections.get(ctx.channel.id)
-        if ws is None:
-            await ctx.send("Nothing running.")
-            return
-        await ws.send(json.dumps({"type": "cancel"}))
-        await ctx.send("🛑 Cancel sent.")
-    except Exception as e:
-        await ctx.send(f"❌ {e}")
-
-
-@bot.command(name="setdir")
-async def cmd_setdir(ctx, *, path: str):
-    """Point this channel's session at a different project directory."""
-    async with _get_lock(ctx.channel.id):
-        try:
-            ws = await _get_ws(ctx.channel.id)
-            await ws.send(json.dumps({"type": "set_dir", "path": path}))
-            raw = await ws.recv()
-            msg = json.loads(raw)
-            await ctx.send(msg.get("content", "Done."))
-        except Exception as e:
-            await ctx.send(f"❌ {e}")
-
-
-@bot.command(name="harness")
-async def cmd_help(ctx):
-    """Show available bot commands."""
-    await ctx.send(
-        "**Harness bot commands**\n"
-        "`!ask <prompt>` — send a prompt (works in any channel)\n"
-        "`!apply` — write pending files to disk\n"
-        "`!reject` — discard pending file writes\n"
-        "`!reset` — clear conversation history for this channel\n"
-        "`!compact` — summarize conversation to free context\n"
-        "`!cancel` — interrupt in-progress generation\n"
-        "`!setdir <path>` — switch project directory\n"
-        "`!harness` — show this help\n\n"
-        f"**Active prompt mode:** `{PROMPT_MODE}`  |  **Auto-apply:** `{AUTO_APPLY}`\n"
-        "In **game channels**, just type normally — no `!ask` needed."
-    )
-
 
 # ─── Slash (application) commands ────────────────────────────────────────────
 # These mirror the `!` prefix commands but appear in Discord's native `/` menu
@@ -358,9 +254,23 @@ async def _simple_ws_action(interaction: discord.Interaction, payload: dict, exp
             await interaction.followup.send(f"❌ {e}")
 
 
-@bot.tree.command(name="reset", description="Clear conversation history for this channel.")
+@bot.tree.command(name="reset", description="Clear conversation history for this channel. Bypasses the turn lock.")
 async def slash_reset(interaction: discord.Interaction):
-    await _simple_ws_action(interaction, {"type": "reset"}, {"reset_complete"}, "🔄 Conversation reset.")
+    # Deliberately does NOT acquire _get_lock — reset must work even while
+    # an in-flight turn is holding the lock. Fire cancel first so the server
+    # aborts any running Ollama stream, then reset to clear state.
+    cid = interaction.channel_id
+    ws = _connections.get(cid)
+    if ws is None:
+        await interaction.response.send_message("No active session for this channel.")
+        return
+    try:
+        await ws.send(json.dumps({"type": "cancel"}))
+        await ws.send(json.dumps({"type": "reset"}))
+        await interaction.response.send_message("🔄 Reset sent. The in-flight turn (if any) will abort.")
+    except Exception as e:
+        _connections.pop(cid, None)
+        await interaction.response.send_message(f"❌ {e}")
 
 
 @bot.tree.command(name="compact", description="Summarize conversation to free context.")
@@ -518,6 +428,133 @@ async def slash_saves(interaction: discord.Interaction):
         await interaction.response.send_message("(no saves yet)")
         return
     await interaction.response.send_message("**Saves:** " + ", ".join(f"`{f}`" for f in files))
+
+
+# ─── Emergency kill switch ───────────────────────────────────────────────────
+# Deterministic: no model calls, no prompt tokens. Slash-command handlers send
+# typed control frames / run subprocesses directly.
+
+_EMERGENCY_LOG = _BOT_ROOT / "emergency.log"
+_VALID_TARGETS = ("session", "ollama", "harness", "bot", "all")
+
+
+def _audit(entry: str) -> None:
+    ts = datetime.now().isoformat(timespec="seconds")
+    line = f"[{ts}] {entry}"
+    try:
+        with _EMERGENCY_LOG.open("a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception as e:
+        print(f"WARN: emergency audit write failed: {e}")
+    print(line)
+
+
+async def _kill_session(cid: int, dry: bool) -> str:
+    if dry:
+        return "DRY session: would send cancel+reset on this channel's WS"
+    ws = _connections.get(cid)
+    if ws is None:
+        return "session: no active WS for this channel"
+    try:
+        await ws.send(json.dumps({"type": "cancel"}))
+        await ws.send(json.dumps({"type": "reset"}))
+        return "session: cancel+reset sent"
+    except Exception as e:
+        return f"session: failed ({e})"
+
+
+async def _kill_ollama(dry: bool) -> str:
+    is_win = platform.system() == "Windows"
+    cmd = ["taskkill", "/F", "/IM", "ollama.exe"] if is_win else ["pkill", "-9", "ollama"]
+    if dry:
+        return f"DRY ollama: would run `{' '.join(cmd)}`"
+    try:
+        r = subprocess.run(cmd, capture_output=True, timeout=10, text=True)
+        return f"ollama: rc={r.returncode} {r.stdout.strip() or r.stderr.strip()}"
+    except Exception as e:
+        return f"ollama: failed ({e})"
+
+
+async def _kill_harness(cid: int, dry: bool) -> str:
+    if dry:
+        return "DRY harness: would send {'type':'shutdown'} on WS"
+    try:
+        ws = _connections.get(cid) or await _get_ws(cid)
+        await ws.send(json.dumps({"type": "shutdown"}))
+        return "harness: shutdown frame sent"
+    except Exception as e:
+        return f"harness: failed ({e})"
+
+
+async def _kill_bot(dry: bool) -> str:
+    if dry:
+        return "DRY bot: would await bot.close() then sys.exit(0)"
+    try:
+        await bot.close()
+    finally:
+        # Scheduled after we return so followup.send has a chance to flush.
+        asyncio.get_event_loop().call_later(0.5, lambda: sys.exit(0))
+    return "bot: close() issued; exiting in 0.5s"
+
+
+@bot.tree.command(
+    name="emergency",
+    description="Kill switch. Set dry_run:true to preview. Otherwise confirm must equal EMERGENCY.",
+)
+@app_commands.describe(
+    target="What to kill",
+    confirm="Type EMERGENCY to execute (ignored when dry_run:true)",
+    dry_run="Preview the plan without executing",
+)
+@app_commands.choices(target=[app_commands.Choice(name=t, value=t) for t in _VALID_TARGETS])
+async def slash_emergency(
+    interaction: discord.Interaction,
+    target: app_commands.Choice[str],
+    confirm: str = "",
+    dry_run: bool = False,
+):
+    tgt = target.value
+    user = f"{interaction.user} (id={interaction.user.id})"
+    cid = interaction.channel_id
+    _audit(f"INVOKE target={tgt} dry_run={dry_run} channel={cid} user={user}")
+
+    if not dry_run and confirm != "EMERGENCY":
+        _audit(f"REJECT bad confirm target={tgt}")
+        await interaction.response.send_message(
+            "Type `EMERGENCY` in `confirm` to execute, or set `dry_run:true` to preview.",
+            ephemeral=True,
+        )
+        return
+
+    await interaction.response.defer(thinking=True)
+    results: list[str] = []
+
+    # Chain order for `all`: ollama → harness → bot, so a bot kill at the
+    # end doesn't orphan the heavier processes.
+    if tgt == "session":
+        results.append(await _kill_session(cid, dry_run))
+    elif tgt == "ollama":
+        results.append(await _kill_ollama(dry_run))
+    elif tgt == "harness":
+        results.append(await _kill_harness(cid, dry_run))
+    elif tgt == "bot":
+        results.append(await _kill_bot(dry_run))
+    elif tgt == "all":
+        results.append(await _kill_ollama(dry_run))
+        await asyncio.sleep(0.3)
+        results.append(await _kill_harness(cid, dry_run))
+        await asyncio.sleep(0.3)
+        results.append(await _kill_bot(dry_run))
+
+    for r in results:
+        _audit(f"RESULT {r}")
+
+    header = "🧪 **DRY RUN**" if dry_run else "🚨 **EMERGENCY**"
+    body = "\n".join(f"• {r}" for r in results)
+    try:
+        await interaction.followup.send(f"{header} target=`{tgt}`\n{body}")
+    except Exception:
+        pass  # bot may be mid-shutdown
 
 
 # ─── Run ─────────────────────────────────────────────────────────────────────

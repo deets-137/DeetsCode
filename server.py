@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 import sys
 import uuid
@@ -113,6 +114,55 @@ DEFAULT_NUM_CTX = 32768
 DEFAULT_NUM_PREDICT = 8192
 
 SKIP_DIRS = {"__pycache__", "node_modules", ".git", ".venv", "venv", "dist", "build"}
+
+SESSIONS_DIR = Path(__file__).parent / "sessions"
+SESSION_SCHEMA = 1
+
+
+def _session_path(session_id: str) -> Path | None:
+    # Only allow simple slugs — no path separators, dots, or shell chars.
+    if not session_id or not re.fullmatch(r"[A-Za-z0-9_\-]{1,64}", session_id):
+        return None
+    return SESSIONS_DIR / f"{session_id}.json"
+
+
+def load_session(session_id: str) -> dict | None:
+    path = _session_path(session_id)
+    if path is None or not path.is_file():
+        return None
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if data.get("schema") != SESSION_SCHEMA:
+            return None  # incompatible; ignore rather than crash
+        return data
+    except (OSError, json.JSONDecodeError):
+        return None
+
+
+def save_session(session_id: str, messages: list, packs: list[str], prompt: str, temperature: float):
+    path = _session_path(session_id)
+    if path is None:
+        return
+    SESSIONS_DIR.mkdir(exist_ok=True)
+    payload = {
+        "schema": SESSION_SCHEMA,
+        "messages": messages,
+        "packs": packs,
+        "prompt": prompt,
+        "temperature": temperature,
+    }
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(payload), encoding="utf-8")
+    tmp.replace(path)
+
+
+def delete_session(session_id: str):
+    path = _session_path(session_id)
+    if path is not None and path.is_file():
+        try:
+            path.unlink()
+        except OSError:
+            pass
 
 
 async def fetch_context_length(model: str) -> int:
@@ -334,6 +384,7 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
                 }
             }
         )
+        state["stream"] = stream
 
         reasoning_buf = ""
         content_buf = ""
@@ -450,17 +501,37 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
         await ws.send_json({"type": "pending_writes", "writes": dict(pending_writes)})
 
 
-async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_packs: list[str], selected_prompt: str = "default"):
-    state = {"usage_tokens": None}
+async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_packs: list[str], selected_prompt: str = "default", session_id: str | None = None, temperature: float | None = None):
+    state: dict = {"usage_tokens": None, "stream": None}
     try:
         await _agent_loop_impl(ws, user_content, messages, state, selected_packs, selected_prompt)
     except asyncio.CancelledError:
+        # asyncio.cancel() alone doesn't reliably kill the underlying HTTP stream
+        # to Ollama — httpx cancellation can be delayed on Windows. Force-close
+        # so the Ollama POST actually terminates instead of running to completion.
+        s = state.get("stream")
+        if s is not None:
+            try:
+                await s.close()
+            except Exception:
+                pass
         try:
             await ws.send_json({"type": "info", "content": "Cancelled."})
         except Exception:
             pass
         raise
     finally:
+        s = state.get("stream")
+        if s is not None:
+            try:
+                await s.close()
+            except Exception:
+                pass
+        if session_id:
+            try:
+                save_session(session_id, messages, selected_packs, selected_prompt, temperature if temperature is not None else current_temperature)
+            except Exception:
+                pass
         try:
             if state["usage_tokens"]:
                 await ws.send_json({"type": "usage", "total": state["usage_tokens"], "max": current_context_length})
@@ -533,6 +604,7 @@ async def websocket_endpoint(ws: WebSocket):
     current_task: asyncio.Task | None = None
     selected_packs: list[str] = []
     selected_prompt: str = "default"
+    session_id: str | None = None
 
     # Emit ctx length on connect so the bar isn't stuck on the HTML fallback.
     try:
@@ -551,6 +623,26 @@ async def websocket_endpoint(ws: WebSocket):
                 await ws.send_json({"type": "error", "content": f"Malformed message: {e}"})
                 continue
 
+            if data["type"] == "hello":
+                sid = data.get("session_id")
+                if not isinstance(sid, str) or _session_path(sid) is None:
+                    await ws.send_json({"type": "error", "content": f"Invalid session_id: {sid!r}"})
+                    continue
+                session_id = sid
+                loaded = load_session(session_id)
+                if loaded:
+                    messages = list(loaded.get("messages") or [])
+                    selected_packs = list(loaded.get("packs") or [])
+                    selected_prompt = loaded.get("prompt") or "default"
+                    try:
+                        current_temperature = float(loaded.get("temperature", current_temperature))
+                    except (TypeError, ValueError):
+                        pass
+                    await ws.send_json({"type": "hello_ack", "restored": True, "messages": len(messages), "prompt": selected_prompt})
+                else:
+                    await ws.send_json({"type": "hello_ack", "restored": False, "messages": 0, "prompt": selected_prompt})
+                continue
+
             if data["type"] == "set_dir":
                 global project_dir
                 new_dir = Path(data["path"]).expanduser().resolve()
@@ -561,6 +653,8 @@ async def websocket_endpoint(ws: WebSocket):
                 messages.clear()
                 clear_pending_writes()
                 clear_read_files()
+                if session_id:
+                    delete_session(session_id)
                 await ws.send_json({"type": "info", "content": f"Project set to: {project_dir}", "project": str(project_dir)})
                 continue
 
@@ -626,9 +720,15 @@ async def websocket_endpoint(ws: WebSocket):
             if data["type"] == "reset":
                 if current_task and not current_task.done():
                     current_task.cancel()
+                    try:
+                        await asyncio.wait_for(current_task, timeout=5.0)
+                    except (asyncio.CancelledError, asyncio.TimeoutError, Exception):
+                        pass
                 messages.clear()
                 clear_pending_writes()
                 clear_read_files()
+                if session_id:
+                    delete_session(session_id)
                 await ws.send_json({"type": "reset_complete"})
                 continue
 
@@ -675,6 +775,16 @@ async def websocket_endpoint(ws: WebSocket):
                 current_temperature = max(0.0, min(2.0, t))
                 continue
 
+            if data["type"] == "shutdown":
+                # Hard exit — bypasses uvicorn reloader and finally blocks.
+                # That's the point: this fires when the server is wedged.
+                try:
+                    await ws.send_json({"type": "info", "content": "Harness shutting down."})
+                    await ws.close()
+                except Exception:
+                    pass
+                os._exit(0)
+
             if data["type"] == "message":
                 if current_task and not current_task.done():
                     current_task.cancel()
@@ -717,7 +827,7 @@ async def websocket_endpoint(ws: WebSocket):
                     user_content = user_text
 
                 messages.append({"role": "user", "content": user_content})
-                current_task = asyncio.create_task(agent_loop(ws, user_text, messages, list(selected_packs), selected_prompt))
+                current_task = asyncio.create_task(agent_loop(ws, user_text, messages, list(selected_packs), selected_prompt, session_id, current_temperature))
 
     except WebSocketDisconnect:
         if current_task and not current_task.done():
