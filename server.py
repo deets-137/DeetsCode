@@ -78,7 +78,11 @@ def strip_think(text: str) -> str:
     return text.strip()
 
 
-def load_prompt_template(name: str = "default") -> str:
+def load_prompt_template(name: str = "DeetsCode") -> str:
+    # Backcompat: sessions saved before the coding-mode rename have
+    # prompt="default". Transparently redirect to DeetsCode.
+    if name == "default":
+        name = "DeetsCode"
     prompts_dir = Path(__file__).parent / "prompts"
     candidate = prompts_dir / f"{Path(name).name}.md"
     if candidate.is_file():
@@ -99,7 +103,7 @@ from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 
 from config import HOST, MODEL, OLLAMA_BASE_URL, PORT, TEMPERATURE
-from tools import TOOL_DEFINITIONS, clear_pending_writes, clear_read_files, execute_tool, pending_writes
+from tools import clear_pending_writes, clear_read_files, load_tools, pending_writes
 
 app = FastAPI()
 client = AsyncOpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
@@ -351,7 +355,7 @@ def get_pending():
     return JSONResponse({"writes": dict(pending_writes)})
 
 
-async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, state: dict, selected_packs: list[str], selected_prompt: str = "default"):
+async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, state: dict, selected_packs: list[str], selected_prompt: str = "DeetsCode", session_id: str | None = None, user_id: str | None = None):
     tree_text = build_file_tree(project_dir)
     prompt_template = load_prompt_template(selected_prompt)
     system_prompt = prompt_template.replace("{project_dir}", str(project_dir)).replace("{file_tree}", tree_text)
@@ -359,6 +363,9 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
     if pack_block:
         system_prompt = f"{system_prompt}\n\n{pack_block}"
     loop_messages = [{"role": "system", "content": system_prompt}] + messages
+    # Mode-gated tool pack. Each turn reloads because the mode can switch
+    # between turns via /mode — cheap enough, keeps the schema in sync.
+    tool_defs, execute_tool = load_tools(selected_prompt)
     MAX_ITERATIONS = 25
     iteration = 0
 
@@ -371,7 +378,7 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
         stream = await client.chat.completions.create(
             model=current_model,
             messages=loop_messages,
-            tools=TOOL_DEFINITIONS,
+            tools=tool_defs,
             stream=True,
             temperature=current_temperature,
             stream_options={"include_usage": True},
@@ -459,7 +466,7 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
                 args = {}
 
             await ws.send_json({"type": "tool_call", "name": name, "args": args})
-            result = execute_tool(name, args, project_dir)
+            result = execute_tool(name, args, session_id or "unknown", project_dir, user_id=user_id)
             await ws.send_json({"type": "tool_result", "name": name, "content": result})
 
             # Auto-refresh the task panel in the UI when update_task writes
@@ -501,10 +508,10 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
         await ws.send_json({"type": "pending_writes", "writes": dict(pending_writes)})
 
 
-async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_packs: list[str], selected_prompt: str = "default", session_id: str | None = None, temperature: float | None = None):
+async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_packs: list[str], selected_prompt: str = "DeetsCode", session_id: str | None = None, temperature: float | None = None, user_id: str | None = None):
     state: dict = {"usage_tokens": None, "stream": None}
     try:
-        await _agent_loop_impl(ws, user_content, messages, state, selected_packs, selected_prompt)
+        await _agent_loop_impl(ws, user_content, messages, state, selected_packs, selected_prompt, session_id, user_id)
     except asyncio.CancelledError:
         # asyncio.cancel() alone doesn't reliably kill the underlying HTTP stream
         # to Ollama — httpx cancellation can be delayed on Windows. Force-close
@@ -603,7 +610,7 @@ async def websocket_endpoint(ws: WebSocket):
     messages: list[dict] = []
     current_task: asyncio.Task | None = None
     selected_packs: list[str] = []
-    selected_prompt: str = "default"
+    selected_prompt: str = "DeetsCode"
     session_id: str | None = None
 
     # Emit ctx length on connect so the bar isn't stuck on the HTML fallback.
@@ -633,7 +640,10 @@ async def websocket_endpoint(ws: WebSocket):
                 if loaded:
                     messages = list(loaded.get("messages") or [])
                     selected_packs = list(loaded.get("packs") or [])
-                    selected_prompt = loaded.get("prompt") or "default"
+                    selected_prompt = loaded.get("prompt") or "DeetsCode"
+                    # Session-file backcompat: old sessions saved mode="default".
+                    if selected_prompt == "default":
+                        selected_prompt = "DeetsCode"
                     try:
                         current_temperature = float(loaded.get("temperature", current_temperature))
                     except (TypeError, ValueError):
@@ -671,7 +681,11 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_json({"type": "error", "content": f"Slash tool not allowed: {tool}"})
                     continue
                 await ws.send_json({"type": "tool_call", "name": tool, "args": args})
-                result = execute_tool(tool, args, project_dir)
+                # Slash tools are whitelisted to core read-only ops; load core-only
+                # regardless of the session's game mode so we don't surprise-invoke
+                # a chess tool from the web UI slash menu.
+                _, _slash_execute = load_tools("DeetsCode")
+                result = _slash_execute(tool, args, session_id or "unknown", project_dir, user_id=None)
                 await ws.send_json({"type": "tool_result", "name": tool, "content": result})
                 continue
 
@@ -714,7 +728,9 @@ async def websocket_endpoint(ws: WebSocket):
                 continue
 
             if data["type"] == "set_prompt":
-                selected_prompt = data.get("prompt", "default")
+                selected_prompt = data.get("prompt", "DeetsCode")
+                if selected_prompt == "default":
+                    selected_prompt = "DeetsCode"
                 continue
 
             if data["type"] == "reset":
@@ -789,10 +805,14 @@ async def websocket_endpoint(ws: WebSocket):
                 if current_task and not current_task.done():
                     current_task.cancel()
 
+                user_id: str | None = None
                 try:
                     user_payload = json.loads(data["content"])
                     user_name = user_payload["name"]
                     user_text = user_payload["text"]
+                    # Discord IDs are ints; normalize to string for tool-side compare.
+                    raw_id = user_payload.get("id")
+                    user_id = str(raw_id) if raw_id is not None else None
                 except Exception:
                     user_name = "User"
                     user_text = data["content"]
@@ -827,7 +847,7 @@ async def websocket_endpoint(ws: WebSocket):
                     user_content = user_text
 
                 messages.append({"role": "user", "content": user_content})
-                current_task = asyncio.create_task(agent_loop(ws, user_text, messages, list(selected_packs), selected_prompt, session_id, current_temperature))
+                current_task = asyncio.create_task(agent_loop(ws, user_text, messages, list(selected_packs), selected_prompt, session_id, current_temperature, user_id))
 
     except WebSocketDisconnect:
         if current_task and not current_task.done():

@@ -45,7 +45,7 @@ GAME_CHANNEL_IDS: set[int] = {1344481118287695904,932359665122177104}  # e.g. {1
 # If True, file writes queued by the AI are applied automatically without asking.
 AUTO_APPLY = True
 
-# Server prompt mode to use for this bot ("default", "dnd", etc — see prompts/)
+# Server prompt mode to use for this bot ("DeetsCode", "dnd", "chess", etc — see prompts/)
 PROMPT_MODE = "dnd"
 
 HARNESS_WS = "ws://localhost:8000/ws"
@@ -342,7 +342,7 @@ async def slash_setdir(interaction: discord.Interaction, path: str):
             await interaction.followup.send(f"❌ {e}")
 
 
-@bot.tree.command(name="mode", description="Switch prompt mode (default, dnd, etc).")
+@bot.tree.command(name="mode", description="Switch prompt mode (DeetsCode, dnd, chess, etc).")
 async def slash_mode(interaction: discord.Interaction, prompt: str):
     cid = interaction.channel_id
     await interaction.response.defer(thinking=False)

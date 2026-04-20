@@ -1,13 +1,20 @@
-import random
+"""
+Coding tool pack — loaded for the `DeetsCode` mode (and its legacy `default`
+alias). These are the tools a coding agent needs: search, write/edit with
+approval queueing, symbol listing, context tracking, and shell.
+
+Game modes (chess, dnd, ...) deliberately do NOT load this pack. Chess doesn't
+need shell or `write_file`; adding them would bloat the schema and invite bugs.
+`read_file` lives in tools/core.py so game modes have a narrow escape hatch.
+"""
+
 import re
-import shlex
 import subprocess
 from pathlib import Path
+from typing import Optional
 
-pending_writes: dict[str, str] = {}
-read_files: list[str] = []
+from .core import pending_writes, read_files
 
-MAX_READ_CHARS = 100_000
 MAX_SEARCH_MATCHES = 50
 SEARCH_SKIP_DIRS = {"__pycache__", "node_modules", ".git", ".venv", "venv", "dist", "build"}
 
@@ -38,31 +45,7 @@ _EXT_LANG = {
 }
 
 
-def clear_pending_writes():
-    pending_writes.clear()
-
-
-def clear_read_files():
-    read_files.clear()
-
-
 TOOL_DEFINITIONS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "read_file",
-            "description": "Read the contents of a file in the project.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {"type": "string", "description": "Path relative to project root"},
-                    "start_line": {"type": "integer", "description": "First line to read (1-indexed, inclusive). Omit to read from the beginning."},
-                    "end_line": {"type": "integer", "description": "Last line to read (inclusive). Omit to read to the end of the file."},
-                },
-                "required": ["path"],
-            },
-        },
-    },
     {
         "type": "function",
         "function": {
@@ -71,7 +54,7 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path relative to project root"},
+                    "path":    {"type": "string", "description": "Path relative to project root"},
                     "content": {"type": "string", "description": "Full file content to write"},
                 },
                 "required": ["path", "content"],
@@ -86,7 +69,7 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Path relative to project root"},
+                    "path":       {"type": "string", "description": "Path relative to project root"},
                     "old_string": {"type": "string", "description": "Exact text to find. Must match exactly once — include surrounding context to disambiguate if needed."},
                     "new_string": {"type": "string", "description": "Replacement text."},
                 },
@@ -103,8 +86,8 @@ TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "pattern": {"type": "string", "description": "Python regex pattern"},
-                    "path": {"type": "string", "description": "Optional subdirectory to limit search (relative to project root). Default: entire project."},
-                    "glob": {"type": "string", "description": "Optional filename glob to filter (e.g. '*.py', '*.js'). Default: all files."},
+                    "path":    {"type": "string", "description": "Optional subdirectory to limit search (relative to project root). Default: entire project."},
+                    "glob":    {"type": "string", "description": "Optional filename glob to filter (e.g. '*.py', '*.js'). Default: all files."},
                 },
                 "required": ["pattern"],
             },
@@ -119,23 +102,6 @@ TOOL_DEFINITIONS = [
                 "type": "object",
                 "properties": {
                     "path": {"type": "string", "description": "Path relative to project root"},
-                },
-                "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_dir",
-            "description": "List the contents of a directory in the project.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "path": {
-                        "type": "string",
-                        "description": "Path relative to project root. Use '.' for the root.",
-                    }
                 },
                 "required": ["path"],
             },
@@ -161,93 +127,32 @@ TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "command": {"type": "string", "description": "Shell command to run"}
+                    "command": {"type": "string", "description": "Shell command to run"},
                 },
                 "required": ["command"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "roll_dice",
-            "description": "Roll dice. Use this instead of run_command for any dice roll — it's instant and cannot be hallucinated. Returns individual rolls, the total, and the expression for narration.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "sides": {"type": "integer", "description": "Number of sides on each die (e.g. 20 for d20, 6 for d6). Must be >= 2."},
-                    "count": {"type": "integer", "description": "How many dice to roll. Default 1."},
-                    "modifier": {"type": "integer", "description": "Flat modifier to add to the total (e.g. +3 for a Strength bonus). Default 0."},
-                    "advantage": {"type": "string", "enum": ["none", "advantage", "disadvantage"], "description": "For a single die: roll twice and keep higher (advantage) or lower (disadvantage). Ignored when count > 1."},
-                    "label": {"type": "string", "description": "Optional short label for narration (e.g. 'attack', 'persuasion', 'damage')."},
-                },
-                "required": ["sides"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "update_task",
-            "description": "Create or update the task checklist (task.md). Use markdown checkboxes: - [ ] todo, - [/] in-progress, - [x] done. If content is empty, returns the current checklist without modifying it.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "content": {
-                        "type": "string",
-                        "description": "Full markdown content for task.md. Use - [ ] for todo, - [/] for in-progress, - [x] for done. Leave empty to read the current checklist.",
-                    }
-                },
-                "required": [],
             },
         },
     },
 ]
 
 
-def execute_tool(name: str, args: dict, project_dir: Path) -> str:
+def execute_tool(
+    name: str,
+    args: dict,
+    session_id: str,
+    project_dir: Path,
+    user_id: Optional[str] = None,
+) -> str:
+    """Coding-agent tools. Ignores session_id/user_id (no per-channel state)."""
     try:
-        if name == "list_context_files":
-            if not read_files:
-                return "No files read yet this session."
-            return "\n".join(read_files)
-
-        if name == "read_file":
-            if "path" not in args:
-                return "Error: Missing required argument 'path'"
-            path = (project_dir / args["path"]).resolve()
-            if not path.is_relative_to(project_dir.resolve()):
-                return "Error: path escapes project directory"
-            if not path.exists():
-                return f"Error: file not found: {args['path']}"
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
-            start = args.get("start_line")
-            end = args.get("end_line")
-            if start is not None or end is not None:
-                s = max(0, (start or 1) - 1)
-                e = end if end is not None else len(lines)
-                lines = lines[s:e]
-                content = "\n".join(lines)
-                content = f"[lines {s+1}–{e} of {args['path']}]\n{content}"
-            else:
-                content = "\n".join(lines)
-            if len(content) > MAX_READ_CHARS:
-                content = content[:MAX_READ_CHARS] + f"\n\n[truncated: file exceeds {MAX_READ_CHARS} chars — re-read with start_line/end_line]"
-            rel = args["path"]
-            if rel in read_files:
-                content = f"<system>\nWARNING: re-read of '{rel}'. if file unchanged, use prior context. if intentional (post-edit or partial slice), log to friction.md.\n</system>\n\n{content}"
-            else:
-                read_files.append(rel)
-            return content
-
-        elif name == "write_file":
+        if name == "write_file":
             if "path" not in args or "content" not in args:
                 return "Error: Missing required arguments 'path' or 'content'"
             rel_path = args["path"]
             pending_writes[rel_path] = args["content"]
             return f"Queued write: {rel_path}"
 
-        elif name == "edit_file":
+        if name == "edit_file":
             if "path" not in args or "old_string" not in args or "new_string" not in args:
                 return "Error: Missing required arguments 'path', 'old_string', or 'new_string'"
             rel_path = args["path"]
@@ -274,7 +179,7 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
             pending_writes[rel_path] = content.replace(old, new, 1)
             return f"Queued edit: {rel_path}"
 
-        elif name == "search":
+        if name == "search":
             if "pattern" not in args:
                 return "Error: Missing required argument 'pattern'"
             pattern = args["pattern"]
@@ -316,7 +221,7 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
                 header += f" (truncated at {MAX_SEARCH_MATCHES})"
             return header + "\n" + "\n".join(matches)
 
-        elif name == "list_symbols":
+        if name == "list_symbols":
             if "path" not in args:
                 return "Error: Missing required argument 'path'"
             rel = args["path"]
@@ -343,22 +248,12 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
             header = f"{len(symbols)} symbols in {rel} ({lang}):"
             return header + "\n" + "\n".join(symbols)
 
-        elif name == "list_dir":
-            if "path" not in args:
-                return "Error: Missing required argument 'path'"
-            path = (project_dir / args["path"]).resolve()
-            if not path.is_relative_to(project_dir.resolve()):
-                return "Error: path escapes project directory"
-            if not path.is_dir():
-                return f"Error: not a directory: {args['path']}"
-            entries = sorted(path.iterdir(), key=lambda p: (p.is_file(), p.name))
-            return "\n".join(
-                f"{'[dir] ' if e.is_dir() else '[file]'} {e.name}"
-                for e in entries
-                if not e.name.startswith(".") and e.name not in SEARCH_SKIP_DIRS
-            )
+        if name == "list_context_files":
+            if not read_files:
+                return "No files read yet this session."
+            return "\n".join(read_files)
 
-        elif name == "run_command":
+        if name == "run_command":
             if "command" not in args:
                 return "Error: Missing required argument 'command'"
             command = args["command"]
@@ -377,53 +272,6 @@ def execute_tool(name: str, args: dict, project_dir: Path) -> str:
                 return output[:5000] if output else "(no output)"
             except Exception as e:
                 return f"Error executing command: {e}"
-
-        elif name == "roll_dice":
-            try:
-                sides = int(args.get("sides", 0))
-            except (TypeError, ValueError):
-                return "Error: 'sides' must be an integer"
-            if sides < 2:
-                return "Error: 'sides' must be >= 2"
-            try:
-                count = int(args.get("count", 1) or 1)
-            except (TypeError, ValueError):
-                return "Error: 'count' must be an integer"
-            if count < 1 or count > 100:
-                return "Error: 'count' must be between 1 and 100"
-            try:
-                modifier = int(args.get("modifier", 0) or 0)
-            except (TypeError, ValueError):
-                return "Error: 'modifier' must be an integer"
-            adv = (args.get("advantage") or "none").lower()
-            label = (args.get("label") or "").strip()
-
-            if count == 1 and adv in ("advantage", "disadvantage"):
-                a, b = random.randint(1, sides), random.randint(1, sides)
-                kept = max(a, b) if adv == "advantage" else min(a, b)
-                total = kept + modifier
-                rolls_str = f"[{a}, {b}] → kept {kept} ({adv})"
-                expr = f"1d{sides}{'+' if modifier >= 0 else ''}{modifier or ''} with {adv}"
-            else:
-                rolls = [random.randint(1, sides) for _ in range(count)]
-                total = sum(rolls) + modifier
-                rolls_str = "[" + ", ".join(str(r) for r in rolls) + "]"
-                mod_str = f"{'+' if modifier >= 0 else ''}{modifier}" if modifier else ""
-                expr = f"{count}d{sides}{mod_str}"
-
-            head = f"{label}: " if label else ""
-            return f"{head}{expr} = {rolls_str}" + (f" + {modifier}" if modifier and count > 1 else "") + f" → **{total}**"
-
-        elif name == "update_task":
-            task_path = project_dir / "task.md"
-            content = args.get("content", "").strip()
-            if content:
-                task_path.write_text(content, encoding="utf-8")
-                return f"task.md updated:\n{content}"
-            else:
-                if task_path.is_file():
-                    return f"Current task.md:\n{task_path.read_text(encoding='utf-8', errors='replace')}"
-                return "No task.md found. Call update_task with content to create one."
 
         return f"Unknown tool: {name}"
 
