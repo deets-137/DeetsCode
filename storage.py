@@ -89,6 +89,21 @@ def _init_schema(c: sqlite3.Connection) -> None:
         );
         CREATE INDEX IF NOT EXISTS idx_notes_channel_ts
             ON notes(channel_name, ts);
+
+        CREATE TABLE IF NOT EXISTS stats (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            channel_name  TEXT NOT NULL,
+            user_name     TEXT NOT NULL,
+            mode          TEXT,
+            model         TEXT,
+            status        TEXT NOT NULL,
+            duration_ms   INTEGER NOT NULL,
+            started_at    INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_stats_channel_ts
+            ON stats(channel_name, started_at);
+        CREATE INDEX IF NOT EXISTS idx_stats_model
+            ON stats(model);
     """)
     # Additive migrations for pre-existing DBs. Each statement is safe to
     # re-run; we swallow "duplicate column" errors rather than version-track.
@@ -288,6 +303,76 @@ def list_notes(
         params,
     ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ─── Stats ───────────────────────────────────────────────────────────────────
+
+def record_stat(
+    channel_name: str,
+    user_name: str,
+    duration_ms: int,
+    status: str,
+    mode: Optional[str] = None,
+    model: Optional[str] = None,
+    started_at: Optional[int] = None,
+) -> int:
+    cur = _db().execute(
+        "INSERT INTO stats (channel_name, user_name, mode, model, status, "
+        "duration_ms, started_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (
+            channel_name,
+            user_name,
+            mode,
+            model,
+            status,
+            int(duration_ms),
+            int(started_at if started_at is not None else time.time()),
+        ),
+    )
+    return cur.lastrowid
+
+
+def stats_summary(
+    channel_name: Optional[str] = None,
+    mode: Optional[str] = None,
+    limit: int = 200,
+) -> dict:
+    """Aggregate the last N stat rows. Filtered to a channel and/or mode."""
+    clauses, params = [], []
+    if channel_name is not None:
+        clauses.append("channel_name = ?"); params.append(channel_name)
+    if mode is not None:
+        clauses.append("mode = ?"); params.append(mode)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(limit)
+    rows = _db().execute(
+        f"SELECT duration_ms, status, model, mode FROM stats{where} "
+        f"ORDER BY started_at DESC LIMIT ?",
+        params,
+    ).fetchall()
+    rows = [dict(r) for r in rows]
+    if not rows:
+        return {"count": 0, "by_model": {}}
+    completed = [r for r in rows if r["status"] == "completed"]
+    durations = [r["duration_ms"] for r in completed]
+    by_model: dict[str, dict] = {}
+    for r in completed:
+        key = r["model"] or "(unknown)"
+        d = by_model.setdefault(key, {"count": 0, "total_ms": 0, "max_ms": 0})
+        d["count"] += 1
+        d["total_ms"] += r["duration_ms"]
+        d["max_ms"] = max(d["max_ms"], r["duration_ms"])
+    for d in by_model.values():
+        d["avg_ms"] = d["total_ms"] // d["count"]
+    return {
+        "count": len(rows),
+        "completed": len(completed),
+        "errors": len(rows) - len(completed),
+        "avg_ms": (sum(durations) // len(durations)) if durations else 0,
+        "min_ms": min(durations) if durations else 0,
+        "max_ms": max(durations) if durations else 0,
+        "by_model": by_model,
+    }
 
 
 def set_note_status(note_id: int, status: str) -> bool:

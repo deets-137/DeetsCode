@@ -542,7 +542,7 @@ async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_
         try:
             if state["usage_tokens"]:
                 await ws.send_json({"type": "usage", "total": state["usage_tokens"], "max": current_context_length})
-            await ws.send_json({"type": "done"})
+            await ws.send_json({"type": "done", "model": current_model})
         except Exception:
             pass
 
@@ -861,7 +861,7 @@ async def websocket_endpoint(ws: WebSocket):
             current_task.cancel()
         try:
             await ws.send_json({"type": "error", "content": f"Server error: {e}"})
-            await ws.send_json({"type": "done"})
+            await ws.send_json({"type": "done", "model": current_model})
         except Exception:
             pass
         clear_pending_writes()
