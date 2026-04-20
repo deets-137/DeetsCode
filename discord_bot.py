@@ -40,7 +40,7 @@ DISCORD_TOKEN = os.environ.get("DISCORD_TOKEN", "")
 
 # Channel IDs where the bot responds to ALL messages (no prefix/mention needed).
 # Right-click a channel in Discord (developer mode on) → Copy ID
-GAME_CHANNEL_IDS: set[int] = {1344481118287695904}  # e.g. {1234567890123456789}
+GAME_CHANNEL_IDS: set[int] = {1344481118287695904,932359665122177104}  # e.g. {1234567890123456789}
 
 # If True, file writes queued by the AI are applied automatically without asking.
 AUTO_APPLY = True
