@@ -285,7 +285,7 @@ function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   window.__ws = ws;
 
-  ws.onopen = () => { log("connected to harness", "info"); refreshTree(); refreshPacks(); fetchModels(); refreshTaskPanel(); fetchThemes(); };
+  ws.onopen = () => { log("connected to harness", "info"); refreshTree(); refreshPacks(); fetchModels(); refreshTaskPanel(); fetchThemes(); refreshPendingPanel(); };
   ws.onclose = () => {
     log("disconnected — retrying in 3s...", "info");
     setTimeout(connect, 3000);
@@ -582,9 +582,36 @@ function hideThinking() {
 }
 
 // ── Response box helpers ──────────────────────────
+// The currently-streaming assistant message div. Normal text chunks append
+// into its buffer and the whole thing is re-rendered as markdown on each
+// delta — avoids per-chunk parsing of half-closed code fences / lists.
+let currentAssistantMsg = null;
+
+function renderMarkdown(text) {
+  if (typeof marked === "undefined" || typeof DOMPurify === "undefined") {
+    return escapeHtml(text);
+  }
+  return DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
+}
+
 function appendResponse(text, type = "normal") {
   hideThinking();
   const box = document.getElementById("response-text");
+
+  if (type === "normal") {
+    if (!currentAssistantMsg) {
+      currentAssistantMsg = document.createElement("div");
+      currentAssistantMsg.className = "assistant-md";
+      currentAssistantMsg._buffer = "";
+      box.appendChild(currentAssistantMsg);
+    }
+    currentAssistantMsg._buffer += text;
+    currentAssistantMsg.innerHTML = renderMarkdown(currentAssistantMsg._buffer);
+    box.parentElement.scrollTop = box.parentElement.scrollHeight;
+    return;
+  }
+
+  currentAssistantMsg = null;
   const span = document.createElement("span");
   span.textContent = text;
   if (type === "thinking") { span.style.opacity = "0.35"; span.style.fontStyle = "italic"; }
@@ -600,12 +627,14 @@ function appendResponse(text, type = "normal") {
 function addDivider() {
   const box = document.getElementById("response-text");
   if (!box.hasChildNodes()) return;
+  currentAssistantMsg = null;
   const hr = document.createElement("hr");
   hr.className = "response-divider";
   box.appendChild(hr);
 }
 
 function clearResponse() {
+  currentAssistantMsg = null;
   document.getElementById("response-text").innerHTML = "";
 }
 
@@ -622,22 +651,21 @@ function setInputEnabled(enabled) {
   if (stop) stop.disabled = enabled;
 }
 
-// ── Pending writes banner ─────────────────────────
+// ── Pending writes panel ──────────────────────────
 function showPendingWrites(writes) {
   const files = Object.keys(writes);
-  let banner = document.getElementById("pending-banner");
-  if (!banner) {
-    banner = document.createElement("div");
-    banner.id = "pending-banner";
-    banner.className = "pending-banner";
-    document.body.appendChild(banner);
+  const inner = document.getElementById("pending-panel-inner");
+  const count = document.getElementById("pending-count");
+  if (!inner || !count) return;
+  count.textContent = String(files.length);
+  if (files.length === 0) {
+    inner.innerHTML = `<span class="pending-empty">queue is empty</span>`;
+    return;
   }
-  const label = `${files.length} pending write${files.length > 1 ? "s" : ""}`;
-  banner.innerHTML = `
-    <span>${label}: <em>${files.map(escapeHtml).join(", ")}</em></span>
-    <button class="banner-btn apply" onclick="applyWrites()">apply</button>
-    <button class="banner-btn reject" onclick="rejectWrites()">reject</button>
-  `;
+  inner.innerHTML = files.map(f => {
+    const bytes = writes[f] ? writes[f].length : 0;
+    return `<div class="pending-row"><span class="pending-path">${escapeHtml(f)}</span><span class="pending-bytes">${bytes.toLocaleString()} B</span></div>`;
+  }).join("");
 }
 
 // ── Context files ─────────────────────────────────
@@ -762,16 +790,36 @@ function clearToolPanel() {
 }
 
 function hidePendingWrites() {
-  const banner = document.getElementById("pending-banner");
-  if (banner) banner.remove();
+  showPendingWrites({});
 }
 
 function applyWrites() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: "apply_writes" }));
 }
 
 function rejectWrites() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: "reject_writes" }));
+}
+
+async function flushPending() {
+  try {
+    const res = await fetch("/pending", { method: "DELETE" });
+    const data = await res.json();
+    log(`Flushed ${data.flushed ?? 0} pending write(s).`, "info");
+  } catch (e) {
+    log("Flush failed: " + (e?.message || e), "error");
+  }
+  hidePendingWrites();
+}
+
+async function refreshPendingPanel() {
+  try {
+    const res = await fetch("/pending");
+    const data = await res.json();
+    showPendingWrites(data.writes || {});
+  } catch (e) { /* server not up yet */ }
 }
 
 // ── Keyboard shortcut (Enter to send) ────────────

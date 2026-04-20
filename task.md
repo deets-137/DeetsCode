@@ -1,3 +1,3 @@
-- [/] Add 'Abyss' theme block to `theme.css`
-- [ ] Add theme swatch to `index.html`
-- [ ] Verify and report
+- [x] Add marked.js CDN to index.html
+- [x] Update app.js to use marked.parse() for response text
+- [/] Add markdown element CSS to style.css

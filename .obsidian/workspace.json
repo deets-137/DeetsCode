@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "prompt.md",
+                "file": "prompts/chess.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "prompt"
+              "title": "chess"
             }
           }
         ]
@@ -185,6 +185,10 @@
   },
   "active": "3765c684a16d5241",
   "lastOpenFiles": [
+    "manual/tools.md",
+    "prompt.md",
+    "prompts/dnd.md",
+    "special_thanks.md",
     "report/report_disc.md",
     "report/report.md",
     "report",
@@ -196,7 +200,6 @@
     "__pycache__/discord_bot.cpython-312.pyc",
     "server.py.tmp.6136.1776618024032",
     "report.md",
-    "prompt.md",
     "__pycache__/server.cpython-312.pyc",
     "task.md",
     "campaign_state.json",
@@ -208,7 +211,6 @@
     "manual/architecture.md",
     "server.py.tmp.27128.1776537795250",
     "prompts/default.md",
-    "prompts/dnd.md",
     "manual/writing_prompts.md",
     "manual/friction.md",
     "manual/ui.md",

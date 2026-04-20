@@ -18,6 +18,23 @@ from .core import pending_writes, read_files
 MAX_SEARCH_MATCHES = 50
 SEARCH_SKIP_DIRS = {"__pycache__", "node_modules", ".git", ".venv", "venv", "dist", "build"}
 
+# Telltale sequences of UTF-8 bytes re-interpreted as cp1252 and re-encoded
+# as UTF-8 — the classic double-encoding footprint. None of these appear in
+# normal source, so a hit means the model almost certainly regurgitated a
+# corrupted copy of the file.
+_MOJIBAKE_MARKERS = (
+    "â€”", "â€“", "â€œ", "â€\x9d", "â€˜", "â€™", "â€¦",
+    "âœ“", "âœ•", "âœŽ", "â†º", "â†’", "â–¸", "â–¾", "â—‰", "â—‹",
+    "Ã©", "Ã¨", "Ã¢", "Ã´", "Ã§", "Ã±",
+)
+
+
+def _looks_mojibaked(text: str) -> str | None:
+    for m in _MOJIBAKE_MARKERS:
+        if m in text:
+            return m
+    return None
+
 _SYMBOL_PATTERNS = {
     "python": [
         (re.compile(r"^\s*async\s+def\s+(\w+)"), "async def"),
@@ -65,7 +82,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "edit_file",
-            "description": "Queue an edit to an existing file by replacing an exact string. old_string must match exactly once in the file. Prefer this over write_file for small changes. Changes are held for user approval.",
+            "description": "Queue an edit to an existing file by replacing an exact string. old_string must match exactly once in the file. Prefer this over write_file for small changes. Changes are held for user approval. IMPORTANT: when copying text from read_file output, strip the `N<TAB>` line-number prefix from each line — it is metadata, not part of the file.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -74,6 +91,20 @@ TOOL_DEFINITIONS = [
                     "new_string": {"type": "string", "description": "Replacement text."},
                 },
                 "required": ["path", "old_string", "new_string"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "discard_pending_write",
+            "description": "Drop a previously queued write or edit for the given path without touching disk. Use this if you realize a queued change is wrong and you can't repair it with edit_file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path relative to project root"},
+                },
+                "required": ["path"],
             },
         },
     },
@@ -149,8 +180,24 @@ def execute_tool(
             if "path" not in args or "content" not in args:
                 return "Error: Missing required arguments 'path' or 'content'"
             rel_path = args["path"]
+            marker = _looks_mojibaked(args["content"])
+            if marker is not None:
+                return (
+                    f"Error: content looks double-encoded (found {marker!r}). "
+                    "Your copy of the file is corrupted. Do NOT re-submit the whole "
+                    "file — call read_file again and use edit_file on the specific region."
+                )
             pending_writes[rel_path] = args["content"]
             return f"Queued write: {rel_path}"
+
+        if name == "discard_pending_write":
+            if "path" not in args:
+                return "Error: Missing required argument 'path'"
+            rel_path = args["path"]
+            if rel_path not in pending_writes:
+                return f"Error: no pending write for {rel_path}"
+            pending_writes.pop(rel_path, None)
+            return f"Discarded pending write: {rel_path}"
 
         if name == "edit_file":
             if "path" not in args or "old_string" not in args or "new_string" not in args:
@@ -158,8 +205,26 @@ def execute_tool(
             rel_path = args["path"]
             old = args["old_string"]
             new = args["new_string"]
+            # Defensively strip `N<TAB>` line-number prefixes if the model
+            # copied them in from read_file output. Only strips when EVERY
+            # non-empty line matches the pattern — avoids eating legitimate
+            # content that happens to start with digits+tab.
+            def _strip_line_numbers(s: str) -> str:
+                lines = s.split("\n")
+                nonblank = [ln for ln in lines if ln.strip()]
+                if nonblank and all(re.match(r"^\s*\d+\t", ln) for ln in nonblank):
+                    return "\n".join(re.sub(r"^\s*\d+\t", "", ln) for ln in lines)
+                return s
+            old = _strip_line_numbers(old)
+            new = _strip_line_numbers(new)
             if old == new:
                 return "Error: old_string and new_string are identical"
+            marker = _looks_mojibaked(new)
+            if marker is not None:
+                return (
+                    f"Error: new_string looks double-encoded (found {marker!r}). "
+                    "Your copy of the source text is corrupted. Re-read the file and try again."
+                )
             if rel_path in pending_writes:
                 content = pending_writes[rel_path]
                 source = "pending write"

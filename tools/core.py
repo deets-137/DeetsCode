@@ -89,6 +89,29 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "list_packs",
+            "description": "List available reference doc packs and their section headings. Packs are domain knowledge (server architecture, UI styling, conventions, etc). Use this to discover what's available, then call load_pack to pull just the section you need into context.",
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "load_pack",
+            "description": "Read a reference pack, optionally just one section. Prefer loading a single section over the whole pack — packs can be long and full loads eat context. Call list_packs first to see section names.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name":    {"type": "string", "description": "Pack name (without .md), e.g. 'server' or 'styling'."},
+                    "section": {"type": "string", "description": "Optional level-2 heading title to extract (e.g. 'Agent Loop'). Omit to load the whole pack."},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "update_task",
             "description": "Create or update the task checklist (task.md). Use markdown checkboxes: - [ ] todo, - [/] in-progress, - [x] done. If content is empty, returns the current checklist without modifying it.",
             "parameters": {
@@ -104,6 +127,34 @@ TOOL_DEFINITIONS = [
 
 
 SKIP_DIRS_HIDDEN = {"__pycache__", "node_modules", ".git", ".venv", "venv", "dist", "build"}
+
+PACKS_GLOBAL_DIR = Path(__file__).parent.parent / "packs"
+
+
+def _pack_lookup_dirs(project_dir: Path) -> list[tuple[str, Path]]:
+    return [("project", project_dir / "manual"), ("global", PACKS_GLOBAL_DIR)]
+
+
+def _find_pack(name: str, project_dir: Path) -> Optional[Path]:
+    safe = Path(name).name
+    for _scope, src in _pack_lookup_dirs(project_dir):
+        path = src / f"{safe}.md"
+        if path.is_file():
+            return path
+    return None
+
+
+def _pack_sections(text: str) -> list[tuple[str, str]]:
+    """Split markdown by `## ` (level-2) headings. Preamble above the first
+    heading is returned under the synthetic section name `_preamble`."""
+    sections: list[tuple[str, list[str]]] = [("_preamble", [])]
+    for line in text.splitlines():
+        if line.startswith("## ") and not line.startswith("### "):
+            title = line[3:].strip()
+            sections.append((title, []))
+        else:
+            sections[-1][1].append(line)
+    return [(t, "\n".join(ls).strip()) for t, ls in sections if "\n".join(ls).strip()]
 
 
 def execute_tool(
@@ -123,22 +174,35 @@ def execute_tool(
                 return "Error: path escapes project directory"
             if not path.exists():
                 return f"Error: file not found: {args['path']}"
-            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            all_lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+            total = len(all_lines)
             start = args.get("start_line")
             end = args.get("end_line")
             if start is not None or end is not None:
                 s = max(0, (start or 1) - 1)
-                e = end if end is not None else len(lines)
-                lines = lines[s:e]
-                content = "\n".join(lines)
-                content = f"[lines {s+1}–{e} of {args['path']}]\n{content}"
+                e = min(end if end is not None else total, total)
+                sliced = all_lines[s:e]
+                header = f"[lines {s+1}–{e} of {total} in {args['path']}]"
             else:
-                content = "\n".join(lines)
+                s = 0
+                sliced = all_lines
+                header = f"[{total} lines in {args['path']}]"
+            # `N\t<content>` — tab-separated so the prefix is unambiguously
+            # metadata. edit_file strips this defensively if the model copies
+            # it into old_string.
+            width = len(str(s + len(sliced))) if sliced else 1
+            numbered = "\n".join(f"{str(s + i + 1).rjust(width)}\t{ln}" for i, ln in enumerate(sliced))
+            content = (
+                f"{header}\n"
+                f"# Line numbers are prefixed as `N<TAB>`. They are NOT part of the file — "
+                f"do NOT include them in edit_file's old_string.\n"
+                f"{numbered}"
+            )
             if len(content) > MAX_READ_CHARS:
-                content = content[:MAX_READ_CHARS] + f"\n\n[truncated: file exceeds {MAX_READ_CHARS} chars — re-read with start_line/end_line]"
+                content = content[:MAX_READ_CHARS] + f"\n\n[truncated: output exceeds {MAX_READ_CHARS} chars — re-read with start_line/end_line]"
             rel = args["path"]
             if rel in read_files:
-                content = f"<system>\nWARNING: re-read of '{rel}'. if file unchanged, use prior context. if intentional (post-edit or partial slice), log to friction.md.\n</system>\n\n{content}"
+                content = f"<system>\nWARNING: re-read of '{rel}'. if file unchanged, use prior context.\n</system>\n\n{content}"
             else:
                 read_files.append(rel)
             return content
@@ -193,6 +257,44 @@ def execute_tool(
 
             head = f"{label}: " if label else ""
             return f"{head}{expr} = {rolls_str}" + (f" + {modifier}" if modifier and count > 1 else "") + f" → **{total}**"
+
+        if name == "list_packs":
+            lines = []
+            seen = set()
+            for scope, src in _pack_lookup_dirs(project_dir):
+                if not src.is_dir():
+                    continue
+                for entry in sorted(src.iterdir(), key=lambda p: p.name.lower()):
+                    if entry.suffix.lower() != ".md" or entry.name.lower() == "readme.md":
+                        continue
+                    if entry.stem in seen:
+                        continue
+                    seen.add(entry.stem)
+                    try:
+                        text = entry.read_text(encoding="utf-8", errors="replace")
+                    except OSError:
+                        continue
+                    sections = [t for t, _ in _pack_sections(text) if t != "_preamble"]
+                    hint = f" — sections: {', '.join(sections)}" if sections else ""
+                    lines.append(f"- {entry.stem} ({scope}, {entry.stat().st_size} chars){hint}")
+            return "Available packs:\n" + "\n".join(lines) if lines else "No packs available."
+
+        if name == "load_pack":
+            pname = args.get("name", "").strip()
+            if not pname:
+                return "Error: 'name' is required"
+            path = _find_pack(pname, project_dir)
+            if path is None:
+                return f"Error: pack '{pname}' not found"
+            text = path.read_text(encoding="utf-8", errors="replace")
+            section = (args.get("section") or "").strip()
+            if not section:
+                return f"[pack: {pname}]\n{text}"
+            for title, body in _pack_sections(text):
+                if title.lower() == section.lower():
+                    return f"[pack: {pname} § {title}]\n{body}"
+            avail = ", ".join(t for t, _ in _pack_sections(text) if t != "_preamble") or "(none)"
+            return f"Error: section '{section}' not found in '{pname}'. Available: {avail}"
 
         if name == "update_task":
             task_path = project_dir / "task.md"

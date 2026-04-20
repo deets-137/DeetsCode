@@ -105,3 +105,41 @@
   --glass-shadow:     0 10px 30px rgba(58, 90, 64, 0.10), 0 2px 6px rgba(58, 90, 64, 0.06);
   --focus-glow:       0 0 0 1px rgba(255, 245, 230, 0.60), 0 0 24px 2px rgba(74, 124, 89, 0.45);
 }
+
+[data-theme="7"] {
+  /* Abyss: deep black with soft red glows, warm white text */
+  --canvas:           #050505;
+  --canvas-blob-1:    #3a0000;
+  --canvas-blob-2:    #1a0000;
+  --panel-outer:      rgba(15, 8, 8, 0.55);
+  --panel-input:      rgba(18, 9, 9, 0.72);
+  --panel-response:   rgba(18, 9, 9, 0.72);
+  --textbox-bg:       #0a0a0a;
+  --textbox-text:     #f5f0eb;
+  --response-box-bg:  #080808;
+  --response-text:    #f5f0eb;
+  --divider:          #b05050;
+  --glass-border:     rgba(180, 60, 60, 0.10);
+  --glass-highlight:  rgba(220, 80, 80, 0.06);
+  --glass-shadow:     0 10px 40px rgba(0, 0, 0, 0.80), 0 2px 6px rgba(0, 0, 0, 0.60);
+  --focus-glow:       0 0 0 1px rgba(180, 60, 60, 0.20), 0 0 24px 2px rgba(180, 60, 60, 0.15);
+}
+
+[data-theme="8"] {
+  /* Sepia Dreams: warm parchment tones, soft amber, nostalgic and easy on the eyes */
+  --canvas:           #f5efe6;
+  --canvas-blob-1:    #e8dcc8;
+  --canvas-blob-2:    #d4c4a8;
+  --panel-outer:      rgba(228, 216, 196, 0.55);
+  --panel-input:      rgba(232, 220, 200, 0.72);
+  --panel-response:   rgba(232, 220, 200, 0.72);
+  --textbox-bg:       #faf6f0;
+  --textbox-text:     #3e2c1c;
+  --response-box-bg:  #faf6f0;
+  --response-text:    #5a3e28;
+  --divider:          #8b6f4e;
+  --glass-border:     rgba(245, 239, 230, 0.50);
+  --glass-highlight:  rgba(255, 250, 240, 0.40);
+  --glass-shadow:     0 10px 30px rgba(90, 62, 40, 0.08), 0 2px 6px rgba(90, 62, 40, 0.05);
+  --focus-glow:       0 0 0 1px rgba(245, 239, 230, 0.70), 0 0 24px 2px rgba(139, 111, 78, 0.30);
+}
