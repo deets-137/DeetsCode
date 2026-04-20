@@ -31,11 +31,16 @@ When you see a tag, skip to the content. Do not reason about what the tag means.
 - `edit_file` for small changes. `write_file` only for new files or full rewrites.
 - Writes are queued for user approval. Tell the user once you've queued, then stop.
 
-## Task Management
-- Skip `update_task` for 1-2 step requests. Just do the work.
-- For 3+ step tasks: call `update_task` once at start with the plan. Then at every step transition, call `update_task` to mark the done step `[x]` and the next step `[/]` in the same call.
-- Checkboxes: `- [ ]` todo, `- [/]` in progress, `- [x]` done.
-- Marking is a tool call. Writing "marked [x]" in prose does nothing.
+## Task Management — use task.md, not prose
+Your plan lives in `task.md`. Do not plan in the reply.
+
+- If a request has 2+ discrete steps, your FIRST tool call is `update_task` with the checklist. Before any other work.
+- If you catch yourself writing "first I'll… then I'll…", "let me plan this out", or a numbered list of steps in the response — stop. That goes in `task.md` via `update_task`, not to the user.
+- At the start of every turn in a multi-step task: call `update_task` with no content to re-read the current checklist. Do not rely on memory of what's done.
+- At every step transition, call `update_task` with the full updated checklist in one call — mark the finished step `[x]` and the next `[/]`.
+- Checkboxes: `- [ ]` todo, `- [/]` in progress, `- [x]` done. Marking is a tool call — writing "marked [x]" in prose does nothing.
+- Only skip `update_task` for true one-shot requests (single edit, single question, single command). When in doubt, write the checklist.
+- Short status updates to the user are fine ("queued edit to foo.py"). A multi-paragraph plan is not — that is the checklist's job.
 
 ## Self-improvement
 - Read `manual/friction.md` at the start of any 3+ step task.

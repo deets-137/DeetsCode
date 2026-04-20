@@ -77,6 +77,18 @@ def _init_schema(c: sqlite3.Connection) -> None:
             display_name  TEXT NOT NULL,
             last_seen     INTEGER NOT NULL
         );
+
+        CREATE TABLE IF NOT EXISTS notes (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_name     TEXT NOT NULL,
+            channel_name  TEXT NOT NULL,
+            text          TEXT NOT NULL,
+            ts            INTEGER NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'open',
+            closed_at     INTEGER
+        );
+        CREATE INDEX IF NOT EXISTS idx_notes_channel_ts
+            ON notes(channel_name, ts);
     """)
     # Additive migrations for pre-existing DBs. Each statement is safe to
     # re-run; we swallow "duplicate column" errors rather than version-track.
@@ -84,6 +96,8 @@ def _init_schema(c: sqlite3.Connection) -> None:
         "ALTER TABLE games ADD COLUMN created_by TEXT",
         "ALTER TABLE games ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}'",
         "ALTER TABLE moves ADD COLUMN annotation TEXT",
+        "ALTER TABLE notes ADD COLUMN status TEXT NOT NULL DEFAULT 'open'",
+        "ALTER TABLE notes ADD COLUMN closed_at INTEGER",
     ]
     for stmt in _additive:
         try:
@@ -91,6 +105,11 @@ def _init_schema(c: sqlite3.Connection) -> None:
         except sqlite3.OperationalError as e:
             if "duplicate column" not in str(e).lower():
                 raise
+    # Indexes that reference additive columns must be created after migrations.
+    c.execute(
+        "CREATE INDEX IF NOT EXISTS idx_notes_channel_status "
+        "ON notes(channel_name, status)"
+    )
 
 
 # ─── Game IDs ────────────────────────────────────────────────────────────────
@@ -238,3 +257,46 @@ def upsert_player(user_id: str, display_name: str) -> None:
 def get_player(user_id: str) -> Optional[dict]:
     row = _db().execute("SELECT * FROM players WHERE user_id = ?", (user_id,)).fetchone()
     return dict(row) if row else None
+
+
+# ─── Notes ───────────────────────────────────────────────────────────────────
+
+def add_note(user_name: str, channel_name: str, text: str) -> int:
+    cur = _db().execute(
+        "INSERT INTO notes (user_name, channel_name, text, ts) VALUES (?, ?, ?, ?)",
+        (user_name, channel_name, text, int(time.time())),
+    )
+    return cur.lastrowid
+
+
+def list_notes(
+    channel_name: Optional[str] = None,
+    status: Optional[str] = "open",
+    limit: int = 20,
+) -> list[dict]:
+    """List notes. status='open'|'closed'|None (None → all)."""
+    clauses, params = [], []
+    if channel_name is not None:
+        clauses.append("channel_name = ?"); params.append(channel_name)
+    if status is not None:
+        clauses.append("status = ?"); params.append(status)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(limit)
+    rows = _db().execute(
+        f"SELECT id, user_name, channel_name, text, ts, status, closed_at "
+        f"FROM notes{where} ORDER BY ts DESC LIMIT ?",
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def set_note_status(note_id: int, status: str) -> bool:
+    """Set a note's status. Returns True if the row existed."""
+    if status not in ("open", "closed"):
+        raise ValueError("status must be 'open' or 'closed'")
+    closed_at = int(time.time()) if status == "closed" else None
+    cur = _db().execute(
+        "UPDATE notes SET status = ?, closed_at = ? WHERE id = ?",
+        (status, closed_at, note_id),
+    )
+    return cur.rowcount > 0
