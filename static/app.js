@@ -26,6 +26,10 @@ async function fetchModels() {
         if (m === data.current) opt.selected = true;
         select.appendChild(opt);
       });
+      const box = document.getElementById("chat-textbox");
+      if (box && data.current) {
+        box.placeholder = `Message ${data.current}... (Enter to send, Shift+Enter for newline)`;
+      }
     } else {
       const opt = document.createElement("option");
       opt.textContent = "No models found";
@@ -213,6 +217,10 @@ function requestRead(path) {
   if (!template) {
     template = "Read `{path}` and reply with only the single word: ready";
   }
+  if (!template.includes("{path}")) {
+    log("file-click template is missing the `{path}` marker — not sending", "error");
+    return;
+  }
   const text = template.replace(/{path}/g, path);
 
   clearResponse();
@@ -397,8 +405,13 @@ function sendMessage() {
     return;
   }
 
-  clearResponse();
-  clearToolPanel();
+  const keepHistory = localStorage.getItem("harness-keep-history") === "1";
+  if (!keepHistory) {
+    clearResponse();
+    clearToolPanel();
+  } else {
+    addDivider();
+  }
   lastMsgType = "user";
   appendResponse(`You: ${text}\n\n`, "user");
   ws.send(JSON.stringify({ type: "message", content: text }));
@@ -572,36 +585,15 @@ function hideThinking() {
 function appendResponse(text, type = "normal") {
   hideThinking();
   const box = document.getElementById("response-text");
-
-  // render <think>...</think> blocks dimmed
-  const thinkRe = /<think>([\s\S]*?)<\/think>/g;
-  let last = 0, match;
-  const parts = [];
-  while ((match = thinkRe.exec(text)) !== null) {
-    if (match.index > last) parts.push({ t: text.slice(last, match.index), think: false });
-    parts.push({ t: match[1], think: true });
-    last = match.index + match[0].length;
-  }
-  if (last < text.length) parts.push({ t: text.slice(last), think: false });
-  if (parts.length === 0) parts.push({ t: text, think: false });
-
-  for (let i = 0; i < parts.length; i++) {
-    const part = parts[i];
-    const span = document.createElement("span");
-    span.textContent = part.t;
-    if (part.think || type === "thinking") { span.style.opacity = "0.35"; span.style.fontStyle = "italic"; }
-    else if (type === "tool")  span.style.opacity = "0.55";
-    else if (type === "user")  span.style.fontWeight = "bold";
-    else if (type === "info")  span.style.opacity = "0.6";
-    else if (type === "error") span.style.color = "#c0392b";
-    else if (type === "compact") { span.style.opacity = "0.7"; span.style.fontStyle = "italic"; }
-    box.appendChild(span);
-    if (part.think && i < parts.length - 1) {
-      const hr = document.createElement("hr");
-      hr.className = "response-divider";
-      box.appendChild(hr);
-    }
-  }
+  const span = document.createElement("span");
+  span.textContent = text;
+  if (type === "thinking") { span.style.opacity = "0.35"; span.style.fontStyle = "italic"; }
+  else if (type === "tool")  span.style.opacity = "0.55";
+  else if (type === "user")  span.style.fontWeight = "bold";
+  else if (type === "info")  span.style.opacity = "0.6";
+  else if (type === "error") span.style.color = "#c0392b";
+  else if (type === "compact") { span.style.opacity = "0.7"; span.style.fontStyle = "italic"; }
+  box.appendChild(span);
   box.parentElement.scrollTop = box.parentElement.scrollHeight;
 }
 
@@ -798,6 +790,14 @@ document.addEventListener("DOMContentLoaded", () => {
       cancelRun();
     }
   });
+
+  const keepHistoryToggle = document.getElementById("keep-history-toggle");
+  if (keepHistoryToggle) {
+    keepHistoryToggle.checked = localStorage.getItem("harness-keep-history") === "1";
+    keepHistoryToggle.addEventListener("change", (e) => {
+      localStorage.setItem("harness-keep-history", e.target.checked ? "1" : "0");
+    });
+  }
 
   const autoApplyToggle = document.getElementById("auto-apply-toggle");
   if (autoApplyToggle) {

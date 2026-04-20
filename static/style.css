@@ -64,6 +64,14 @@ body::after {
   padding: 20px;
   display: flex;
   gap: 16px;
+  min-width: 0;
+}
+
+/* Under ~1200px the 4-column layout gets clipped. Let it scroll horizontally
+   so right-hand panels are reachable instead of falling off-screen. */
+@media (max-width: 1200px) {
+  body { overflow-x: auto; }
+  .canvas { min-width: 1200px; }
 }
 
 /* ── Glass surface (shared) ──────────────────────── */
