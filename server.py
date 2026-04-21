@@ -123,6 +123,57 @@ import paths
 # spectate handshake; drained on disconnect.
 _spectators: dict[str, set[WebSocket]] = {}
 
+# Remote-control queues by session_id. Each live session (hello'd) owns one
+# asyncio.Queue; any OTHER websocket may enqueue a synthetic control frame
+# (e.g. {"type": "reset"}) that the owning session's receive loop will pick
+# up and dispatch through the normal handler path. Enables the web UI to
+# fire reset/compact/cancel/set_prompt on a Discord bot session.
+_session_control: dict[str, "asyncio.Queue[dict]"] = {}
+
+# Actions any caller is allowed to forward. Kept narrow on purpose — anything
+# that touches the filesystem or starts a turn stays local-only.
+_REMOTE_CONTROL_ACTIONS = {"reset", "compact", "cancel", "set_prompt"}
+
+
+# ─── Cross-session control dispatcher ────────────────────────────────────────
+# Shared by: the `remote_control` WS handler on this socket, the HTTP
+# `/api/session/{sid}/control` endpoint, and any future panel/integration
+# that wants to drive another session. Keep all validation + translation in
+# here so every caller gets identical semantics.
+
+class RemoteControlError(Exception):
+    """Raised when a remote-control request is invalid or not dispatchable."""
+
+
+def enqueue_session_control(target_session_id: str, action: str, **extra) -> str:
+    """Push a synthetic control frame into `target_session_id`'s receive loop.
+
+    Returns a short human message describing what happened. Raises
+    RemoteControlError on bad inputs or if the target isn't currently live.
+
+    Example: enqueue_session_control("discord-123", "set_prompt", prompt="chess")
+    """
+    if not isinstance(target_session_id, str) or not target_session_id:
+        raise RemoteControlError("target_session_id required")
+    if action not in _REMOTE_CONTROL_ACTIONS:
+        raise RemoteControlError(f"action '{action}' not allowed")
+    q = _session_control.get(target_session_id)
+    if q is None:
+        raise RemoteControlError(
+            f"session '{target_session_id}' is not live (only online sessions accept controls)"
+        )
+    frame: dict = {"type": action}
+    if action == "set_prompt":
+        frame["prompt"] = extra.get("prompt") or "DeetsCode"
+    q.put_nowait(frame)
+    return f"→ sent `{action}` to `{target_session_id}`"
+
+
+def list_live_sessions() -> list[str]:
+    """Session ids that currently have a registered control queue (i.e.
+    are connected and past hello). Useful for inventory panels."""
+    return list(_session_control.keys())
+
 # Types of frames we do NOT persist to the event log. Mostly ephemeral UI
 # bookkeeping that would bloat the table without debug value.
 _EVENT_SKIP_TYPES = {"ctx_length", "hello_ack"}
@@ -709,8 +760,26 @@ async def list_event_sessions_endpoint(limit: int = 50):
             except OSError:
                 mtime_ms = 0
             rows.append({"session_id": sid, "n": 0, "last_ts": mtime_ms, "last_id": 0})
+    # Flag which sessions are currently connected (have a control queue) so
+    # the UI can disable remote-control buttons for offline sessions.
+    live = set(list_live_sessions())
+    for r in rows:
+        r["live"] = r["session_id"] in live
     rows.sort(key=lambda r: r.get("last_ts") or 0, reverse=True)
     return JSONResponse({"sessions": rows[:limit]})
+
+
+@app.post("/api/session/{session_id}/control")
+async def session_control_endpoint(session_id: str, body: dict):
+    """HTTP facade over enqueue_session_control. Body: {action, prompt?}.
+    Used by panels that don't hold a WS, or by external tooling (curl, etc)."""
+    try:
+        msg = enqueue_session_control(
+            session_id, body.get("action"), prompt=body.get("prompt")
+        )
+        return JSONResponse({"ok": True, "message": msg})
+    except RemoteControlError as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=400)
 
 
 @app.get("/api/events")
@@ -735,6 +804,9 @@ async def websocket_endpoint(ws: WebSocket):
     selected_prompt: str = "DeetsCode"
     session_id: str | None = None
     spectating: str | None = None  # session_id this ws is subscribed to (read-only mode)
+    # Each hello'd session gets its own control queue so other WSes (the web
+    # UI's dev panel) can enqueue synthetic control frames for THIS session.
+    control_queue: "asyncio.Queue[dict]" = asyncio.Queue()
 
     # Wrap ws.send_json so every outbound frame is recorded to the event log
     # and fanned out to any spectators attached to this session. One hook
@@ -764,8 +836,22 @@ async def websocket_endpoint(ws: WebSocket):
 
     try:
         while True:
+            # Race the WS receive against the control queue so remote-control
+            # frames (from another UI socket) get picked up even while this
+            # session is idle-blocking on the client. First one to arrive wins;
+            # the other task is cancelled. See _session_control above.
+            recv_task = asyncio.create_task(ws.receive_json())
+            ctrl_task = asyncio.create_task(control_queue.get())
+            done, pending = await asyncio.wait(
+                {recv_task, ctrl_task}, return_when=asyncio.FIRST_COMPLETED
+            )
+            for p in pending:
+                p.cancel()
             try:
-                data = await ws.receive_json()
+                if recv_task in done:
+                    data = recv_task.result()
+                else:
+                    data = ctrl_task.result()
             except WebSocketDisconnect:
                 raise
             except Exception as e:
@@ -793,6 +879,25 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_json({"type": "hello_ack", "restored": True, "messages": len(messages), "prompt": selected_prompt})
                 else:
                     await ws.send_json({"type": "hello_ack", "restored": False, "messages": 0, "prompt": selected_prompt})
+                # Register this session's control queue so the UI can remote-
+                # control it via `remote_control` frames. Drained in finally.
+                _session_control[session_id] = control_queue
+                continue
+
+            if data["type"] == "remote_control":
+                # Thin WS wrapper around enqueue_session_control. Any new
+                # panel or HTTP route that wants to drive another session
+                # should call enqueue_session_control directly — don't
+                # reinvent the validation/translation logic here.
+                try:
+                    msg = enqueue_session_control(
+                        data.get("target_session_id"),
+                        data.get("action"),
+                        prompt=data.get("prompt"),
+                    )
+                    await ws.send_json({"type": "info", "content": msg})
+                except RemoteControlError as e:
+                    await ws.send_json({"type": "error", "content": f"remote_control: {e}"})
                 continue
 
             if data["type"] == "spectate":
@@ -1068,6 +1173,8 @@ async def websocket_endpoint(ws: WebSocket):
     finally:
         if spectating and spectating in _spectators:
             _spectators[spectating].discard(ws)
+        if session_id and _session_control.get(session_id) is control_queue:
+            _session_control.pop(session_id, None)
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

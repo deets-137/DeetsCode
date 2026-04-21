@@ -353,11 +353,138 @@ window.startSpectate = startSpectate;
 window.stopSpectate = stopSpectate;
 window.refreshSpectateSessions = refreshSpectateSessions;
 
+// ─── bot-panel:control ────────────────────────────────────────────────────
+// All three control buttons + the mode-switch dropdown target whatever
+// session is selected in #spectate-select. The server validates + routes via
+// enqueue_session_control — these functions just build the WS frame.
+//
+// Offline (non-live) sessions can't be controlled; buttons disable themselves
+// when _inventoryLive.has(target) is false.
+//
+// Modularization note: all DOM lookups go through the ids declared in the
+// matching <section data-panel="control"> block. Keep those ids stable when
+// moving this code.
+
+const _inventoryLive = new Set();            // session_ids currently live
+const _inventoryMeta = new Map();            // session_id -> {n, last_ts}
+let _controlModes = ["DeetsCode", "dnd", "chess"];  // refreshed from /api/prompts
+
+function _controlTarget() {
+  const sel = document.getElementById("spectate-select");
+  return (sel && sel.value) || "";
+}
+
+function _updateControlPanel() {
+  const target = _controlTarget();
+  const live = target && _inventoryLive.has(target);
+  const label = document.getElementById("control-target");
+  if (label) {
+    label.textContent = target ? (live ? `→ ${target}` : `${target} (offline)`) : "no target";
+    label.classList.toggle("live", !!live);
+  }
+  for (const btn of document.querySelectorAll('#bot-ops [data-panel="control"] .dev-btn')) {
+    btn.disabled = !live;
+  }
+  const status = document.getElementById("control-status");
+  if (status) {
+    status.textContent = !target
+      ? "pick a session above"
+      : live ? "ready" : "session is offline (connect it first)";
+  }
+}
+
+function onSpectateSelectChange() {
+  _updateControlPanel();
+}
+
+function remoteControl(action) {
+  const target = _controlTarget();
+  if (!target || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: "remote_control", target_session_id: target, action }));
+}
+
+function remoteSetPrompt() {
+  const target = _controlTarget();
+  const mode = document.getElementById("control-mode");
+  const prompt = mode && mode.value;
+  if (!target || !prompt || !ws || ws.readyState !== 1) return;
+  ws.send(JSON.stringify({ type: "remote_control", target_session_id: target, action: "set_prompt", prompt }));
+}
+
+async function _refreshControlModes() {
+  try {
+    const r = await fetch("/api/prompts");
+    const { prompts } = await r.json();
+    if (Array.isArray(prompts) && prompts.length) _controlModes = prompts;
+  } catch (e) { /* keep defaults */ }
+  const sel = document.getElementById("control-mode");
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = _controlModes.map(m => `<option value="${m}">${m}</option>`).join("");
+  if (keep && _controlModes.includes(keep)) sel.value = keep;
+}
+
+// ─── bot-panel:inventory ──────────────────────────────────────────────────
+// Table of every known session. Reuses /api/events/sessions (which now
+// includes a `live` flag populated from list_live_sessions on the server).
+// Row click pre-selects the session into #spectate-select so the control
+// panel targets it.
+
+async function refreshSessionInventory() {
+  try {
+    const r = await fetch("/api/events/sessions");
+    const { sessions } = await r.json();
+    _inventoryLive.clear();
+    _inventoryMeta.clear();
+    for (const s of sessions) {
+      if (s.live) _inventoryLive.add(s.session_id);
+      _inventoryMeta.set(s.session_id, { n: s.n || 0, last_ts: s.last_ts || 0 });
+    }
+    const tbody = document.getElementById("inv-tbody");
+    if (!tbody) return;
+    if (!sessions.length) {
+      tbody.innerHTML = `<tr><td colspan="4" class="inv-empty">no sessions yet</td></tr>`;
+    } else {
+      const selected = _controlTarget();
+      tbody.innerHTML = sessions.map(s => {
+        const when = s.last_ts ? new Date(s.last_ts).toLocaleTimeString() : "—";
+        const cls = s.live ? "live" : "off";
+        const txt = s.live ? "live" : "offline";
+        const sel = s.session_id === selected ? " class=\"selected\"" : "";
+        return `<tr${sel} data-sid="${s.session_id}" onclick="_pickInventoryRow('${s.session_id}')">`
+             + `<td>${s.session_id}</td><td>${s.n || 0}</td><td>${when}</td>`
+             + `<td><span class="inv-state ${cls}">${txt}</span></td></tr>`;
+      }).join("");
+    }
+    _updateControlPanel();
+  } catch (e) { /* ignore */ }
+}
+
+function _pickInventoryRow(sid) {
+  const sel = document.getElementById("spectate-select");
+  if (!sel) return;
+  // Ensure the option exists (inventory may know a session the picker doesn't).
+  if (!Array.from(sel.options).some(o => o.value === sid)) {
+    const opt = document.createElement("option");
+    opt.value = sid; opt.textContent = sid;
+    sel.appendChild(opt);
+  }
+  sel.value = sid;
+  onSpectateSelectChange();
+  refreshSessionInventory();  // re-render selected highlight
+}
+
+window.remoteControl = remoteControl;
+window.remoteSetPrompt = remoteSetPrompt;
+window.refreshSessionInventory = refreshSessionInventory;
+window.onSpectateSelectChange = onSpectateSelectChange;
+window._pickInventoryRow = _pickInventoryRow;
+
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   window.__ws = ws;
 
-  ws.onopen = () => { log("connected to harness", "info"); refreshTree(); refreshPacks(); fetchModels(); refreshTaskPanel(); fetchThemes(); refreshPendingPanel(); refreshSpectateSessions(); };
+  ws.onopen = () => { log("connected to harness", "info"); refreshTree(); refreshPacks(); fetchModels(); refreshTaskPanel(); fetchThemes(); refreshPendingPanel(); refreshSpectateSessions(); refreshSessionInventory(); _refreshControlModes(); _updateControlPanel(); };
   ws.onclose = () => {
     log("disconnected — retrying in 3s...", "info");
     setTimeout(connect, 3000);

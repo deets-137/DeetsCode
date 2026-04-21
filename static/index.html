@@ -179,33 +179,94 @@
         </div>
       </div>
 
-      <div class="file-panel dev-panel" id="dev-panel">
-        <div class="file-panel-header">
-          <span>dev · spectate</span>
-          <button onclick="refreshSpectateSessions()" title="Refresh sessions">↺</button>
-        </div>
-        <div class="file-panel-inner dev-panel-inner">
-          <div class="dev-row">
-            <select id="spectate-select" class="dev-select">
-              <option value="">Pick a session…</option>
-            </select>
+      <!--
+        Bot-ops section — three sibling panels that together turn the web UI
+        into a debug/control surface for Discord bot sessions. Each panel is
+        self-contained (own header, inner, JS entry points) so tomorrow we
+        can lift <div class="bot-ops"> out as a standalone module or a Web
+        Component. When modularizing:
+          - Each .bot-panel is one unit; they share no DOM state with each
+            other (the spectate <select>'s value is the only cross-panel
+            signal, and it lives in the DOM id `spectate-select`).
+          - JS entry points on window: refreshSpectateSessions, startSpectate,
+            stopSpectate, refreshSessionInventory, remoteControl, remoteSetPrompt.
+          - Server-side: one shared helper `enqueue_session_control` in
+            server.py, exposed via the `remote_control` WS type AND a
+            POST /api/session/{sid}/control HTTP route.
+      -->
+      <div class="bot-ops" id="bot-ops">
+
+        <!-- [bot-panel:spectate] Read-only tail of a Discord session's frames. -->
+        <section class="file-panel dev-panel bot-panel" data-panel="spectate">
+          <div class="file-panel-header">
+            <span>bot · spectate</span>
+            <button onclick="refreshSpectateSessions()" title="Refresh sessions">↺</button>
           </div>
-          <div class="dev-row dev-row-btns">
-            <button class="dev-btn" onclick="startSpectate()">watch</button>
-            <button class="dev-btn" onclick="stopSpectate()">stop</button>
-            <span id="spectate-status" class="dev-status">idle</span>
+          <div class="file-panel-inner dev-panel-inner">
+            <div class="dev-row">
+              <select id="spectate-select" class="dev-select" onchange="onSpectateSelectChange()">
+                <option value="">Pick a session…</option>
+              </select>
+            </div>
+            <div class="dev-row dev-row-btns">
+              <button class="dev-btn" onclick="startSpectate()">watch</button>
+              <button class="dev-btn" onclick="stopSpectate()">stop</button>
+              <span id="spectate-status" class="dev-status">idle</span>
+            </div>
+            <div class="dev-row dev-filters" id="dev-filters">
+              <span class="dev-label">show:</span>
+              <label class="dev-chip"><input type="checkbox" data-evt="thinking" checked>thinking</label>
+              <label class="dev-chip"><input type="checkbox" data-evt="tool_call" checked>tool_call</label>
+              <label class="dev-chip"><input type="checkbox" data-evt="tool_result" checked>tool_result</label>
+              <label class="dev-chip"><input type="checkbox" data-evt="text" checked>text</label>
+              <label class="dev-chip"><input type="checkbox" data-evt="error" checked>error</label>
+              <label class="dev-chip"><input type="checkbox" data-evt="info">info</label>
+            </div>
+            <div class="dev-row dev-counts" id="dev-counts">no events yet</div>
           </div>
-          <div class="dev-row dev-filters" id="dev-filters">
-            <span class="dev-label">show:</span>
-            <label class="dev-chip"><input type="checkbox" data-evt="thinking" checked>thinking</label>
-            <label class="dev-chip"><input type="checkbox" data-evt="tool_call" checked>tool_call</label>
-            <label class="dev-chip"><input type="checkbox" data-evt="tool_result" checked>tool_result</label>
-            <label class="dev-chip"><input type="checkbox" data-evt="text" checked>text</label>
-            <label class="dev-chip"><input type="checkbox" data-evt="error" checked>error</label>
-            <label class="dev-chip"><input type="checkbox" data-evt="info">info</label>
+        </section>
+
+        <!-- [bot-panel:control] Fires reset/compact/cancel/set_prompt against -->
+        <!-- whatever session is selected in the spectate <select>. Buttons  -->
+        <!-- disable when no live session is targeted.                       -->
+        <section class="file-panel bot-panel" data-panel="control">
+          <div class="file-panel-header">
+            <span>bot · control</span>
+            <span id="control-target" class="dev-status">no target</span>
           </div>
-          <div class="dev-row dev-counts" id="dev-counts">no events yet</div>
-        </div>
+          <div class="file-panel-inner dev-panel-inner">
+            <div class="dev-row dev-row-btns">
+              <button class="dev-btn" data-action="reset"   onclick="remoteControl('reset')">reset</button>
+              <button class="dev-btn" data-action="compact" onclick="remoteControl('compact')">compact</button>
+              <button class="dev-btn" data-action="cancel"  onclick="remoteControl('cancel')">cancel</button>
+            </div>
+            <div class="dev-row">
+              <span class="dev-label">mode:</span>
+              <select id="control-mode" class="dev-select"></select>
+              <button class="dev-btn" onclick="remoteSetPrompt()">switch</button>
+            </div>
+            <div class="dev-row dev-counts" id="control-status">pick a session above</div>
+          </div>
+        </section>
+
+        <!-- [bot-panel:inventory] Table of every known session with live/off status, -->
+        <!-- event count, last activity. Row-click pre-selects into spectate.        -->
+        <section class="file-panel bot-panel" data-panel="inventory">
+          <div class="file-panel-header">
+            <span>bot · sessions</span>
+            <button onclick="refreshSessionInventory()" title="Refresh inventory">↺</button>
+          </div>
+          <div class="file-panel-inner dev-panel-inner">
+            <table class="inv-table" id="inv-table">
+              <thead>
+                <tr><th>session</th><th>events</th><th>last</th><th>state</th></tr>
+              </thead>
+              <tbody id="inv-tbody">
+                <tr><td colspan="4" class="inv-empty">loading…</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
       </div>
     </div>
 

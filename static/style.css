@@ -1158,7 +1158,24 @@ input:checked + .toggle-slider:before {
 .pending-banner .banner-btn.reject { background: rgba(180, 100, 100, 0.32); }
 .pending-banner .banner-btn.reject:hover { background: rgba(180, 100, 100, 0.55); }
 
-/* ─── dev / spectate panel ───────────────────────────────────────────────── */
+/* ─── bot-ops section ────────────────────────────────────────────────────── */
+/* Wraps the three bot-panel siblings (spectate, control, inventory). Designed */
+/* so the whole .bot-ops block can later be moved to its own module/partial    */
+/* without the rest of the UI caring. All shared classes (dev-row, dev-btn,   */
+/* etc.) are scoped here so modularizing means moving these rules together.    */
+.right-column > .bot-ops {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+.bot-ops > .bot-panel {
+  flex: 0 0 auto;
+  align-self: stretch;
+  width: 100%;
+}
+
+/* back-compat alias: the existing spectate panel keeps its original selector */
 .right-column > .dev-panel {
   flex: 0 0 auto;
   height: auto;
@@ -1231,3 +1248,38 @@ input:checked + .toggle-slider:before {
   border-top: 1px dashed rgba(0,0,0,0.1);
   display: block;
 }
+.dev-btn[disabled] {
+  opacity: 0.4;
+  cursor: not-allowed;
+  filter: none;
+}
+
+/* ─── bot-panel:inventory table ──────────────────────────────────────────── */
+.inv-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: monospace;
+  font-size: 10px;
+}
+.inv-table th {
+  text-align: left;
+  font-weight: normal;
+  opacity: 0.55;
+  padding: 2px 6px;
+  border-bottom: 1px dashed rgba(0,0,0,0.1);
+}
+.inv-table td {
+  padding: 3px 6px;
+  border-bottom: 1px dotted rgba(0,0,0,0.07);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 0;
+}
+.inv-table tbody tr { cursor: pointer; }
+.inv-table tbody tr:hover { background: rgba(0,0,0,0.03); }
+.inv-table tbody tr.selected { background: rgba(80, 140, 80, 0.12); }
+.inv-state { font-size: 9px; padding: 1px 5px; border-radius: 3px; }
+.inv-state.live { background: rgba(80, 160, 80, 0.25); color: #2a5c2a; }
+.inv-state.off  { background: rgba(0,0,0,0.06); opacity: 0.6; }
+.inv-empty { text-align: center; opacity: 0.5; padding: 12px; }
