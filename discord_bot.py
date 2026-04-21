@@ -406,6 +406,50 @@ async def slash_mode(interaction: discord.Interaction, prompt: str):
             await interaction.followup.send(f"❌ {e}")
 
 
+@bot.tree.command(name="state", description="Show active game state for this channel (deterministic — no model call).")
+async def slash_state(interaction: discord.Interaction):
+    cid = str(interaction.channel_id)
+    try:
+        games = storage.list_games(channel_id=cid, status="active", limit=10)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ storage error: {e}", ephemeral=True)
+        return
+    if not games:
+        await interaction.response.send_message(
+            "No active games in this channel. Use chess/dnd tools to start one.",
+            ephemeral=True,
+        )
+        return
+    lines = [f"**Active games in this channel ({len(games)}):**"]
+    for g in games:
+        full = storage.load_game(g["game_id"])
+        if full is None:
+            continue
+        gtype = full.get("game_type", "?")
+        gid = full["game_id"]
+        state = full.get("state") or {}
+        if gtype == "chess":
+            try:
+                import chess as _chess  # python-chess
+                board = _chess.Board(state["fen"])
+                turn = "White" if board.turn == _chess.WHITE else "Black"
+                turn_name = state.get("white_name") if board.turn == _chess.WHITE else state.get("black_name")
+                lines.append(
+                    f"\n`{gid}` · chess · {turn} to move ({turn_name})\n"
+                    f"FEN: `{board.fen()}`\n"
+                    f"```\n{board.unicode(invert_color=True, borders=True)}\n```"
+                )
+            except Exception as e:
+                lines.append(f"\n`{gid}` · chess · (failed to render: {e})")
+        else:
+            lines.append(f"\n`{gid}` · {gtype} · state keys: {list(state.keys())}")
+    msg = "\n".join(lines)
+    # Discord message cap is 2000 chars; truncate safely if multiple games.
+    if len(msg) > 1900:
+        msg = msg[:1900] + "\n…(truncated)"
+    await interaction.response.send_message(msg, ephemeral=False)
+
+
 @bot.tree.command(name="spectate", description="Show the session id to paste into the web UI's spectate picker.")
 async def slash_spectate(interaction: discord.Interaction):
     cid = interaction.channel_id
