@@ -514,6 +514,15 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
             await ws.send_json({"type": "text", "content": tail_visible})
         if not tool_calls_buf:
             stripped = strip_think(content_buf)
+            # Rescue path: Qwen3 sometimes forgets to close </think>, which
+            # routes the model's actual reply into the thinking stream and
+            # leaves the UI with an empty response. If we produced no visible
+            # output and no tool call this turn but DO have a thinking tail,
+            # surface that tail as visible text so the user sees something.
+            if not stripped and tail_thinking:
+                stripped = tail_thinking.strip()
+                if stripped:
+                    await ws.send_json({"type": "text", "content": stripped})
             if stripped:
                 messages.append({"role": "assistant", "content": stripped})
             break
@@ -1030,6 +1039,21 @@ async def websocket_endpoint(ws: WebSocket):
                         f"- Maintain the 'vibe' of the current world_state.\n"
                         f"</dm_instructions>"
                     )
+                elif selected_prompt == "chess":
+                    # Chess tools need the caller's Discord id (chess_new takes
+                    # it as white_id/black_id, chess_move/chess_resign use it
+                    # for turn enforcement). Expose it so the model can quote
+                    # it verbatim instead of inventing a value.
+                    if user_id is not None:
+                        user_content = (
+                            f"<current_request>\n"
+                            f"speaker_name: {user_name}\n"
+                            f"speaker_id: {user_id}\n"
+                            f"message: {user_text}\n"
+                            f"</current_request>"
+                        )
+                    else:
+                        user_content = user_text
                 else:
                     user_content = user_text
 
