@@ -686,7 +686,23 @@ async def get_themes():
 
 @app.get("/api/events/sessions")
 async def list_event_sessions_endpoint(limit: int = 50):
-    return JSONResponse({"sessions": storage.list_event_sessions(limit=limit)})
+    # Union event-log sessions (populated once messages flow) with saved
+    # session files on disk (populated on first /hello from a channel).
+    # This way new bot channels appear before any traffic has been recorded.
+    rows = storage.list_event_sessions(limit=limit)
+    seen = {r["session_id"] for r in rows}
+    if SESSIONS_DIR.is_dir():
+        for p in SESSIONS_DIR.glob("*.json"):
+            sid = p.stem
+            if sid in seen:
+                continue
+            try:
+                mtime_ms = int(p.stat().st_mtime * 1000)
+            except OSError:
+                mtime_ms = 0
+            rows.append({"session_id": sid, "n": 0, "last_ts": mtime_ms, "last_id": 0})
+    rows.sort(key=lambda r: r.get("last_ts") or 0, reverse=True)
+    return JSONResponse({"sessions": rows[:limit]})
 
 
 @app.get("/api/events")
