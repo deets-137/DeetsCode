@@ -105,17 +105,26 @@ async def _get_ws(channel_id: int) -> websockets.ClientConnection:
         # from sessions/<id>.json. On a fresh install nothing is restored; on
         # a server restart or bot reconnect, the prior messages come back.
         await ws.send(json.dumps({"type": "hello", "session_id": f"discord-{channel_id}"}))
+        restored_prompt: str | None = None
         try:
             raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
             ack = json.loads(raw)
-            if ack.get("type") == "hello_ack" and ack.get("restored"):
-                print(f"DEBUG: Session restored for channel {channel_id} ({ack.get('messages', 0)} messages)")
+            if ack.get("type") == "hello_ack":
+                restored_prompt = ack.get("prompt")
+                if ack.get("restored"):
+                    print(f"DEBUG: Session restored for channel {channel_id} "
+                          f"({ack.get('messages', 0)} messages, prompt={restored_prompt})")
         except Exception:
             pass  # ack is best-effort; fall through
         if AUTO_APPLY:
             await ws.send(json.dumps({"type": "set_auto_apply", "enabled": True}))
-        await ws.send(json.dumps({"type": "set_prompt", "prompt": PROMPT_MODE}))
-        _mode_by_channel.setdefault(channel_id, PROMPT_MODE)
+        # Honor the restored prompt if there was one. Otherwise fall back to the
+        # channel's last-known mode, and finally to the module default. This
+        # keeps /mode sticky across server/bot restarts instead of snapping
+        # back to PROMPT_MODE on every reconnect.
+        effective_mode = restored_prompt or _mode_by_channel.get(channel_id) or PROMPT_MODE
+        await ws.send(json.dumps({"type": "set_prompt", "prompt": effective_mode}))
+        _mode_by_channel[channel_id] = effective_mode
         _connections[channel_id] = ws
         print(f"DEBUG: Reconnected to Harness for channel {channel_id}")
 
