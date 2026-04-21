@@ -49,6 +49,22 @@
     <div class="left-panel">
 
       <!-- Directory picker -->
+      <div class="chat-input-panel" style="display:flex;gap:6px;padding:8px 10px;align-items:center;">
+        <select id="spectate-select" style="
+          flex:1; background:var(--textbox-bg); border:none; border-radius:6px;
+          padding:6px 10px; font-family:monospace; font-size:12px; color:#2a2a2a; outline:none;
+        "><option value="">Spectate session…</option></select>
+        <button onclick="startSpectate()" style="
+          background:var(--textbox-bg); border:none; border-radius:6px;
+          padding:6px 10px; font-family:monospace; font-size:12px; cursor:pointer; color:#2a2a2a;
+        ">watch</button>
+        <button onclick="stopSpectate()" style="
+          background:var(--textbox-bg); border:none; border-radius:6px;
+          padding:6px 10px; font-family:monospace; font-size:12px; cursor:pointer; color:#2a2a2a;
+        ">stop</button>
+        <span id="spectate-status" style="font-family:monospace;font-size:11px;color:#888;"></span>
+      </div>
+
       <div class="chat-input-panel" style="display:flex;gap:6px;padding:8px 10px;">
         <input id="dir-input" type="text" placeholder="Project path..." style="
           flex:1; background:var(--textbox-bg); border:none; border-radius:6px;

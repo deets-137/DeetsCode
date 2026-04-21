@@ -397,6 +397,16 @@ async def slash_mode(interaction: discord.Interaction, prompt: str):
             await interaction.followup.send(f"❌ {e}")
 
 
+@bot.tree.command(name="spectate", description="Show the session id to paste into the web UI's spectate picker.")
+async def slash_spectate(interaction: discord.Interaction):
+    cid = interaction.channel_id
+    sid = f"discord-{cid}"
+    await interaction.response.send_message(
+        f"🔭 Session id for this channel: `{sid}`\nOpen the web UI → pick it in the spectate dropdown → watch live.",
+        ephemeral=True,
+    )
+
+
 @bot.tree.command(name="fastmode", description="Toggle appending /no_think to every message (skip reasoning — instant replies).")
 async def slash_fastmode(interaction: discord.Interaction):
     cid = interaction.channel_id

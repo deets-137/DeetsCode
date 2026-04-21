@@ -280,12 +280,62 @@ async function fetchThemes() {
 let ws = null;
 let busy = false;
 let lastMsgType = null;
+let spectating = null;       // session_id currently being spectated, or null
+let spectateLastId = 0;      // highest event id we've rendered (for tail/resume)
+
+async function refreshSpectateSessions() {
+  try {
+    const r = await fetch("/api/events/sessions");
+    const { sessions } = await r.json();
+    const sel = document.getElementById("spectate-select");
+    if (!sel) return;
+    const keep = sel.value;
+    sel.innerHTML = `<option value="">Spectate session…</option>` +
+      sessions.map(s => {
+        const when = new Date(s.last_ts).toLocaleTimeString();
+        return `<option value="${s.session_id}">${s.session_id} · ${s.n} events · ${when}</option>`;
+      }).join("");
+    if (keep) sel.value = keep;
+  } catch (e) { /* ignore */ }
+}
+
+function startSpectate() {
+  const sel = document.getElementById("spectate-select");
+  const sid = sel && sel.value;
+  if (!sid) return;
+  if (!ws || ws.readyState !== 1) return;
+  // Clear the response pane so we get a clean replay.
+  const rt = document.getElementById("response-text");
+  if (rt) rt.innerHTML = "";
+  lastMsgType = null;
+  spectating = sid;
+  spectateLastId = 0;
+  ws.send(JSON.stringify({ type: "spectate", session_id: sid, since_id: 0 }));
+  const tb = document.getElementById("chat-textbox");
+  if (tb) { tb.disabled = true; tb.placeholder = `SPECTATING ${sid} — input disabled`; }
+  const status = document.getElementById("spectate-status");
+  if (status) status.textContent = `watching ${sid}`;
+}
+
+function stopSpectate() {
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "unspectate" }));
+  spectating = null;
+  spectateLastId = 0;
+  const tb = document.getElementById("chat-textbox");
+  if (tb) { tb.disabled = false; tb.placeholder = "Message... (Enter to send, Shift+Enter for newline)"; }
+  const status = document.getElementById("spectate-status");
+  if (status) status.textContent = "";
+}
+
+window.startSpectate = startSpectate;
+window.stopSpectate = stopSpectate;
+window.refreshSpectateSessions = refreshSpectateSessions;
 
 function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   window.__ws = ws;
 
-  ws.onopen = () => { log("connected to harness", "info"); refreshTree(); refreshPacks(); fetchModels(); refreshTaskPanel(); fetchThemes(); refreshPendingPanel(); };
+  ws.onopen = () => { log("connected to harness", "info"); refreshTree(); refreshPacks(); fetchModels(); refreshTaskPanel(); fetchThemes(); refreshPendingPanel(); refreshSpectateSessions(); };
   ws.onclose = () => {
     log("disconnected — retrying in 3s...", "info");
     setTimeout(connect, 3000);
@@ -293,8 +343,22 @@ function connect() {
   ws.onerror = () => ws.close();
 
   ws.onmessage = (event) => {
-    const msg = JSON.parse(event.data);
+    let msg = JSON.parse(event.data);
     if (window.__agentLog) window.__agentLog.push({t: Date.now(), ...msg});
+
+    // Spectate control frames.
+    if (msg.type === "spectate_ack") {
+      spectateLastId = msg.last_id || 0;
+      const status = document.getElementById("spectate-status");
+      if (status && spectating) status.textContent = `watching ${spectating} (live @ ${spectateLastId})`;
+      return;
+    }
+    // Spectated events — unwrap and re-dispatch through the normal switch.
+    if (msg.type === "event" && msg.event) {
+      if (msg.event.id && msg.event.id > spectateLastId) spectateLastId = msg.event.id;
+      msg = msg.event.payload;
+      if (!msg || !msg.type) return;
+    }
 
     switch (msg.type) {
       case "thinking":

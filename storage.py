@@ -104,6 +104,18 @@ def _init_schema(c: sqlite3.Connection) -> None:
             ON stats(channel_name, started_at);
         CREATE INDEX IF NOT EXISTS idx_stats_model
             ON stats(model);
+
+        CREATE TABLE IF NOT EXISTS events (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            session_id   TEXT NOT NULL,
+            ts           INTEGER NOT NULL,
+            type         TEXT NOT NULL,
+            payload_json TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_events_session_id
+            ON events(session_id, id);
+        CREATE INDEX IF NOT EXISTS idx_events_type
+            ON events(type);
     """)
     # Additive migrations for pre-existing DBs. Each statement is safe to
     # re-run; we swallow "duplicate column" errors rather than version-track.
@@ -373,6 +385,57 @@ def stats_summary(
         "max_ms": max(durations) if durations else 0,
         "by_model": by_model,
     }
+
+
+# ─── Events (audit log for the spectator/debugger) ───────────────────────────
+
+def record_event(session_id: str, type_: str, payload: dict) -> int:
+    """Append one event. Returns the assigned id (monotonically increasing)."""
+    cur = _db().execute(
+        "INSERT INTO events (session_id, ts, type, payload_json) VALUES (?, ?, ?, ?)",
+        (session_id, int(time.time() * 1000), type_, json.dumps(payload)),
+    )
+    return cur.lastrowid
+
+
+def query_events(
+    session_id: Optional[str] = None,
+    since_id: int = 0,
+    types: Optional[list[str]] = None,
+    limit: int = 500,
+) -> list[dict]:
+    """Query events. since_id is exclusive — pass the last id you saw to tail."""
+    clauses = ["id > ?"]
+    params: list[Any] = [since_id]
+    if session_id is not None:
+        clauses.append("session_id = ?"); params.append(session_id)
+    if types:
+        placeholders = ",".join("?" for _ in types)
+        clauses.append(f"type IN ({placeholders})")
+        params.extend(types)
+    where = " WHERE " + " AND ".join(clauses)
+    params.append(limit)
+    rows = _db().execute(
+        f"SELECT id, session_id, ts, type, payload_json FROM events{where} "
+        f"ORDER BY id LIMIT ?",
+        params,
+    ).fetchall()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d["payload"] = json.loads(d.pop("payload_json"))
+        out.append(d)
+    return out
+
+
+def list_event_sessions(limit: int = 50) -> list[dict]:
+    """Recent sessions that have events, with counts + last activity."""
+    rows = _db().execute(
+        "SELECT session_id, COUNT(*) AS n, MAX(ts) AS last_ts, MAX(id) AS last_id "
+        "FROM events GROUP BY session_id ORDER BY last_ts DESC LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def set_note_status(note_id: int, status: str) -> bool:

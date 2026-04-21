@@ -116,6 +116,16 @@ from openai import AsyncOpenAI
 
 from config import HOST, MODEL, OLLAMA_BASE_URL, PORT, TEMPERATURE
 from tools import clear_pending_writes, clear_read_files, load_tools, pending_writes
+import storage
+
+# Spectators by session_id. Each spectator is a WebSocket that receives a
+# read-only copy of every frame emitted for that session. Populated by the
+# spectate handshake; drained on disconnect.
+_spectators: dict[str, set[WebSocket]] = {}
+
+# Types of frames we do NOT persist to the event log. Mostly ephemeral UI
+# bookkeeping that would bloat the table without debug value.
+_EVENT_SKIP_TYPES = {"ctx_length", "hello_ack"}
 
 app = FastAPI()
 client = AsyncOpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
@@ -674,6 +684,23 @@ async def get_themes():
         return JSONResponse({"themes": [], "error": str(e)})
 
 
+@app.get("/api/events/sessions")
+async def list_event_sessions_endpoint(limit: int = 50):
+    return JSONResponse({"sessions": storage.list_event_sessions(limit=limit)})
+
+
+@app.get("/api/events")
+async def query_events_endpoint(
+    session_id: str | None = None,
+    since_id: int = 0,
+    type: str | None = None,
+    limit: int = 500,
+):
+    types = [t for t in type.split(",")] if type else None
+    rows = storage.query_events(session_id=session_id, since_id=since_id, types=types, limit=limit)
+    return JSONResponse({"events": rows})
+
+
 @app.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     global current_model, auto_apply_enabled, current_temperature, current_context_length
@@ -683,6 +710,26 @@ async def websocket_endpoint(ws: WebSocket):
     selected_packs: list[str] = []
     selected_prompt: str = "DeetsCode"
     session_id: str | None = None
+    spectating: str | None = None  # session_id this ws is subscribed to (read-only mode)
+
+    # Wrap ws.send_json so every outbound frame is recorded to the event log
+    # and fanned out to any spectators attached to this session. One hook
+    # covers all ~30 emit sites.
+    _original_send_json = ws.send_json
+    async def _traced_send_json(payload: dict):
+        t = payload.get("type") if isinstance(payload, dict) else None
+        if session_id and t and t not in _EVENT_SKIP_TYPES:
+            try:
+                storage.record_event(session_id, t, payload)
+            except Exception:
+                pass
+            for spec in list(_spectators.get(session_id, ())):
+                try:
+                    await spec.send_json({"type": "event", "event": {"type": t, "payload": payload}})
+                except Exception:
+                    _spectators.get(session_id, set()).discard(spec)
+        await _original_send_json(payload)
+    ws.send_json = _traced_send_json
 
     # Emit ctx length on connect so the bar isn't stuck on the HTML fallback.
     try:
@@ -722,6 +769,42 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_json({"type": "hello_ack", "restored": True, "messages": len(messages), "prompt": selected_prompt})
                 else:
                     await ws.send_json({"type": "hello_ack", "restored": False, "messages": 0, "prompt": selected_prompt})
+                continue
+
+            if data["type"] == "spectate":
+                # Read-only attach to another session's frames. Replays event
+                # history, then subscribes for live emissions via _spectators.
+                target = data.get("session_id")
+                if not isinstance(target, str) or not target:
+                    await _original_send_json({"type": "error", "content": "spectate: session_id required"})
+                    continue
+                since = int(data.get("since_id") or 0)
+                # Detach from a previous target if re-subscribing.
+                if spectating and spectating in _spectators:
+                    _spectators[spectating].discard(ws)
+                spectating = target
+                _spectators.setdefault(spectating, set()).add(ws)
+                # Replay history in batches so huge sessions don't block the loop.
+                last_id = since
+                while True:
+                    batch = storage.query_events(session_id=target, since_id=last_id, limit=500)
+                    if not batch:
+                        break
+                    for ev in batch:
+                        await _original_send_json({"type": "event", "event": {
+                            "id": ev["id"], "ts": ev["ts"], "type": ev["type"], "payload": ev["payload"],
+                        }})
+                        last_id = ev["id"]
+                    if len(batch) < 500:
+                        break
+                await _original_send_json({"type": "spectate_ack", "session_id": target, "last_id": last_id})
+                continue
+
+            if data["type"] == "unspectate":
+                if spectating and spectating in _spectators:
+                    _spectators[spectating].discard(ws)
+                spectating = None
+                await _original_send_json({"type": "spectate_ack", "session_id": None, "last_id": 0})
                 continue
 
             if data["type"] == "set_dir":
@@ -954,6 +1037,9 @@ async def websocket_endpoint(ws: WebSocket):
             pass
         clear_pending_writes()
         clear_read_files()
+    finally:
+        if spectating and spectating in _spectators:
+            _spectators[spectating].discard(ws)
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
