@@ -49,6 +49,22 @@
     <div class="left-panel">
 
       <!-- Directory picker -->
+      <div class="chat-input-panel" style="display:flex;gap:6px;padding:8px 10px;align-items:center;">
+        <select id="spectate-select" style="
+          flex:1; background:var(--textbox-bg); border:none; border-radius:6px;
+          padding:6px 10px; font-family:monospace; font-size:12px; color:#2a2a2a; outline:none;
+        "><option value="">Spectate session…</option></select>
+        <button onclick="startSpectate()" style="
+          background:var(--textbox-bg); border:none; border-radius:6px;
+          padding:6px 10px; font-family:monospace; font-size:12px; cursor:pointer; color:#2a2a2a;
+        ">watch</button>
+        <button onclick="stopSpectate()" style="
+          background:var(--textbox-bg); border:none; border-radius:6px;
+          padding:6px 10px; font-family:monospace; font-size:12px; cursor:pointer; color:#2a2a2a;
+        ">stop</button>
+        <span id="spectate-status" style="font-family:monospace;font-size:11px;color:#888;"></span>
+      </div>
+
       <div class="chat-input-panel" style="display:flex;gap:6px;padding:8px 10px;">
         <input id="dir-input" type="text" placeholder="Project path..." style="
           flex:1; background:var(--textbox-bg); border:none; border-radius:6px;
@@ -103,9 +119,24 @@
         <div class="temp-slider-panel">
           <div class="temp-label">temp</div>
           <div class="temp-track">
-            <input type="range" id="temp-slider" class="temp-range" min="0" max="100" value="30" orient="vertical">
+            <input type="range" id="temp-slider" class="temp-range" min="0" max="100" value="65" orient="vertical">
           </div>
-          <div class="temp-value" id="temp-value">0.3</div>
+          <div class="temp-value" id="temp-value">0.65</div>
+        </div>
+      </div>
+
+      <!-- Pending writes panel -->
+      <div class="tool-panel pending-panel" id="pending-panel">
+        <div class="file-panel-header">
+          <span>pending writes <span class="pending-count" id="pending-count">0</span></span>
+          <div class="pending-pills">
+            <button class="pending-pill apply" onclick="applyWrites()" title="Write queued changes to disk">approve</button>
+            <button class="pending-pill reject" onclick="rejectWrites()" title="Drop queued changes (via websocket)">reject</button>
+            <button class="pending-pill flush" onclick="flushPending()" title="Force-clear the queue (HTTP DELETE /pending)">flush</button>
+          </div>
+        </div>
+        <div class="pending-panel-inner" id="pending-panel-inner">
+          <span class="pending-empty">queue is empty</span>
         </div>
       </div>
     </div>
@@ -165,6 +196,8 @@
 
   </div>
 
+  <script src="https://cdn.jsdelivr.net/npm/marked@14.1.3/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

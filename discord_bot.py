@@ -24,6 +24,7 @@ import os
 import platform
 import subprocess
 import sys
+import time
 from datetime import datetime
 
 import discord
@@ -31,6 +32,8 @@ from discord import app_commands
 from discord.ext import commands
 import websockets
 from dotenv import load_dotenv
+
+import storage
 
 load_dotenv()  # reads .env file in the same directory
 
@@ -45,7 +48,7 @@ GAME_CHANNEL_IDS: set[int] = {1344481118287695904,932359665122177104}  # e.g. {1
 # If True, file writes queued by the AI are applied automatically without asking.
 AUTO_APPLY = True
 
-# Server prompt mode to use for this bot ("default", "dnd", etc — see prompts/)
+# Server prompt mode to use for this bot ("DeetsCode", "dnd", "chess", etc — see prompts/)
 PROMPT_MODE = "dnd"
 
 HARNESS_WS = "ws://localhost:8000/ws"
@@ -66,6 +69,8 @@ _locks: dict[int, asyncio.Lock] = {}
 # Channels in fastmode get "/no_think" appended to every player message so Qwen3
 # skips the reasoning channel. Good for combat rounds; turn off for RP/rules.
 _fastmode: dict[int, bool] = {}
+# Per-channel active prompt mode, initialized to PROMPT_MODE and updated on /mode.
+_mode_by_channel: dict[int, str] = {}
 
 # Game saves live under PROJECT_ROOT/saves/<name>.json. The harness runs out of
 # the project dir; the bot just passes the relative path.
@@ -110,6 +115,7 @@ async def _get_ws(channel_id: int) -> websockets.ClientConnection:
         if AUTO_APPLY:
             await ws.send(json.dumps({"type": "set_auto_apply", "enabled": True}))
         await ws.send(json.dumps({"type": "set_prompt", "prompt": PROMPT_MODE}))
+        _mode_by_channel.setdefault(channel_id, PROMPT_MODE)
         _connections[channel_id] = ws
         print(f"DEBUG: Reconnected to Harness for channel {channel_id}")
 
@@ -153,11 +159,23 @@ def _split(text: str, limit: int = 1990) -> list[str]:
 
 # ─── Events ──────────────────────────────────────────────────────────────────
 
+_cogs_loaded = False
+
+
 @bot.event
 async def on_ready():
+    global _cogs_loaded
     print(f"Logged in as {bot.user}  (id: {bot.user.id})")
     print(f"Harness: {HARNESS_WS}")
     print(f"Game channels: {GAME_CHANNEL_IDS or '(none — use @mention)'}")
+    if not _cogs_loaded:
+        for ext in ("bot_cogs.notes", "bot_cogs.stats"):
+            try:
+                await bot.load_extension(ext)
+                print(f"Loaded cog: {ext}")
+            except Exception as e:
+                print(f"Failed to load {ext}: {e}")
+        _cogs_loaded = True
     try:
         synced = await bot.tree.sync()
         print(f"Synced {len(synced)} slash command(s).")
@@ -199,6 +217,13 @@ async def on_message(message: discord.Message):
     }
     final_prompt = json.dumps(user_payload)
 
+    channel_name = getattr(message.channel, "name", None) or str(cid)
+    user_name = message.author.display_name
+    mode = _mode_by_channel.get(cid, PROMPT_MODE)
+    model_used: str | None = None
+    stat_status = "completed"
+    started_at = int(time.time())
+    t0 = time.perf_counter()
     try:
         async with _get_lock(cid):
             async with message.channel.typing():
@@ -217,12 +242,28 @@ async def on_message(message: discord.Message):
                     elif t == "error":
                         chunks.append(f"\n⚠️ {msg.get('content', 'Unknown error')}")
                     elif t == "done":
+                        model_used = msg.get("model") or model_used
                         break
+                    # If the server starts echoing the model name on any frame,
+                    # pick it up; harmless no-op until then.
+                    if not model_used and "model" in msg:
+                        model_used = msg.get("model")
                 reply = "".join(chunks).strip()
     except Exception as e:
         _connections.pop(cid, None)  # drop bad connection; next message reconnects
+        stat_status = "error"
+        storage.record_stat(
+            channel_name=channel_name, user_name=user_name,
+            duration_ms=int((time.perf_counter() - t0) * 1000),
+            status=stat_status, mode=mode, model=model_used, started_at=started_at,
+        )
         await message.channel.send(f"❌ Harness error: `{e}`")
         return
+    storage.record_stat(
+        channel_name=channel_name, user_name=user_name,
+        duration_ms=int((time.perf_counter() - t0) * 1000),
+        status=stat_status, mode=mode, model=model_used, started_at=started_at,
+    )
 
     for chunk in _split(reply or "(no response)"):
         await message.channel.send(chunk)
@@ -342,7 +383,7 @@ async def slash_setdir(interaction: discord.Interaction, path: str):
             await interaction.followup.send(f"❌ {e}")
 
 
-@bot.tree.command(name="mode", description="Switch prompt mode (default, dnd, etc).")
+@bot.tree.command(name="mode", description="Switch prompt mode (DeetsCode, dnd, chess, etc).")
 async def slash_mode(interaction: discord.Interaction, prompt: str):
     cid = interaction.channel_id
     await interaction.response.defer(thinking=False)
@@ -350,9 +391,20 @@ async def slash_mode(interaction: discord.Interaction, prompt: str):
         try:
             ws = await _get_ws(cid)
             await ws.send(json.dumps({"type": "set_prompt", "prompt": prompt}))
+            _mode_by_channel[cid] = prompt
             await interaction.followup.send(f"🎭 Prompt mode → `{prompt}` (takes effect on next turn).")
         except Exception as e:
             await interaction.followup.send(f"❌ {e}")
+
+
+@bot.tree.command(name="spectate", description="Show the session id to paste into the web UI's spectate picker.")
+async def slash_spectate(interaction: discord.Interaction):
+    cid = interaction.channel_id
+    sid = f"discord-{cid}"
+    await interaction.response.send_message(
+        f"🔭 Session id for this channel: `{sid}`\nOpen the web UI → pick it in the spectate dropdown → watch live.",
+        ephemeral=True,
+    )
 
 
 @bot.tree.command(name="fastmode", description="Toggle appending /no_think to every message (skip reasoning — instant replies).")

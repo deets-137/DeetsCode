@@ -18,6 +18,10 @@ config.py
 # Runtime state
 task.md
 friction.md
+storage.db
+storage.db-journal
+storage.db-wal
+storage.db-shm
 
 # Knowledge packs (user-local content)
 packs/

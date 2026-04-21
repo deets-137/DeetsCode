@@ -1,4 +1,3 @@
-- [x] read theme.css
-- [x] design the palette
-- [x] append theme 6 block to theme.css
-- [x] add theme picker option to index.html (not needed — themes are dynamically parsed from theme.css by the server)
+- [x] Add marked.js CDN to index.html
+- [x] Update app.js to use marked.parse() for response text
+- [/] Add markdown element CSS to style.css
