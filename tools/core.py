@@ -112,6 +112,31 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "register_path",
+            "description": (
+                "Register (or update) a path constant in paths.py — the single source of "
+                "truth for filesystem paths across the harness. Always use this instead "
+                "of hardcoding `Path(__file__).parent / ...` in any other module. "
+                "Kinds: 'dir' and 'file' resolve against HARNESS_ROOT and are exported "
+                "as pathlib.Path; 'str' is a bare string constant (use for per-project "
+                "filenames/subdirs that get resolved against a project root at runtime). "
+                "If the constant already exists, its value is replaced in place."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name":  {"type": "string", "description": "SCREAMING_SNAKE constant name (e.g. REPORTS_DIR, CACHE_FILE)."},
+                    "value": {"type": "string", "description": "For dir/file: path relative to HARNESS_ROOT (no leading slash). For str: the literal value."},
+                    "kind":  {"type": "string", "enum": ["dir", "file", "str"], "description": "'dir' → Path, directory. 'file' → Path, file. 'str' → bare string (per-project relative path/name)."},
+                    "description": {"type": "string", "description": "Optional one-line comment placed above the constant."},
+                },
+                "required": ["name", "value", "kind"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "update_task",
             "description": "Create or update the task checklist (task.md). Use markdown checkboxes: - [ ] todo, - [/] in-progress, - [x] done. If content is empty, returns the current checklist without modifying it.",
             "parameters": {
@@ -128,11 +153,11 @@ TOOL_DEFINITIONS = [
 
 SKIP_DIRS_HIDDEN = {"__pycache__", "node_modules", ".git", ".venv", "venv", "dist", "build"}
 
-PACKS_GLOBAL_DIR = Path(__file__).parent.parent / "packs"
+from paths import PACKS_DIR as PACKS_GLOBAL_DIR, PROJECT_MANUAL_SUBDIR
 
 
 def _pack_lookup_dirs(project_dir: Path) -> list[tuple[str, Path]]:
-    return [("project", project_dir / "manual"), ("global", PACKS_GLOBAL_DIR)]
+    return [("project", project_dir / PROJECT_MANUAL_SUBDIR), ("global", PACKS_GLOBAL_DIR)]
 
 
 def _find_pack(name: str, project_dir: Path) -> Optional[Path]:
@@ -157,14 +182,68 @@ def _pack_sections(text: str) -> list[tuple[str, str]]:
     return [(t, "\n".join(ls).strip()) for t, ls in sections if "\n".join(ls).strip()]
 
 
+import re as _re
+
+_PATHS_FILE = Path(__file__).parent.parent / "paths.py"
+_CONST_LINE_RE = _re.compile(r"^([A-Z][A-Z0-9_]*)\s*[:=]")
+
+
+def _register_path(args: dict) -> str:
+    name = (args.get("name") or "").strip()
+    value = (args.get("value") or "").strip()
+    kind = (args.get("kind") or "").strip()
+    desc = (args.get("description") or "").strip()
+
+    if not name or not name.isidentifier() or not name.isupper():
+        return "Error: 'name' must be a SCREAMING_SNAKE identifier"
+    if not value:
+        return "Error: 'value' is required"
+    if kind not in ("dir", "file", "str"):
+        return "Error: 'kind' must be one of 'dir', 'file', 'str'"
+    if not _PATHS_FILE.is_file():
+        return f"Error: paths.py not found at {_PATHS_FILE}"
+
+    # Escape quotes in value for safe embedding in a double-quoted string literal.
+    safe_value = value.replace("\\", "\\\\").replace('"', '\\"')
+    if kind == "str":
+        new_line = f'{name} = "{safe_value}"'
+    else:
+        new_line = f'{name}: Path = HARNESS_ROOT / "{safe_value}"'
+
+    block = (f"# {desc}\n{new_line}" if desc else new_line)
+
+    original = _PATHS_FILE.read_text(encoding="utf-8")
+    lines = original.splitlines()
+
+    # Replace an existing constant line (plus its immediately-preceding comment, if any).
+    replaced = False
+    for i, line in enumerate(lines):
+        m = _CONST_LINE_RE.match(line)
+        if m and m.group(1) == name:
+            start = i
+            # Absorb one preceding comment line if it belongs to this constant
+            # (adjacent, starts with '#', and is not blank).
+            if start > 0 and lines[start - 1].startswith("#"):
+                start -= 1
+            new_lines = lines[:start] + block.split("\n") + lines[i + 1:]
+            _PATHS_FILE.write_text("\n".join(new_lines) + ("\n" if original.endswith("\n") else ""), encoding="utf-8")
+            return f"Updated `{name}` in paths.py → {new_line}"
+
+    # Append to end.
+    suffix = "" if original.endswith("\n") else "\n"
+    new_text = original + suffix + block + "\n"
+    _PATHS_FILE.write_text(new_text, encoding="utf-8")
+    return f"Added `{name}` to paths.py → {new_line}"
+
+
 def execute_tool(
     name: str,
     args: dict,
     session_id: str,
     project_dir: Path,
-    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
 ) -> str:
-    """Unified signature matching game packs. Core tools ignore session_id/user_id."""
+    """Unified signature matching game packs. Core tools ignore session_id/user_name."""
     try:
         if name == "read_file":
             if "path" not in args:
@@ -296,8 +375,12 @@ def execute_tool(
             avail = ", ".join(t for t, _ in _pack_sections(text) if t != "_preamble") or "(none)"
             return f"Error: section '{section}' not found in '{pname}'. Available: {avail}"
 
+        if name == "register_path":
+            return _register_path(args)
+
         if name == "update_task":
-            task_path = project_dir / "task.md"
+            from paths import TASK_FILENAME
+            task_path = project_dir / TASK_FILENAME
             content = args.get("content", "").strip()
             if content:
                 task_path.write_text(content, encoding="utf-8")

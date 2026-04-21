@@ -14,16 +14,14 @@ State shape (stored in storage.games.state_json):
     {
       "v": 1,
       "fen": "<current position>",
-      "white_id": "<discord user id or 'computer'>",
-      "black_id": "<discord user id or 'computer'>",
-      "white_name": "<display>",
-      "black_name": "<display>",
+      "white": "<display name or 'computer'>",
+      "black": "<display name or 'computer'>",
       "result": null          # or "1-0", "0-1", "1/2-1/2"
     }
 
 Per-move rows in storage.moves carry {san, uci, captured, fen_after} as move_json.
-Turn enforcement: player_id passed via execute_tool must match whose turn it is,
-unless the current side's id is "computer" (any caller may move as the engine).
+Turn enforcement: user_name passed via execute_tool must match whose turn it is,
+unless the current side is "computer" (any caller may move as the engine).
 """
 
 import io
@@ -46,20 +44,21 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "chess_new",
             "description": (
-                "Start a new chess game in the current channel. Both players must be "
-                "specified. Use the literal string 'computer' for an AI-controlled "
-                "side. Returns a short game_id — quote this in future calls and in "
-                "your reply so players can reference the right game."
+                "Start a new chess game in the current channel. "
+                "`white` and `black` are display names, taken verbatim from the "
+                "`speaker` field in the current request envelope — or the literal "
+                "string 'computer' for the AI side. "
+                "After creating the game, DO NOT make the first move unless that side "
+                "is 'computer'. If the human plays White, wait for them to send a move. "
+                "Returns a short game_id — quote it in replies so players can reference it."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "white_id":   {"type": "string", "description": "Discord user ID for White, or 'computer'"},
-                    "black_id":   {"type": "string", "description": "Discord user ID for Black, or 'computer'"},
-                    "white_name": {"type": "string", "description": "Display name for White"},
-                    "black_name": {"type": "string", "description": "Display name for Black"},
+                    "white": {"type": "string", "description": "Display name of the White player, or 'computer'."},
+                    "black": {"type": "string", "description": "Display name of the Black player, or 'computer'."},
                 },
-                "required": ["white_id", "black_id", "white_name", "black_name"],
+                "required": ["white", "black"],
             },
         },
     },
@@ -69,9 +68,13 @@ TOOL_DEFINITIONS = [
             "name": "chess_move",
             "description": (
                 "Make a move in an active game. Accepts SAN (e.g. 'Nf3', 'O-O', 'exd5') "
-                "or UCI (e.g. 'g1f3'). Rejects illegal moves, moves when it's not your "
-                "turn, and moves after the game has ended. Optionally annotate the move "
-                "with a PGN symbol like '!', '?!', '!!', '?', '??'."
+                "or UCI (e.g. 'g1f3'). The mover is taken automatically from the current "
+                "request envelope's `speaker` — you do NOT pass it. The tool rejects the "
+                "move if that speaker is not the side whose turn it is, if the move is "
+                "illegal, or if the game has ended. If the active side is 'computer', YOU "
+                "call this tool on its behalf. Optionally annotate with a PGN symbol like "
+                "'!', '?!', '!!', '?', '??'. Auto-renders the board — do NOT follow up "
+                "with chess_board."
             ),
             "parameters": {
                 "type": "object",
@@ -88,7 +91,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "chess_board",
-            "description": "Show the current board for a game: ASCII diagram, FEN, whose turn, and status.",
+            "description": (
+                "Re-render the current board (ASCII + FEN + whose turn). "
+                "Only call this when the user explicitly asks to see the board again. "
+                "chess_move and chess_new already render — do NOT call this after them."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -121,7 +128,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "chess_resign",
-            "description": "Resign the game on behalf of the caller (player_id inferred from context). Ends the game; opposite side wins.",
+            "description": (
+                "Resign the game on behalf of the current speaker. Their name is taken "
+                "automatically from the request envelope — do NOT pass it. Ends the game; "
+                "the opposite side wins."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -149,7 +160,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "chess_history",
-            "description": "Return the game as PGN — full move list with annotations and result.",
+            "description": "Return the full move list as PGN (standard chess notation) including annotations and the game result.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -187,19 +198,11 @@ def _load_board(game_id: str) -> tuple[Optional[dict], Optional[chess.Board]]:
     return g, board
 
 
-def _current_turn_id(state: dict, board: chess.Board) -> str:
-    return state["white_id"] if board.turn == chess.WHITE else state["black_id"]
-
-
 def _current_turn_name(state: dict, board: chess.Board) -> str:
-    return state["white_name"] if board.turn == chess.WHITE else state["black_name"]
+    return state["white"] if board.turn == chess.WHITE else state["black"]
 
 
 def _board_image_url(board: chess.Board) -> str:
-    """Niklas Fiekas's web-boardimage renders the FEN to a PNG on demand.
-    We only pass the position field (first token of FEN) — that's all the
-    service needs, and it keeps the URL short. Orient for the side to move
-    so whoever's up sees their pieces at the bottom."""
     fen_position = board.fen().split(" ")[0]
     orient = "white" if board.turn == chess.WHITE else "black"
     return f"{BOARD_IMAGE_BASE}?fen={quote(fen_position)}&orientation={orient}"
@@ -216,9 +219,6 @@ def _render(board: chess.Board, state: dict, extra: str = "") -> str:
     )
     if extra:
         header += f"\n{extra}"
-    # Unicode pieces render well in Discord; the image URL auto-embeds as a
-    # real board diagram under the message. Belt and suspenders — if the URL
-    # fails, the text board is still readable.
     ascii_board = board.unicode(invert_color=True, borders=True)
     return f"{header}\n\n{ascii_board}\n\n{_board_image_url(board)}"
 
@@ -242,7 +242,6 @@ def _status_str(board: chess.Board, state: dict) -> str:
 
 
 def _terminal_result(board: chess.Board) -> Optional[str]:
-    """Return '1-0'/'0-1'/'1/2-1/2' if the position is terminal, else None."""
     if board.is_checkmate():
         return "0-1" if board.turn == chess.WHITE else "1-0"
     if board.is_stalemate() or board.is_insufficient_material():
@@ -251,7 +250,6 @@ def _terminal_result(board: chess.Board) -> Optional[str]:
 
 
 def _parse_move(board: chess.Board, move_str: str) -> Optional[chess.Move]:
-    """Accept SAN or UCI. Return chess.Move or None if unparseable/illegal."""
     move_str = move_str.strip()
     try:
         return board.parse_san(move_str)
@@ -269,43 +267,37 @@ def _parse_move(board: chess.Board, move_str: str) -> Optional[chess.Move]:
 # ─── Tools ───────────────────────────────────────────────────────────────────
 
 def _tool_new(args: dict, session_id: str) -> str:
-    white_id   = args["white_id"].strip()
-    black_id   = args["black_id"].strip()
-    white_name = args["white_name"].strip()
-    black_name = args["black_name"].strip()
-    if not (white_id and black_id and white_name and black_name):
-        return "Error: white_id, black_id, white_name, black_name are all required"
+    white = args.get("white", "").strip()
+    black = args.get("black", "").strip()
+    if not (white and black):
+        return "Error: white and black are both required"
 
     board = chess.Board()
     state = {
         "v": STATE_VERSION,
         "fen": board.fen(),
-        "white_id": white_id,
-        "black_id": black_id,
-        "white_name": white_name,
-        "black_name": black_name,
+        "white": white,
+        "black": black,
         "result": None,
     }
-    # channel_id in storage = session_id (the WS session key is the discord channel)
-    creator = white_id if white_id != COMPUTER else black_id
+    creator = white if white != COMPUTER else black
     gid = storage.create_game(
         "chess", session_id, state,
         created_by=None if creator == COMPUTER else creator,
     )
-    # Cache player display names for reporting. Skip the COMPUTER sentinel.
-    if white_id != COMPUTER:
-        storage.upsert_player(white_id, white_name)
-    if black_id != COMPUTER:
-        storage.upsert_player(black_id, black_name)
+    if white != COMPUTER:
+        storage.upsert_player(white, white)
+    if black != COMPUTER:
+        storage.upsert_player(black, black)
 
     return (
-        f"Game `{gid}` started. {white_name} (White) vs {black_name} (Black).\n"
+        f"Game `{gid}` started. {white} (White) vs {black} (Black).\n"
         f"{_render(board, state)}\n"
         f"Reference this game by its id `{gid}` in future calls."
     )
 
 
-def _tool_move(args: dict, user_id: Optional[str]) -> str:
+def _tool_move(args: dict, user_name: Optional[str]) -> str:
     gid = args.get("game_id", "").strip()
     move_str = args.get("move", "").strip()
     annotation = (args.get("annotation") or "").strip() or None
@@ -319,15 +311,14 @@ def _tool_move(args: dict, user_id: Optional[str]) -> str:
     if state.get("result") is not None:
         return f"Error: game `{gid}` is already over ({state['result']})"
 
-    # Turn enforcement. COMPUTER is a wildcard — any caller may move for it.
-    current_id = _current_turn_id(state, board)
-    if current_id != COMPUTER:
-        if user_id is None:
+    current = _current_turn_name(state, board)
+    if current != COMPUTER:
+        if user_name is None:
             return "Error: caller identity unknown; cannot verify turn"
-        if str(user_id) != current_id:
+        if user_name != current:
             return (
-                f"Error: not your turn — it's {_current_turn_name(state, board)}'s move. "
-                f"(You are {user_id}, expected {current_id}.)"
+                f"Error: not your turn — it's {current}'s move. "
+                f"(You are {user_name}.)"
             )
 
     move = _parse_move(board, move_str)
@@ -337,7 +328,6 @@ def _tool_move(args: dict, user_id: Optional[str]) -> str:
             f"Call chess_legal_moves for a list."
         )
 
-    # Capture info (before pushing so target square still has the captured piece)
     captured_piece = None
     if board.is_capture(move):
         if board.is_en_passant(move):
@@ -358,7 +348,7 @@ def _tool_move(args: dict, user_id: Optional[str]) -> str:
     storage.save_state(gid, state)
     storage.record_move(
         gid,
-        user_id if current_id != COMPUTER else None,
+        user_name if current != COMPUTER else None,
         {"san": san, "uci": uci, "captured": captured_piece, "fen_after": board.fen()},
         annotation=annotation,
     )
@@ -402,7 +392,7 @@ def _tool_legal_moves(args: dict) -> str:
     return f"{len(san_list)} legal move(s): " + ", ".join(san_list)
 
 
-def _tool_resign(args: dict, user_id: Optional[str]) -> str:
+def _tool_resign(args: dict, user_name: Optional[str]) -> str:
     gid = args.get("game_id", "").strip()
     g, board = _load_board(gid)
     if g is None:
@@ -410,21 +400,20 @@ def _tool_resign(args: dict, user_id: Optional[str]) -> str:
     state = g["state"]
     if state.get("result") is not None:
         return f"Error: game `{gid}` is already over ({state['result']})"
-    if user_id is None:
+    if user_name is None:
         return "Error: caller identity unknown; cannot attribute resignation"
 
-    uid = str(user_id)
-    if uid == state["white_id"]:
-        result, winner = "0-1", state["black_name"]
-    elif uid == state["black_id"]:
-        result, winner = "1-0", state["white_name"]
+    if user_name == state["white"]:
+        result, winner = "0-1", state["black"]
+    elif user_name == state["black"]:
+        result, winner = "1-0", state["white"]
     else:
-        return f"Error: {uid} is not a player in this game"
+        return f"Error: {user_name} is not a player in this game"
 
     state["result"] = result
     storage.save_state(gid, state)
     storage.end_game(gid, status="ended")
-    storage.record_move(gid, uid, {"resign": True}, annotation=None)
+    storage.record_move(gid, user_name, {"resign": True}, annotation=None)
     return f"Resignation recorded. {winner} wins. Result: {result}."
 
 
@@ -436,7 +425,6 @@ def _tool_undo(args: dict) -> str:
     state = g["state"]
 
     history = storage.game_history(gid)
-    # Pop all trailing resign/non-move rows too — shouldn't happen mid-game but be safe.
     while history and history[-1]["move"].get("resign"):
         _pop_last_move(gid, history[-1]["seq"])
         history.pop()
@@ -446,7 +434,6 @@ def _tool_undo(args: dict) -> str:
     _pop_last_move(gid, history[-1]["seq"])
     history.pop()
 
-    # Rebuild board from remaining moves. Cheaper than tracking FEN stacks.
     board = chess.Board()
     for row in history:
         san_or_uci = row["move"].get("san") or row["move"].get("uci")
@@ -456,9 +443,8 @@ def _tool_undo(args: dict) -> str:
         board.push(m)
 
     state["fen"] = board.fen()
-    state["result"] = None  # undoing a mating move reopens the game
+    state["result"] = None
     storage.save_state(gid, state)
-    # If the DB row was marked ended, flip back to active.
     storage._db().execute(
         "UPDATE games SET status='active', ended_at=NULL WHERE game_id=?", (gid,)
     )
@@ -479,10 +465,9 @@ def _tool_history(args: dict) -> str:
     state = g["state"]
     history = storage.game_history(gid)
 
-    # Rebuild a python-chess Game object so we can export clean PGN.
     game = chess.pgn.Game()
-    game.headers["White"] = state["white_name"]
-    game.headers["Black"] = state["black_name"]
+    game.headers["White"] = state["white"]
+    game.headers["Black"] = state["black"]
     game.headers["Result"] = state.get("result") or "*"
     node = game
     board = chess.Board()
@@ -515,7 +500,7 @@ def _tool_list(args: dict, session_id: str) -> str:
         g = storage.load_game(r["game_id"])
         s = g["state"] if g else {}
         lines.append(
-            f"  `{r['game_id']}`  {s.get('white_name', '?')} vs {s.get('black_name', '?')}  [{r['status']}]"
+            f"  `{r['game_id']}`  {s.get('white', '?')} vs {s.get('black', '?')}  [{r['status']}]"
         )
     return "\n".join(lines)
 
@@ -527,19 +512,19 @@ def execute_tool(
     args: dict,
     session_id: str,
     project_dir: Path,
-    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
 ) -> str:
     try:
         if name == "chess_new":
             return _tool_new(args, session_id)
         if name == "chess_move":
-            return _tool_move(args, user_id)
+            return _tool_move(args, user_name)
         if name == "chess_board":
             return _tool_board(args)
         if name == "chess_legal_moves":
             return _tool_legal_moves(args)
         if name == "chess_resign":
-            return _tool_resign(args, user_id)
+            return _tool_resign(args, user_name)
         if name == "chess_undo":
             return _tool_undo(args)
         if name == "chess_history":

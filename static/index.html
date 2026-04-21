@@ -49,22 +49,6 @@
     <div class="left-panel">
 
       <!-- Directory picker -->
-      <div class="chat-input-panel" style="display:flex;gap:6px;padding:8px 10px;align-items:center;">
-        <select id="spectate-select" style="
-          flex:1; background:var(--textbox-bg); border:none; border-radius:6px;
-          padding:6px 10px; font-family:monospace; font-size:12px; color:#2a2a2a; outline:none;
-        "><option value="">Spectate session…</option></select>
-        <button onclick="startSpectate()" style="
-          background:var(--textbox-bg); border:none; border-radius:6px;
-          padding:6px 10px; font-family:monospace; font-size:12px; cursor:pointer; color:#2a2a2a;
-        ">watch</button>
-        <button onclick="stopSpectate()" style="
-          background:var(--textbox-bg); border:none; border-radius:6px;
-          padding:6px 10px; font-family:monospace; font-size:12px; cursor:pointer; color:#2a2a2a;
-        ">stop</button>
-        <span id="spectate-status" style="font-family:monospace;font-size:11px;color:#888;"></span>
-      </div>
-
       <div class="chat-input-panel" style="display:flex;gap:6px;padding:8px 10px;">
         <input id="dir-input" type="text" placeholder="Project path..." style="
           flex:1; background:var(--textbox-bg); border:none; border-radius:6px;
@@ -161,35 +145,66 @@
       </div>
     </div>
 
-    <!-- Right column: files + packs stacked -->
+    <!-- Right column: files + packs + task (grid-aligned) + dev (below) -->
     <div class="right-column">
-      <div class="file-panel">
-        <div class="file-panel-header">
-          <span>files</span>
-          <button onclick="refreshTree()">↺</button>
+      <div class="right-grid">
+        <div class="file-panel">
+          <div class="file-panel-header">
+            <span>files</span>
+            <button onclick="refreshTree()">↺</button>
+          </div>
+          <div class="file-panel-inner" id="file-tree"></div>
         </div>
-        <div class="file-panel-inner" id="file-tree"></div>
-      </div>
 
-      <div class="file-panel packs-panel-side">
-        <div class="file-panel-header">
-          <span>knowledge packs</span>
-          <button onclick="refreshPacks()" title="Rescan packs">↺</button>
+        <div class="file-panel packs-panel-side">
+          <div class="file-panel-header">
+            <span>knowledge packs</span>
+            <button onclick="refreshPacks()" title="Rescan packs">↺</button>
+          </div>
+          <div class="file-panel-inner packs-inner">
+            <div class="packs-chips" id="packs-chips">
+              <span class="packs-empty">no packs found</span>
+            </div>
+          </div>
         </div>
-        <div class="file-panel-inner packs-inner">
-          <div class="packs-chips" id="packs-chips">
-            <span class="packs-empty">no packs found</span>
+
+        <div class="file-panel task-panel" id="task-panel">
+          <div class="file-panel-header">
+            <span>task list</span>
+            <button onclick="refreshTaskPanel()" title="Refresh task list">↺</button>
+          </div>
+          <div class="file-panel-inner task-inner" id="task-inner">
+            <span class="task-empty">no task.md found</span>
           </div>
         </div>
       </div>
 
-      <div class="file-panel task-panel" id="task-panel">
+      <div class="file-panel dev-panel" id="dev-panel">
         <div class="file-panel-header">
-          <span>task list</span>
-          <button onclick="refreshTaskPanel()" title="Refresh task list">↺</button>
+          <span>dev · spectate</span>
+          <button onclick="refreshSpectateSessions()" title="Refresh sessions">↺</button>
         </div>
-        <div class="file-panel-inner task-inner" id="task-inner">
-          <span class="task-empty">no task.md found</span>
+        <div class="file-panel-inner dev-panel-inner">
+          <div class="dev-row">
+            <select id="spectate-select" class="dev-select">
+              <option value="">Pick a session…</option>
+            </select>
+          </div>
+          <div class="dev-row dev-row-btns">
+            <button class="dev-btn" onclick="startSpectate()">watch</button>
+            <button class="dev-btn" onclick="stopSpectate()">stop</button>
+            <span id="spectate-status" class="dev-status">idle</span>
+          </div>
+          <div class="dev-row dev-filters" id="dev-filters">
+            <span class="dev-label">show:</span>
+            <label class="dev-chip"><input type="checkbox" data-evt="thinking" checked>thinking</label>
+            <label class="dev-chip"><input type="checkbox" data-evt="tool_call" checked>tool_call</label>
+            <label class="dev-chip"><input type="checkbox" data-evt="tool_result" checked>tool_result</label>
+            <label class="dev-chip"><input type="checkbox" data-evt="text" checked>text</label>
+            <label class="dev-chip"><input type="checkbox" data-evt="error" checked>error</label>
+            <label class="dev-chip"><input type="checkbox" data-evt="info">info</label>
+          </div>
+          <div class="dev-row dev-counts" id="dev-counts">no events yet</div>
         </div>
       </div>
     </div>

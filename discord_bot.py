@@ -34,6 +34,7 @@ import websockets
 from dotenv import load_dotenv
 
 import storage
+import bot_media
 
 load_dotenv()  # reads .env file in the same directory
 
@@ -74,9 +75,7 @@ _mode_by_channel: dict[int, str] = {}
 
 # Game saves live under PROJECT_ROOT/saves/<name>.json. The harness runs out of
 # the project dir; the bot just passes the relative path.
-import pathlib as _pathlib
-_BOT_ROOT = _pathlib.Path(__file__).parent
-_SAVES_DIR = _BOT_ROOT / "saves"
+from paths import HARNESS_ROOT as _BOT_ROOT, SAVES_DIR as _SAVES_DIR
 
 # ─── WS helpers ──────────────────────────────────────────────────────────────
 
@@ -105,17 +104,26 @@ async def _get_ws(channel_id: int) -> websockets.ClientConnection:
         # from sessions/<id>.json. On a fresh install nothing is restored; on
         # a server restart or bot reconnect, the prior messages come back.
         await ws.send(json.dumps({"type": "hello", "session_id": f"discord-{channel_id}"}))
+        restored_prompt: str | None = None
         try:
             raw = await asyncio.wait_for(ws.recv(), timeout=10.0)
             ack = json.loads(raw)
-            if ack.get("type") == "hello_ack" and ack.get("restored"):
-                print(f"DEBUG: Session restored for channel {channel_id} ({ack.get('messages', 0)} messages)")
+            if ack.get("type") == "hello_ack":
+                restored_prompt = ack.get("prompt")
+                if ack.get("restored"):
+                    print(f"DEBUG: Session restored for channel {channel_id} "
+                          f"({ack.get('messages', 0)} messages, prompt={restored_prompt})")
         except Exception:
             pass  # ack is best-effort; fall through
         if AUTO_APPLY:
             await ws.send(json.dumps({"type": "set_auto_apply", "enabled": True}))
-        await ws.send(json.dumps({"type": "set_prompt", "prompt": PROMPT_MODE}))
-        _mode_by_channel.setdefault(channel_id, PROMPT_MODE)
+        # Honor the restored prompt if there was one. Otherwise fall back to the
+        # channel's last-known mode, and finally to the module default. This
+        # keeps /mode sticky across server/bot restarts instead of snapping
+        # back to PROMPT_MODE on every reconnect.
+        effective_mode = restored_prompt or _mode_by_channel.get(channel_id) or PROMPT_MODE
+        await ws.send(json.dumps({"type": "set_prompt", "prompt": effective_mode}))
+        _mode_by_channel[channel_id] = effective_mode
         _connections[channel_id] = ws
         print(f"DEBUG: Reconnected to Harness for channel {channel_id}")
 
@@ -208,12 +216,13 @@ async def on_message(message: discord.Message):
     # Fastmode: append /no_think so Qwen3 skips its reasoning pass.
     if _fastmode.get(cid):
         prompt = f"{prompt} /no_think"
-    # --- Step 2: NEW logic for User Identity ---
-    # We wrap the prompt in a JSON package so the server knows who is talking
+    # Wrap the prompt so the server knows who is talking. Identity is by
+    # display name only — we don't ship the raw Discord id since nothing
+    # downstream needs it and it just confuses small models that have to
+    # quote it verbatim into chess tool calls.
     user_payload = {
         "name": message.author.display_name,
-        "id": message.author.id,
-        "text": prompt
+        "text": prompt,
     }
     final_prompt = json.dumps(user_payload)
 
@@ -231,6 +240,7 @@ async def on_message(message: discord.Message):
                 await ws.send(json.dumps({"type": "message", "content": final_prompt}))
                 chunks: list[str] = []
                 pending: list[str] = []
+                media_urls: list[str] = []
                 while True:
                     raw = await asyncio.wait_for(ws.recv(), timeout=RECV_TIMEOUT)
                     msg = json.loads(raw)
@@ -239,6 +249,10 @@ async def on_message(message: discord.Message):
                         chunks.append(msg.get("content", ""))
                     elif t == "pending_writes":
                         pending = list(msg.get("writes", {}).keys())
+                    elif t == "tool_result":
+                        for url in bot_media.extract(msg.get("name", ""), msg.get("content", "")):
+                            if not media_urls or media_urls[-1] != url:
+                                media_urls.append(url)
                     elif t == "error":
                         chunks.append(f"\n⚠️ {msg.get('content', 'Unknown error')}")
                     elif t == "done":
@@ -267,6 +281,13 @@ async def on_message(message: discord.Message):
 
     for chunk in _split(reply or "(no response)"):
         await message.channel.send(chunk)
+
+    # Post each media URL on its own line so Discord auto-embeds one per message.
+    for url in media_urls:
+        try:
+            await message.channel.send(url)
+        except Exception:
+            pass
 
     if pending:
         listing = "\n".join(f"• `{f}`" for f in pending)
@@ -395,6 +416,50 @@ async def slash_mode(interaction: discord.Interaction, prompt: str):
             await interaction.followup.send(f"🎭 Prompt mode → `{prompt}` (takes effect on next turn).")
         except Exception as e:
             await interaction.followup.send(f"❌ {e}")
+
+
+@bot.tree.command(name="state", description="Show active game state for this channel (deterministic — no model call).")
+async def slash_state(interaction: discord.Interaction):
+    cid = str(interaction.channel_id)
+    try:
+        games = storage.list_games(channel_id=cid, status="active", limit=10)
+    except Exception as e:
+        await interaction.response.send_message(f"❌ storage error: {e}", ephemeral=True)
+        return
+    if not games:
+        await interaction.response.send_message(
+            "No active games in this channel. Use chess/dnd tools to start one.",
+            ephemeral=True,
+        )
+        return
+    lines = [f"**Active games in this channel ({len(games)}):**"]
+    for g in games:
+        full = storage.load_game(g["game_id"])
+        if full is None:
+            continue
+        gtype = full.get("game_type", "?")
+        gid = full["game_id"]
+        state = full.get("state") or {}
+        if gtype == "chess":
+            try:
+                import chess as _chess  # python-chess
+                board = _chess.Board(state["fen"])
+                turn = "White" if board.turn == _chess.WHITE else "Black"
+                turn_name = state.get("white") if board.turn == _chess.WHITE else state.get("black")
+                lines.append(
+                    f"\n`{gid}` · chess · {turn} to move ({turn_name})\n"
+                    f"FEN: `{board.fen()}`\n"
+                    f"```\n{board.unicode(invert_color=True, borders=True)}\n```"
+                )
+            except Exception as e:
+                lines.append(f"\n`{gid}` · chess · (failed to render: {e})")
+        else:
+            lines.append(f"\n`{gid}` · {gtype} · state keys: {list(state.keys())}")
+    msg = "\n".join(lines)
+    # Discord message cap is 2000 chars; truncate safely if multiple games.
+    if len(msg) > 1900:
+        msg = msg[:1900] + "\n…(truncated)"
+    await interaction.response.send_message(msg, ephemeral=False)
 
 
 @bot.tree.command(name="spectate", description="Show the session id to paste into the web UI's spectate picker.")

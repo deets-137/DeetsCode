@@ -8,11 +8,11 @@ Usage from server.py:
     from tools import load_tools
     TOOL_DEFINITIONS, execute_tool = load_tools(prompt_mode)
     ...
-    result = execute_tool(name, args, session_id, project_dir, user_id=user_id)
+    result = execute_tool(name, args, session_id, project_dir, user_name=user_name)
 
 Adding a new mode:
     1. Create tools/<mode>.py exporting TOOL_DEFINITIONS + execute_tool(
-       name, args, session_id, project_dir, user_id=None) → str
+       name, args, session_id, project_dir, user_name=None) → str
     2. Register it in _MODE_PACKS below.
     3. Drop a matching prompts/<mode>.md.
 """
@@ -43,15 +43,15 @@ def load_tools(mode: str) -> tuple[list[dict], Callable]:
     """Return (tool_definitions, execute_fn) merged for the given mode.
 
     execute_fn signature:
-        execute_tool(name, args, session_id, project_dir, user_id=None) -> str
+        execute_tool(name, args, session_id, project_dir, user_name=None) -> str
 
-    Core tools accept but ignore session_id/user_id. Game packs use them for
+    Core tools accept but ignore session_id/user_name. Game packs use them for
     per-channel state and per-player action enforcement.
     """
     from . import core as _core_mod
 
     defs: list[dict] = list(CORE_TOOLS)
-    # dispatch[name] = module with execute_tool(name, args, session_id, project_dir, user_id=None)
+    # dispatch[name] = module with execute_tool(name, args, session_id, project_dir, user_name=None)
     dispatch: dict[str, object] = {
         t["function"]["name"]: _core_mod for t in CORE_TOOLS
     }
@@ -73,12 +73,12 @@ def load_tools(mode: str) -> tuple[list[dict], Callable]:
         args: dict,
         session_id: str,
         project_dir: Path,
-        user_id: str | None = None,
+        user_name: str | None = None,
     ) -> str:
         mod = dispatch.get(name)
         if mod is None:
             return f"Unknown tool: {name}"
-        return mod.execute_tool(name, args, session_id, project_dir, user_id=user_id)
+        return mod.execute_tool(name, args, session_id, project_dir, user_name=user_name)
 
     return defs, execute_tool
 

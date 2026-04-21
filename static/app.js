@@ -282,6 +282,29 @@ let busy = false;
 let lastMsgType = null;
 let spectating = null;       // session_id currently being spectated, or null
 let spectateLastId = 0;      // highest event id we've rendered (for tail/resume)
+const spectateCounts = {};   // type -> count, since last attach
+
+function _devFilterAllows(type) {
+  const cb = document.querySelector(`#dev-filters input[data-evt="${type}"]`);
+  // If we don't have a chip for this type, allow it by default.
+  return cb ? cb.checked : true;
+}
+
+function _updateDevCounts() {
+  const el = document.getElementById("dev-counts");
+  if (!el) return;
+  const entries = Object.entries(spectateCounts);
+  if (entries.length === 0) { el.textContent = spectating ? "waiting for events…" : "no events yet"; return; }
+  entries.sort((a, b) => b[1] - a[1]);
+  el.textContent = entries.map(([t, n]) => `${t}:${n}`).join("  ");
+}
+
+function _setSpectateStatus(text, live = false) {
+  const el = document.getElementById("spectate-status");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("live", !!live);
+}
 
 async function refreshSpectateSessions() {
   try {
@@ -304,17 +327,17 @@ function startSpectate() {
   const sid = sel && sel.value;
   if (!sid) return;
   if (!ws || ws.readyState !== 1) return;
-  // Clear the response pane so we get a clean replay.
   const rt = document.getElementById("response-text");
   if (rt) rt.innerHTML = "";
   lastMsgType = null;
   spectating = sid;
   spectateLastId = 0;
+  for (const k of Object.keys(spectateCounts)) delete spectateCounts[k];
+  _updateDevCounts();
   ws.send(JSON.stringify({ type: "spectate", session_id: sid, since_id: 0 }));
   const tb = document.getElementById("chat-textbox");
   if (tb) { tb.disabled = true; tb.placeholder = `SPECTATING ${sid} — input disabled`; }
-  const status = document.getElementById("spectate-status");
-  if (status) status.textContent = `watching ${sid}`;
+  _setSpectateStatus(`watching ${sid}`, true);
 }
 
 function stopSpectate() {
@@ -323,8 +346,7 @@ function stopSpectate() {
   spectateLastId = 0;
   const tb = document.getElementById("chat-textbox");
   if (tb) { tb.disabled = false; tb.placeholder = "Message... (Enter to send, Shift+Enter for newline)"; }
-  const status = document.getElementById("spectate-status");
-  if (status) status.textContent = "";
+  _setSpectateStatus("idle", false);
 }
 
 window.startSpectate = startSpectate;
@@ -349,15 +371,17 @@ function connect() {
     // Spectate control frames.
     if (msg.type === "spectate_ack") {
       spectateLastId = msg.last_id || 0;
-      const status = document.getElementById("spectate-status");
-      if (status && spectating) status.textContent = `watching ${spectating} (live @ ${spectateLastId})`;
+      if (spectating) _setSpectateStatus(`watching ${spectating} @ ${spectateLastId}`, true);
       return;
     }
-    // Spectated events — unwrap and re-dispatch through the normal switch.
+    // Spectated events — unwrap, count, filter, then re-dispatch.
     if (msg.type === "event" && msg.event) {
       if (msg.event.id && msg.event.id > spectateLastId) spectateLastId = msg.event.id;
       msg = msg.event.payload;
       if (!msg || !msg.type) return;
+      spectateCounts[msg.type] = (spectateCounts[msg.type] || 0) + 1;
+      _updateDevCounts();
+      if (!_devFilterAllows(msg.type)) return;
     }
 
     switch (msg.type) {

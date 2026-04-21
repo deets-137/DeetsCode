@@ -469,7 +469,7 @@ body::after {
   border: none;
 }
 
-/* ── Right column (files + packs + tasks stacked) ── */
+/* ── Right column (files + packs + tasks stacked, then dev panel below) ── */
 .right-column {
   flex: 1;
   min-width: 0;
@@ -477,20 +477,29 @@ body::after {
   flex-direction: column;
   gap: 10px;
   align-self: flex-start;
-  height: 536px;
 }
 
-.right-column > .file-panel {
+/* Inner grid locks to 536px so its bottom aligns with the context column
+   (in-context + slash-commands). Dev panel lives below, outside this grid. */
+.right-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 536px;
+  width: 100%;
+}
+
+.right-grid > .file-panel {
   flex: 0 0 auto;
   width: 100%;
   align-self: stretch;
 }
 
-.right-column > .packs-panel-side {
+.right-grid > .packs-panel-side {
+  flex: 0 0 auto;
   height: auto;
-  max-height: 160px;
-  flex: 0 1 auto;
-  min-height: 60px;
+  min-height: 0;
+  max-height: none;
 }
 
 /* ── Context column (in-context + slash commands) ── */
@@ -558,9 +567,9 @@ body::after {
 }
 
 /* ── Task panel ──────────────────────────────────── */
-.right-column > .task-panel {
+.right-grid > .task-panel {
   flex: 1 1 auto;
-  min-height: 80px;
+  min-height: 0;
   height: auto;
 }
 
@@ -1148,3 +1157,77 @@ input:checked + .toggle-slider:before {
 .pending-banner .banner-btn.apply:hover { background: rgba(120, 180, 140, 0.55); }
 .pending-banner .banner-btn.reject { background: rgba(180, 100, 100, 0.32); }
 .pending-banner .banner-btn.reject:hover { background: rgba(180, 100, 100, 0.55); }
+
+/* ─── dev / spectate panel ───────────────────────────────────────────────── */
+.right-column > .dev-panel {
+  flex: 0 0 auto;
+  height: auto;
+  align-self: stretch;
+  width: 100%;
+}
+.dev-panel-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 11px;
+}
+.dev-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.dev-row-btns { justify-content: flex-start; }
+.dev-select {
+  flex: 1;
+  background: var(--textbox-bg);
+  border: none;
+  border-radius: 5px;
+  padding: 5px 8px;
+  font-family: monospace;
+  font-size: 11px;
+  color: #2a2a2a;
+  outline: none;
+  min-width: 0;
+}
+.dev-btn {
+  background: var(--textbox-bg);
+  border: none;
+  border-radius: 5px;
+  padding: 4px 10px;
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 11px;
+  cursor: pointer;
+  color: #2a2a2a;
+}
+.dev-btn:hover { filter: brightness(0.95); }
+.dev-status {
+  font-family: monospace;
+  font-size: 10px;
+  opacity: 0.7;
+  margin-left: auto;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60%;
+}
+.dev-status.live { opacity: 1; color: #3a8a3a; }
+.dev-filters { gap: 4px; }
+.dev-label { opacity: 0.55; font-size: 10px; margin-right: 2px; }
+.dev-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: var(--textbox-bg);
+  border-radius: 4px;
+  padding: 2px 6px;
+  font-size: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+.dev-chip input { margin: 0; width: 10px; height: 10px; }
+.dev-counts {
+  font-family: monospace;
+  font-size: 10px;
+  opacity: 0.7;
+  padding-top: 4px;
+  border-top: 1px dashed rgba(0,0,0,0.1);
+  display: block;
+}
