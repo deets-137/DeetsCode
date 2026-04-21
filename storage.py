@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 from typing import Any, Optional
 
-_DB_PATH = Path(__file__).parent / "storage.db"
+from paths import DB_PATH as _DB_PATH
 _conn: Optional[sqlite3.Connection] = None
 
 _ID_ALPHABET = string.digits + string.ascii_lowercase  # base36

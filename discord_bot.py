@@ -34,6 +34,7 @@ import websockets
 from dotenv import load_dotenv
 
 import storage
+import bot_media
 
 load_dotenv()  # reads .env file in the same directory
 
@@ -74,9 +75,7 @@ _mode_by_channel: dict[int, str] = {}
 
 # Game saves live under PROJECT_ROOT/saves/<name>.json. The harness runs out of
 # the project dir; the bot just passes the relative path.
-import pathlib as _pathlib
-_BOT_ROOT = _pathlib.Path(__file__).parent
-_SAVES_DIR = _BOT_ROOT / "saves"
+from paths import HARNESS_ROOT as _BOT_ROOT, SAVES_DIR as _SAVES_DIR
 
 # ─── WS helpers ──────────────────────────────────────────────────────────────
 
@@ -217,12 +216,13 @@ async def on_message(message: discord.Message):
     # Fastmode: append /no_think so Qwen3 skips its reasoning pass.
     if _fastmode.get(cid):
         prompt = f"{prompt} /no_think"
-    # --- Step 2: NEW logic for User Identity ---
-    # We wrap the prompt in a JSON package so the server knows who is talking
+    # Wrap the prompt so the server knows who is talking. Identity is by
+    # display name only — we don't ship the raw Discord id since nothing
+    # downstream needs it and it just confuses small models that have to
+    # quote it verbatim into chess tool calls.
     user_payload = {
         "name": message.author.display_name,
-        "id": message.author.id,
-        "text": prompt
+        "text": prompt,
     }
     final_prompt = json.dumps(user_payload)
 
@@ -240,6 +240,7 @@ async def on_message(message: discord.Message):
                 await ws.send(json.dumps({"type": "message", "content": final_prompt}))
                 chunks: list[str] = []
                 pending: list[str] = []
+                media_urls: list[str] = []
                 while True:
                     raw = await asyncio.wait_for(ws.recv(), timeout=RECV_TIMEOUT)
                     msg = json.loads(raw)
@@ -248,6 +249,10 @@ async def on_message(message: discord.Message):
                         chunks.append(msg.get("content", ""))
                     elif t == "pending_writes":
                         pending = list(msg.get("writes", {}).keys())
+                    elif t == "tool_result":
+                        for url in bot_media.extract(msg.get("name", ""), msg.get("content", "")):
+                            if not media_urls or media_urls[-1] != url:
+                                media_urls.append(url)
                     elif t == "error":
                         chunks.append(f"\n⚠️ {msg.get('content', 'Unknown error')}")
                     elif t == "done":
@@ -276,6 +281,13 @@ async def on_message(message: discord.Message):
 
     for chunk in _split(reply or "(no response)"):
         await message.channel.send(chunk)
+
+    # Post each media URL on its own line so Discord auto-embeds one per message.
+    for url in media_urls:
+        try:
+            await message.channel.send(url)
+        except Exception:
+            pass
 
     if pending:
         listing = "\n".join(f"• `{f}`" for f in pending)
@@ -433,7 +445,7 @@ async def slash_state(interaction: discord.Interaction):
                 import chess as _chess  # python-chess
                 board = _chess.Board(state["fen"])
                 turn = "White" if board.turn == _chess.WHITE else "Black"
-                turn_name = state.get("white_name") if board.turn == _chess.WHITE else state.get("black_name")
+                turn_name = state.get("white") if board.turn == _chess.WHITE else state.get("black")
                 lines.append(
                     f"\n`{gid}` · chess · {turn} to move ({turn_name})\n"
                     f"FEN: `{board.fen()}`\n"

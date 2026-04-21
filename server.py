@@ -95,8 +95,7 @@ def load_prompt_template(name: str = "DeetsCode") -> str:
     # prompt="default". Transparently redirect to DeetsCode.
     if name == "default":
         name = "DeetsCode"
-    prompts_dir = Path(__file__).parent / "prompts"
-    candidate = prompts_dir / f"{Path(name).name}.md"
+    candidate = paths.PROMPTS_DIR / f"{Path(name).name}.md"
     if candidate.is_file():
         try:
             return candidate.read_text(encoding="utf-8")
@@ -104,7 +103,7 @@ def load_prompt_template(name: str = "DeetsCode") -> str:
             pass
     # fallback: legacy prompt.md in cwd
     try:
-        return Path("prompt.md").read_text(encoding="utf-8")
+        return paths.LEGACY_PROMPT_FILE.read_text(encoding="utf-8")
     except (FileNotFoundError, OSError):
         return DEFAULT_PROMPT
 
@@ -117,6 +116,7 @@ from openai import AsyncOpenAI
 from config import HOST, MODEL, OLLAMA_BASE_URL, PORT, TEMPERATURE
 from tools import clear_pending_writes, clear_read_files, load_tools, pending_writes
 import storage
+import paths
 
 # Spectators by session_id. Each spectator is a WebSocket that receives a
 # read-only copy of every frame emitted for that session. Populated by the
@@ -131,7 +131,7 @@ app = FastAPI()
 client = AsyncOpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
 project_dir: Path = Path(".").resolve()
-packs_dir: Path = Path(__file__).parent / "packs"
+packs_dir: Path = paths.PACKS_DIR
 auto_apply_enabled: bool = False
 current_model: str = MODEL
 current_temperature: float = TEMPERATURE
@@ -141,7 +141,7 @@ DEFAULT_NUM_PREDICT = 8192
 
 SKIP_DIRS = {"__pycache__", "node_modules", ".git", ".venv", "venv", "dist", "build"}
 
-SESSIONS_DIR = Path(__file__).parent / "sessions"
+SESSIONS_DIR = paths.SESSIONS_DIR
 SESSION_SCHEMA = 1
 
 
@@ -379,10 +379,9 @@ def get_packs():
 
 @app.get("/api/prompts")
 def get_prompts():
-    prompts_dir = Path(__file__).parent / "prompts"
     names = []
-    if prompts_dir.is_dir():
-        names = sorted(p.stem for p in prompts_dir.iterdir() if p.suffix == ".md")
+    if paths.PROMPTS_DIR.is_dir():
+        names = sorted(p.stem for p in paths.PROMPTS_DIR.iterdir() if p.suffix == ".md")
     return JSONResponse({"prompts": names})
 
 
@@ -398,7 +397,7 @@ def flush_pending():
     return JSONResponse({"flushed": count})
 
 
-async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, state: dict, selected_packs: list[str], selected_prompt: str = "DeetsCode", session_id: str | None = None, user_id: str | None = None):
+async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, state: dict, selected_packs: list[str], selected_prompt: str = "DeetsCode", session_id: str | None = None, user_name: str | None = None):
     # Cache the file tree on `state`. Recompute only if invalidated (e.g. after
     # write_file applies). Static over a session — was being re-rendered each
     # turn for no reason.
@@ -556,7 +555,7 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
                 args = {}
 
             await ws.send_json({"type": "tool_call", "name": name, "args": args})
-            result = execute_tool(name, args, session_id or "unknown", project_dir, user_id=user_id)
+            result = execute_tool(name, args, session_id or "unknown", project_dir, user_name=user_name)
             await ws.send_json({"type": "tool_result", "name": name, "content": result})
 
             # Auto-refresh the task panel in the UI when update_task writes
@@ -598,10 +597,10 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
         await ws.send_json({"type": "pending_writes", "writes": dict(pending_writes)})
 
 
-async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_packs: list[str], selected_prompt: str = "DeetsCode", session_id: str | None = None, temperature: float | None = None, user_id: str | None = None):
+async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_packs: list[str], selected_prompt: str = "DeetsCode", session_id: str | None = None, temperature: float | None = None, user_name: str | None = None):
     state: dict = {"usage_tokens": None, "stream": None}
     try:
-        await _agent_loop_impl(ws, user_content, messages, state, selected_packs, selected_prompt, session_id, user_id)
+        await _agent_loop_impl(ws, user_content, messages, state, selected_packs, selected_prompt, session_id, user_name)
     except asyncio.CancelledError:
         # asyncio.cancel() alone doesn't reliably kill the underlying HTTP stream
         # to Ollama — httpx cancellation can be delayed on Windows. Force-close
@@ -666,7 +665,7 @@ async def get_task():
 async def get_themes():
     """Parse theme.css and return all discovered themes with their swatch colors."""
     import re as _re
-    theme_css = Path(__file__).parent / "static" / "theme.css"
+    theme_css = paths.THEME_CSS
     themes = []
     try:
         if not theme_css.is_file():
@@ -864,7 +863,7 @@ async def websocket_endpoint(ws: WebSocket):
                 # regardless of the session's game mode so we don't surprise-invoke
                 # a chess tool from the web UI slash menu.
                 _, _slash_execute = load_tools("DeetsCode")
-                result = _slash_execute(tool, args, session_id or "unknown", project_dir, user_id=None)
+                result = _slash_execute(tool, args, session_id or "unknown", project_dir, user_name=None)
                 await ws.send_json({"type": "tool_result", "name": tool, "content": result})
                 continue
 
@@ -1001,23 +1000,20 @@ async def websocket_endpoint(ws: WebSocket):
                 if current_task and not current_task.done():
                     current_task.cancel()
 
-                user_id: str | None = None
+                user_name: str | None = None
                 try:
                     user_payload = json.loads(data["content"])
                     user_name = user_payload["name"]
                     user_text = user_payload["text"]
-                    # Discord IDs are ints; normalize to string for tool-side compare.
-                    raw_id = user_payload.get("id")
-                    user_id = str(raw_id) if raw_id is not None else None
                 except Exception:
                     user_name = "User"
                     user_text = data["content"]
 
                 if selected_prompt == "dnd":
-                    dnd_dir = project_dir / "dnd"
-                    world_state_path = dnd_dir / "campaign_state.json"
+                    dnd_dir = project_dir / paths.DND_SUBDIR
+                    world_state_path = dnd_dir / paths.CAMPAIGN_STATE_FILENAME
                     # Back-compat: migrate an old root-level campaign_state.json.
-                    legacy = project_dir / "campaign_state.json"
+                    legacy = project_dir / paths.CAMPAIGN_STATE_FILENAME
                     if not world_state_path.exists() and legacy.exists():
                         dnd_dir.mkdir(exist_ok=True)
                         world_state_path.write_text(legacy.read_text(encoding="utf-8"), encoding="utf-8")
@@ -1040,25 +1036,17 @@ async def websocket_endpoint(ws: WebSocket):
                         f"</dm_instructions>"
                     )
                 elif selected_prompt == "chess":
-                    # Chess tools need the caller's Discord id (chess_new takes
-                    # it as white_id/black_id, chess_move/chess_resign use it
-                    # for turn enforcement). Expose it so the model can quote
-                    # it verbatim instead of inventing a value.
-                    if user_id is not None:
-                        user_content = (
-                            f"<current_request>\n"
-                            f"speaker_name: {user_name}\n"
-                            f"speaker_id: {user_id}\n"
-                            f"message: {user_text}\n"
-                            f"</current_request>"
-                        )
-                    else:
-                        user_content = user_text
+                    user_content = (
+                        f"<current_request>\n"
+                        f"speaker: {user_name}\n"
+                        f"message: {user_text}\n"
+                        f"</current_request>"
+                    )
                 else:
                     user_content = user_text
 
                 messages.append({"role": "user", "content": user_content})
-                current_task = asyncio.create_task(agent_loop(ws, user_text, messages, list(selected_packs), selected_prompt, session_id, current_temperature, user_id))
+                current_task = asyncio.create_task(agent_loop(ws, user_text, messages, list(selected_packs), selected_prompt, session_id, current_temperature, user_name))
 
     except WebSocketDisconnect:
         if current_task and not current_task.done():

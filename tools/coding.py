@@ -172,9 +172,9 @@ def execute_tool(
     args: dict,
     session_id: str,
     project_dir: Path,
-    user_id: Optional[str] = None,
+    user_name: Optional[str] = None,
 ) -> str:
-    """Coding-agent tools. Ignores session_id/user_id (no per-channel state)."""
+    """Coding-agent tools. Ignores session_id/user_name (no per-channel state)."""
     try:
         if name == "write_file":
             if "path" not in args or "content" not in args:
