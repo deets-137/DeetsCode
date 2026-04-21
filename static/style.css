@@ -469,7 +469,7 @@ body::after {
   border: none;
 }
 
-/* ── Right column (files + packs + tasks stacked) ── */
+/* ── Right column (files + packs + tasks stacked, then dev panel below) ── */
 .right-column {
   flex: 1;
   min-width: 0;
@@ -477,20 +477,29 @@ body::after {
   flex-direction: column;
   gap: 10px;
   align-self: flex-start;
-  height: 536px;
 }
 
-.right-column > .file-panel {
+/* Inner grid locks to 536px so its bottom aligns with the context column
+   (in-context + slash-commands). Dev panel lives below, outside this grid. */
+.right-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  height: 536px;
+  width: 100%;
+}
+
+.right-grid > .file-panel {
   flex: 0 0 auto;
   width: 100%;
   align-self: stretch;
 }
 
-.right-column > .packs-panel-side {
+.right-grid > .packs-panel-side {
+  flex: 0 0 auto;
   height: auto;
-  max-height: 160px;
-  flex: 0 1 auto;
-  min-height: 60px;
+  min-height: 0;
+  max-height: none;
 }
 
 /* ── Context column (in-context + slash commands) ── */
@@ -558,9 +567,9 @@ body::after {
 }
 
 /* ── Task panel ──────────────────────────────────── */
-.right-column > .task-panel {
+.right-grid > .task-panel {
   flex: 1 1 auto;
-  min-height: 80px;
+  min-height: 0;
   height: auto;
 }
 
@@ -1150,6 +1159,12 @@ input:checked + .toggle-slider:before {
 .pending-banner .banner-btn.reject:hover { background: rgba(180, 100, 100, 0.55); }
 
 /* ─── dev / spectate panel ───────────────────────────────────────────────── */
+.right-column > .dev-panel {
+  flex: 0 0 auto;
+  height: auto;
+  align-self: stretch;
+  width: 100%;
+}
 .dev-panel-inner {
   display: flex;
   flex-direction: column;

@@ -145,35 +145,37 @@
       </div>
     </div>
 
-    <!-- Right column: files + packs + task + dev stacked -->
+    <!-- Right column: files + packs + task (grid-aligned) + dev (below) -->
     <div class="right-column">
-      <div class="file-panel">
-        <div class="file-panel-header">
-          <span>files</span>
-          <button onclick="refreshTree()">↺</button>
+      <div class="right-grid">
+        <div class="file-panel">
+          <div class="file-panel-header">
+            <span>files</span>
+            <button onclick="refreshTree()">↺</button>
+          </div>
+          <div class="file-panel-inner" id="file-tree"></div>
         </div>
-        <div class="file-panel-inner" id="file-tree"></div>
-      </div>
 
-      <div class="file-panel packs-panel-side">
-        <div class="file-panel-header">
-          <span>knowledge packs</span>
-          <button onclick="refreshPacks()" title="Rescan packs">↺</button>
-        </div>
-        <div class="file-panel-inner packs-inner">
-          <div class="packs-chips" id="packs-chips">
-            <span class="packs-empty">no packs found</span>
+        <div class="file-panel packs-panel-side">
+          <div class="file-panel-header">
+            <span>knowledge packs</span>
+            <button onclick="refreshPacks()" title="Rescan packs">↺</button>
+          </div>
+          <div class="file-panel-inner packs-inner">
+            <div class="packs-chips" id="packs-chips">
+              <span class="packs-empty">no packs found</span>
+            </div>
           </div>
         </div>
-      </div>
 
-      <div class="file-panel task-panel" id="task-panel">
-        <div class="file-panel-header">
-          <span>task list</span>
-          <button onclick="refreshTaskPanel()" title="Refresh task list">↺</button>
-        </div>
-        <div class="file-panel-inner task-inner" id="task-inner">
-          <span class="task-empty">no task.md found</span>
+        <div class="file-panel task-panel" id="task-panel">
+          <div class="file-panel-header">
+            <span>task list</span>
+            <button onclick="refreshTaskPanel()" title="Refresh task list">↺</button>
+          </div>
+          <div class="file-panel-inner task-inner" id="task-inner">
+            <span class="task-empty">no task.md found</span>
+          </div>
         </div>
       </div>
 
