@@ -258,7 +258,7 @@ body::after {
 
 /* ── Middle Column ───────────────────────────────── */
 .middle-column {
-  width: 520px;
+  width: 560px;
   flex-shrink: 0;
   display: flex;
   flex-direction: column;
@@ -266,28 +266,31 @@ body::after {
   align-self: flex-start;
 }
 
-/* ── Tool & Config Panels ────────────────────────── */
-.tool-panel {
+/* ── Activity panel (outer): tools + pending writes side-by-side ── */
+.activity-panel {
   width: 100%;
-  height: 260px;
-  background: var(--panel-outer);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
-  border-radius: 16px;
-  padding: 10px;
+  height: auto;
+  align-self: stretch;
+}
+
+.activity-inner {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
-  align-self: flex-start;
-  transition: background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+  flex-direction: row;
+  gap: 8px;
+  padding: 8px;
+  background: transparent;
+  min-height: 0;
+}
+
+.activity-subpanel {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 220px;
 }
 
 .tool-panel-inner {
-  background: var(--response-box-bg);
-  border-radius: 8px;
-  padding: 10px 12px;
+  background: transparent;
+  padding: 4px 2px;
   overflow-y: auto;
   max-height: 220px;
   font-family: 'Aptos', 'Segoe UI', sans-serif;
@@ -296,6 +299,8 @@ body::after {
   display: flex;
   flex-direction: column;
   gap: 8px;
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 .tool-entry {
@@ -336,23 +341,9 @@ body::after {
 .tool-diff .diff-old { color: #b33; opacity: 0.85; }
 .tool-diff .diff-new { color: #186; opacity: 0.9; }
 
-/* ── Config Panel ────────────────────────────────── */
-.config-panel {
-  height: 260px;
-}
-
-.config-panel-inner {
-  background: var(--response-box-bg);
-  border-radius: 8px;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
-
+/* ── Config textarea (used by the customization panel) ── */
 .config-textarea {
   width: 100%;
-  flex: 1;
   background: transparent;
   border: none;
   font-family: 'Aptos', 'Segoe UI', sans-serif;
@@ -361,7 +352,6 @@ body::after {
   resize: none;
   outline: none;
   line-height: 1.4;
-  min-height: 80px;
 }
 
 .config-textarea::placeholder {
@@ -369,104 +359,13 @@ body::after {
   opacity: 0.6;
 }
 
-/* ── Config Row (file click action + temp slider) ── */
-.config-row {
-  display: flex;
-  flex-direction: row;
-  gap: 10px;
-  width: 100%;
-  height: 260px;
-  flex-shrink: 0;
-}
-
-.config-row > .config-panel {
-  flex: 1;
-  min-width: 0;
-}
-
-/* ── Temperature Slider ──────────────────────────── */
-.temp-slider-panel {
-  width: 40px;
-  height: 260px;
-  flex-shrink: 0;
-  overflow: hidden;
-  background: var(--panel-outer);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
-  border-radius: 12px;
-  padding: 6px 4px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: space-between;
-  gap: 4px;
-  transition: background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
-}
-
-.temp-label {
-  font-family: 'Aptos', 'Segoe UI', sans-serif;
-  font-size: 9px;
-  color: var(--response-text);
-  opacity: 0.6;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
 .temp-value {
   font-family: 'Aptos', 'Segoe UI', sans-serif;
-  font-size: 11px;
-  font-weight: bold;
+  font-size: 10px;
   color: var(--response-text);
-  opacity: 0.85;
-}
-
-.temp-track {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-.temp-range {
-  writing-mode: vertical-lr;
-  direction: rtl;
-  -webkit-appearance: none;
-  appearance: none;
-  width: 6px;
-  height: 198px;
-  background: var(--response-box-bg);
-  border-radius: 3px;
-  outline: none;
-  cursor: pointer;
-}
-
-.temp-range::-webkit-slider-thumb {
-  -webkit-appearance: none;
-  appearance: none;
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--response-text);
-  opacity: 0.8;
-  cursor: pointer;
-  transition: opacity 0.2s, box-shadow 0.2s;
-}
-
-.temp-range::-webkit-slider-thumb:hover {
-  opacity: 1;
-  box-shadow: 0 0 8px rgba(140, 224, 164, 0.5);
-}
-
-.temp-range::-moz-range-thumb {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  background: var(--response-text);
-  opacity: 0.8;
-  cursor: pointer;
-  border: none;
+  opacity: 0.75;
+  min-width: 30px;
+  text-align: right;
 }
 
 /* ── Right column (files + packs + tasks stacked, then dev panel below) ── */
@@ -485,45 +384,95 @@ body::after {
   display: flex;
   flex-direction: column;
   gap: 10px;
-  height: 536px;
   width: 100%;
 }
 
 .right-grid > .file-panel {
   flex: 0 0 auto;
   width: 100%;
+  height: 300px;
   align-self: stretch;
 }
 
-.right-grid > .packs-panel-side {
-  flex: 0 0 auto;
-  height: auto;
-  min-height: 0;
-  max-height: none;
-}
-
-/* ── Context column (in-context + slash commands) ── */
+/* ── Context column (status panel + reference info panel) ── */
 .context-column {
-  flex: 1;
-  min-width: 0;
+  flex: 1.2 1 0;
+  min-width: 320px;
   display: flex;
   flex-direction: column;
   gap: 10px;
   align-self: flex-start;
-  height: 536px;
 }
 
 .context-column > .file-panel {
   flex: 0 0 auto;
   width: 100%;
-  height: 260px;
+  height: auto;
 }
 
-/* ── Slash commands panel ────────────────────────── */
-.context-column > .slash-panel {
+/* Info (reference) panel gets room to breathe so packs chips don't get clipped. */
+.context-column > .info-panel {
+  min-height: 300px;
+}
+
+/* Status panel: in-context files + task as side-by-side nested sub-panels */
+.context-column > .status-panel {
+  height: auto;
+  max-height: 300px;
+}
+
+.status-inner {
+  display: flex;
+  flex-direction: row;
+  gap: 8px;
+  padding: 8px;
+  background: transparent;
+  min-height: 0;
+}
+
+.status-subpanel {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 180px;
+}
+
+.status-subinner {
+  background: transparent;
+  padding: 4px 2px;
+  overflow-y: auto;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ── Combined info panel (knowledge packs + slash commands) ── */
+.context-column > .info-panel {
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
+}
+
+.info-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  min-height: 0;
+  background: transparent;
+}
+
+.info-section-slash {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+.info-section .slash-inner,
+.info-section .packs-chips {
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.info-section .slash-inner {
+  flex: 1 1 auto;
 }
 
 .slash-cmd-row {
@@ -680,57 +629,158 @@ body::after {
 .file-node:hover { opacity: 1; }
 .file-children { padding-left: 14px; }
 
-/* ── Bottom-right stack ──────────────────────────── */
-.br-stack {
-  position: fixed;
-  bottom: 16px;
-  right: 16px;
+/* ── Settings bento (model + customization, sits in middle-column) ── */
+.settings-grid {
   display: flex;
   flex-direction: row;
-  align-items: flex-end;
-  gap: 8px;
-  z-index: 100;
+  gap: 12px;
+  width: 100%;
 }
 
-.br-left {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  justify-content: flex-end;
-}
-
-.br-right {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-/* ── Auto-Apply panel ────────────────────────────── */
-.auto-apply-panel {
+/* Shared panel shell for model + customization panels (bento tile) */
+.settings-panel {
+  flex: 1 1 0;
+  min-width: 0;
   background: var(--panel-outer);
   backdrop-filter: blur(24px) saturate(140%);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
   border: 1px solid var(--glass-border);
   box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
-  border-radius: 12px;
-  padding: 6px 10px;
+  border-radius: 16px;
+  padding: 10px 12px;
   display: flex;
-  flex-direction: row;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 8px;
-  width: 100%;
-  height: 40px;
   transition: background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
 }
 
-.auto-apply-label {
+.settings-header {
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--response-text);
+  opacity: 0.55;
+  padding: 0 2px;
+}
+
+.settings-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-row {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+
+.settings-label {
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 10px;
+  color: var(--response-text);
+  opacity: 0.7;
+  line-height: 1.2;
+}
+
+/* Nested sub-panel primitive — used inside settings-panel and info-panel
+   to group related controls as a bento sub-tile rather than a labeled
+   run of siblings. */
+.nested-panel {
+  background: var(--response-box-bg);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 0;
+}
+
+.nested-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
   font-family: 'Aptos', 'Segoe UI', sans-serif;
   font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
   color: var(--response-text);
+  opacity: 0.55;
+  padding: 0 2px 2px;
+}
+
+.nested-header button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--response-text);
+  font-size: 12px;
   opacity: 0.6;
-  text-align: center;
-  line-height: 1.2;
+  line-height: 1;
+}
+
+.nested-header button:hover { opacity: 1; }
+
+/* Horizontal temp slider (replaces the vertical one from the old config row) */
+.temp-row { justify-content: space-between; }
+
+.temp-range-h {
+  flex: 1;
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 2px;
+  outline: none;
+  cursor: pointer;
+}
+
+.temp-range-h::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--response-text);
+  opacity: 0.8;
+  cursor: pointer;
+  transition: opacity 0.2s, box-shadow 0.2s;
+}
+
+.temp-range-h::-webkit-slider-thumb:hover {
+  opacity: 1;
+  box-shadow: 0 0 8px rgba(140, 224, 164, 0.5);
+}
+
+.temp-range-h::-moz-range-thumb {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--response-text);
+  opacity: 0.8;
+  cursor: pointer;
+  border: none;
+}
+
+/* Context usage embedded inside the model panel (no outer glass) */
+.ctx-inline {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 6px 0 0;
+  border-top: 1px dashed rgba(255,255,255,0.12);
+}
+
+/* File-click textarea embedded in the customization panel */
+.settings-textarea {
+  min-height: 60px;
+  max-height: 120px;
+  background: transparent;
+  padding: 2px 0;
+  font-size: 12px;
 }
 
 /* Toggle Switch */
@@ -784,30 +834,16 @@ input:checked + .toggle-slider:before {
   box-shadow: 0 0 8px rgba(140, 224, 164, 0.6);
 }
 
-/* ── Model Picker ────────────────────────────────── */
-.model-picker-panel {
-  background: var(--panel-outer);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
-  border-radius: 12px;
-  padding: 4px 8px;
-  display: flex;
-  align-items: center;
-  width: 100%;
-  height: 32px;
-  transition: background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
-}
-
+/* ── Model Picker select (inside the model settings panel) ── */
 .model-select {
   width: 100%;
   background: transparent;
   border: none;
+  padding: 2px 0;
   font-family: 'Aptos', 'Segoe UI', sans-serif;
-  font-size: 10px;
+  font-size: 11px;
   color: var(--response-text);
-  opacity: 0.8;
+  opacity: 0.85;
   outline: none;
   cursor: pointer;
   appearance: none;
@@ -819,23 +855,7 @@ input:checked + .toggle-slider:before {
   color: #2a2a2a;
 }
 
-/* ── Context window panel ────────────────────────── */
-.ctx-panel {
-  background: var(--panel-outer);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
-  border-radius: 12px;
-  padding: 8px 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  z-index: 100;
-  min-width: 140px;
-  transition: background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
-}
-
+/* ── Context usage (inlined inside the model settings panel) ── */
 .ctx-label {
   font-family: 'Aptos', 'Segoe UI', sans-serif;
   font-size: 10px;
@@ -848,7 +868,7 @@ input:checked + .toggle-slider:before {
 .ctx-bar-track {
   width: 100%;
   height: 4px;
-  background: var(--response-box-bg);
+  background: rgba(255, 255, 255, 0.12);
   border-radius: 2px;
   overflow: hidden;
 }
@@ -868,19 +888,13 @@ input:checked + .toggle-slider:before {
   opacity: 0.45;
 }
 
-/* ── Theme picker ────────────────────────────────── */
+/* ── Theme picker (inside the customization settings panel) ── */
 .theme-picker {
-  background: var(--panel-outer);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  border: 1px solid var(--glass-border);
-  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
-  border-radius: 12px;
-  padding: 8px;
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  transition: background 0.4s ease, box-shadow 0.4s ease, border-color 0.4s ease;
+  gap: 4px;
+  max-height: 160px;
+  overflow-y: auto;
 }
 
 .theme-option {
@@ -1029,18 +1043,12 @@ input:checked + .toggle-slider:before {
   margin: 10px 0;
 }
 
-/* ── Pending writes panel ────────────────────────── */
-.pending-panel {
-  height: auto;
-  max-height: 220px;
-}
-
+/* ── Pending writes sub-panel (inside activity panel) ── */
 .pending-panel-inner {
-  background: var(--response-box-bg);
-  border-radius: 8px;
-  padding: 8px;
+  background: transparent;
+  padding: 4px 2px;
   overflow-y: auto;
-  flex: 1;
+  flex: 1 1 auto;
   min-height: 60px;
   font-family: 'Consolas', 'Menlo', monospace;
   font-size: 12px;
@@ -1158,38 +1166,29 @@ input:checked + .toggle-slider:before {
 .pending-banner .banner-btn.reject { background: rgba(180, 100, 100, 0.32); }
 .pending-banner .banner-btn.reject:hover { background: rgba(180, 100, 100, 0.55); }
 
-/* ─── bot-ops section ────────────────────────────────────────────────────── */
-/* Wraps the three bot-panel siblings (spectate, control, inventory). Designed */
-/* so the whole .bot-ops block can later be moved to its own module/partial    */
-/* without the rest of the UI caring. All shared classes (dev-row, dev-btn,   */
-/* etc.) are scoped here so modularizing means moving these rules together.    */
-.right-column > .bot-ops {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  width: 100%;
-}
-.bot-ops > .bot-panel {
+/* ─── bot-ops panel ──────────────────────────────────────────────────────── */
+/* One outer .file-panel holding three nested sub-panels (spectate, control,  */
+/* inventory). Designed so the whole block can later be lifted into its own   */
+/* module/partial — all shared helper classes (dev-row, dev-btn, inv-*) are   */
+/* scoped here so modularizing means moving these rules together.             */
+.right-column > .bot-ops-panel {
   flex: 0 0 auto;
   align-self: stretch;
   width: 100%;
+  height: auto;
 }
 
-/* back-compat alias: the existing spectate panel keeps its original selector */
-.right-column > .dev-panel {
-  flex: 0 0 auto;
-  height: auto;
-  align-self: stretch;
-  width: 100%;
-}
-.dev-panel-inner {
+.bot-ops-inner {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   padding: 8px;
+  background: transparent;
   font-family: 'Aptos', 'Segoe UI', sans-serif;
   font-size: 11px;
 }
+
+.bot-subpanel { gap: 6px; }
 .dev-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .dev-row-btns { justify-content: flex-start; }
 .dev-select {

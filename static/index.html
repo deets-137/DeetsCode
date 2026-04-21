@@ -8,41 +8,6 @@
 </head>
 <body>
 
-  <!-- Bottom-right stack -->
-  <div class="br-stack">
-    <div class="br-left">
-      <div class="auto-apply-panel">
-        <div class="toggle-wrapper">
-          <input type="checkbox" id="keep-history-toggle">
-          <label for="keep-history-toggle" class="toggle-slider"></label>
-        </div>
-        <span class="auto-apply-label" title="Keep scrollback across turns (off = fresh panel per turn)">keep history</span>
-      </div>
-      <div class="auto-apply-panel">
-        <div class="toggle-wrapper">
-          <input type="checkbox" id="auto-apply-toggle">
-          <label for="auto-apply-toggle" class="toggle-slider"></label>
-        </div>
-        <span class="auto-apply-label">auto apply</span>
-      </div>
-      <div class="model-picker-panel">
-        <select id="model-select" class="model-select">
-          <option value="" disabled selected>loading...</option>
-        </select>
-      </div>
-    </div>
-    <div class="br-right">
-      <div class="ctx-panel">
-        <div class="ctx-label">context <span id="ctx-pct">0%</span></div>
-      <div class="ctx-bar-track"><div class="ctx-bar-fill" id="ctx-bar"></div></div>
-      <div class="ctx-tokens" id="ctx-tokens">0 / 131072</div>
-    </div>
-    <div class="theme-picker" id="theme-picker">
-      <!-- dynamically populated by fetchThemes() -->
-    </div>
-    </div>
-  </div>
-
   <div class="canvas">
 
     <!-- Left 30%: chat panel -->
@@ -79,73 +44,166 @@
 
     </div>
 
-    <!-- Middle column: Tools + Config stacked -->
+    <!-- Middle column: Activity (tools + pending) + Settings stacked -->
     <div class="middle-column">
-      <!-- Tool activity panel -->
-      <div class="tool-panel" id="tool-panel">
+      <!-- Activity panel: tool log + pending writes as side-by-side sub-panels -->
+      <section class="file-panel activity-panel" id="activity-panel">
         <div class="file-panel-header">
-          <span>tools</span>
-          <button onclick="clearToolPanel()">✕</button>
+          <span>activity</span>
         </div>
-        <div class="tool-panel-inner" id="tool-panel-inner"></div>
-      </div>
+        <div class="file-panel-inner activity-inner">
 
-      <!-- Config row: file click action + temperature slider -->
-      <div class="config-row">
-        <div class="tool-panel config-panel" id="config-panel">
-          <div class="file-panel-header">
-            <span>file click action</span>
+          <!-- [activity-subpanel:tools] Live tool_call / tool_result log. -->
+          <div class="nested-panel activity-subpanel" id="tool-panel" data-panel="tools">
+            <div class="nested-header">
+              <span>tools</span>
+              <button onclick="clearToolPanel()" title="Clear tool log">✕</button>
+            </div>
+            <div class="tool-panel-inner" id="tool-panel-inner"></div>
           </div>
-          <div class="config-panel-inner">
-            <textarea id="file-click-template" class="config-textarea" placeholder="Template for clicking a file. Use {path} for the file path."></textarea>
-          </div>
-        </div>
-        <div class="temp-slider-panel">
-          <div class="temp-label">temp</div>
-          <div class="temp-track">
-            <input type="range" id="temp-slider" class="temp-range" min="0" max="100" value="65" orient="vertical">
-          </div>
-          <div class="temp-value" id="temp-value">0.65</div>
-        </div>
-      </div>
 
-      <!-- Pending writes panel -->
-      <div class="tool-panel pending-panel" id="pending-panel">
-        <div class="file-panel-header">
-          <span>pending writes <span class="pending-count" id="pending-count">0</span></span>
-          <div class="pending-pills">
-            <button class="pending-pill apply" onclick="applyWrites()" title="Write queued changes to disk">approve</button>
-            <button class="pending-pill reject" onclick="rejectWrites()" title="Drop queued changes (via websocket)">reject</button>
-            <button class="pending-pill flush" onclick="flushPending()" title="Force-clear the queue (HTTP DELETE /pending)">flush</button>
+          <!-- [activity-subpanel:pending] Queued file writes awaiting approve/reject/flush. -->
+          <div class="nested-panel activity-subpanel pending-panel" id="pending-panel" data-panel="pending">
+            <div class="nested-header">
+              <span>pending writes <span class="pending-count" id="pending-count">0</span></span>
+              <div class="pending-pills">
+                <button class="pending-pill apply" onclick="applyWrites()" title="Write queued changes to disk">approve</button>
+                <button class="pending-pill reject" onclick="rejectWrites()" title="Drop queued changes (via websocket)">reject</button>
+                <button class="pending-pill flush" onclick="flushPending()" title="Force-clear the queue (HTTP DELETE /pending)">flush</button>
+              </div>
+            </div>
+            <div class="pending-panel-inner" id="pending-panel-inner">
+              <span class="pending-empty">queue is empty</span>
+            </div>
           </div>
+
         </div>
-        <div class="pending-panel-inner" id="pending-panel-inner">
-          <span class="pending-empty">queue is empty</span>
-        </div>
+      </section>
+
+      <!-- Settings bento: model + customization side by side -->
+      <div class="settings-grid">
+
+        <!-- [settings-panel:model] model select + temperature + history/auto-apply toggles + context usage -->
+        <section class="settings-panel" data-panel="model">
+          <div class="settings-header">model</div>
+          <div class="settings-inner">
+            <div class="nested-panel">
+              <div class="nested-header">selection</div>
+              <select id="model-select" class="model-select">
+                <option value="" disabled selected>loading...</option>
+              </select>
+            </div>
+            <div class="nested-panel">
+              <div class="nested-header">behavior</div>
+              <div class="settings-row">
+                <div class="toggle-wrapper">
+                  <input type="checkbox" id="keep-history-toggle">
+                  <label for="keep-history-toggle" class="toggle-slider"></label>
+                </div>
+                <span class="settings-label" title="Keep scrollback across turns (off = fresh panel per turn)">keep history</span>
+              </div>
+              <div class="settings-row">
+                <div class="toggle-wrapper">
+                  <input type="checkbox" id="auto-apply-toggle">
+                  <label for="auto-apply-toggle" class="toggle-slider"></label>
+                </div>
+                <span class="settings-label">auto apply</span>
+              </div>
+              <div class="settings-row temp-row">
+                <span class="settings-label">temp</span>
+                <input type="range" id="temp-slider" class="temp-range-h" min="0" max="100" value="65">
+                <span class="temp-value" id="temp-value">0.65</span>
+              </div>
+            </div>
+            <div class="nested-panel">
+              <div class="nested-header">context <span id="ctx-pct">0%</span></div>
+              <div class="ctx-bar-track"><div class="ctx-bar-fill" id="ctx-bar"></div></div>
+              <div class="ctx-tokens" id="ctx-tokens">0 / 131072</div>
+            </div>
+          </div>
+        </section>
+
+        <!-- [settings-panel:customization] theme picker + file-click template -->
+        <section class="settings-panel" data-panel="customization">
+          <div class="settings-header">customization</div>
+          <div class="settings-inner">
+            <div class="nested-panel">
+              <div class="nested-header">file click action</div>
+              <textarea id="file-click-template" class="config-textarea settings-textarea" placeholder="Template for clicking a file. Use {path} for the file path."></textarea>
+            </div>
+            <div class="nested-panel">
+              <div class="nested-header">theme</div>
+              <div class="theme-picker" id="theme-picker">
+                <!-- dynamically populated by fetchThemes() -->
+              </div>
+            </div>
+          </div>
+        </section>
+
       </div>
     </div>
 
-    <!-- Context column: in-context + slash commands -->
+    <!-- Context column: reference (packs + slash) + status (in-context + task) -->
     <div class="context-column">
-      <div class="file-panel" id="context-panel">
-        <div class="file-panel-header">
-          <span>in context</span>
-          <button onclick="clearContextFiles()">✕</button>
-        </div>
-        <div class="file-panel-inner" id="context-files"></div>
-      </div>
 
-      <div class="file-panel slash-panel" id="slash-panel">
+      <!-- Status panel: in-context files + task list as side-by-side sub-panels -->
+      <section class="file-panel status-panel" id="status-panel">
         <div class="file-panel-header">
-          <span>slash commands</span>
-          <button id="slash-edit-btn" onclick="toggleSlashEdit()" title="Edit">✎</button>
+          <span>status</span>
         </div>
-        <div class="file-panel-inner slash-inner" id="slash-inner"></div>
-        <textarea id="slash-editor" class="slash-editor" style="display:none"></textarea>
+        <div class="file-panel-inner status-inner">
+
+          <!-- [status-subpanel:context] Files the model has read this turn. -->
+          <div class="nested-panel status-subpanel" id="context-panel" data-panel="context">
+            <div class="nested-header">
+              <span>in context</span>
+              <button onclick="clearContextFiles()" title="Clear">✕</button>
+            </div>
+            <div class="file-panel-inner status-subinner" id="context-files"></div>
+          </div>
+
+          <!-- [status-subpanel:task] task.md checklist for the active project. -->
+          <div class="nested-panel status-subpanel task-panel" id="task-panel" data-panel="task">
+            <div class="nested-header">
+              <span>task list</span>
+              <button onclick="refreshTaskPanel()" title="Refresh task list">↺</button>
+            </div>
+            <div class="file-panel-inner task-inner status-subinner" id="task-inner">
+              <span class="task-empty">no task.md found</span>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- Reference panel: two nested sub-panels (knowledge packs + slash commands) -->
+      <div class="file-panel info-panel" id="info-panel">
+        <div class="file-panel-header">
+          <span>reference</span>
+        </div>
+        <div class="file-panel-inner info-inner">
+          <div class="nested-panel info-section">
+            <div class="nested-header">
+              <span>knowledge packs</span>
+              <button onclick="refreshPacks()" title="Rescan packs">↺</button>
+            </div>
+            <div class="packs-chips" id="packs-chips">
+              <span class="packs-empty">no packs found</span>
+            </div>
+          </div>
+          <div class="nested-panel info-section info-section-slash">
+            <div class="nested-header">
+              <span>slash commands</span>
+              <button id="slash-edit-btn" onclick="toggleSlashEdit()" title="Edit">✎</button>
+            </div>
+            <div class="slash-inner" id="slash-inner"></div>
+            <textarea id="slash-editor" class="slash-editor" style="display:none"></textarea>
+          </div>
+        </div>
       </div>
     </div>
 
-    <!-- Right column: files + packs + task (grid-aligned) + dev (below) -->
+    <!-- Right column: files + bot-ops -->
     <div class="right-column">
       <div class="right-grid">
         <div class="file-panel">
@@ -154,28 +212,6 @@
             <button onclick="refreshTree()">↺</button>
           </div>
           <div class="file-panel-inner" id="file-tree"></div>
-        </div>
-
-        <div class="file-panel packs-panel-side">
-          <div class="file-panel-header">
-            <span>knowledge packs</span>
-            <button onclick="refreshPacks()" title="Rescan packs">↺</button>
-          </div>
-          <div class="file-panel-inner packs-inner">
-            <div class="packs-chips" id="packs-chips">
-              <span class="packs-empty">no packs found</span>
-            </div>
-          </div>
-        </div>
-
-        <div class="file-panel task-panel" id="task-panel">
-          <div class="file-panel-header">
-            <span>task list</span>
-            <button onclick="refreshTaskPanel()" title="Refresh task list">↺</button>
-          </div>
-          <div class="file-panel-inner task-inner" id="task-inner">
-            <span class="task-empty">no task.md found</span>
-          </div>
         </div>
       </div>
 
@@ -194,15 +230,21 @@
             server.py, exposed via the `remote_control` WS type AND a
             POST /api/session/{sid}/control HTTP route.
       -->
-      <div class="bot-ops" id="bot-ops">
+      <!-- Bot-ops: single outer panel wrapping three nested sub-panels
+           (spectate / control / inventory). Module contract unchanged:
+           ids and cross-panel signal (#spectate-select) preserved. -->
+      <section class="file-panel bot-ops-panel" id="bot-ops" data-panel="bot-ops">
+        <div class="file-panel-header">
+          <span>bot ops</span>
+        </div>
+        <div class="file-panel-inner bot-ops-inner">
 
-        <!-- [bot-panel:spectate] Read-only tail of a Discord session's frames. -->
-        <section class="file-panel dev-panel bot-panel" data-panel="spectate">
-          <div class="file-panel-header">
-            <span>bot · spectate</span>
-            <button onclick="refreshSpectateSessions()" title="Refresh sessions">↺</button>
-          </div>
-          <div class="file-panel-inner dev-panel-inner">
+          <!-- [bot-subpanel:spectate] Read-only tail of a Discord session's frames. -->
+          <div class="nested-panel bot-subpanel" data-panel="spectate">
+            <div class="nested-header">
+              <span>spectate</span>
+              <button onclick="refreshSpectateSessions()" title="Refresh sessions">↺</button>
+            </div>
             <div class="dev-row">
               <select id="spectate-select" class="dev-select" onchange="onSpectateSelectChange()">
                 <option value="">Pick a session…</option>
@@ -224,17 +266,14 @@
             </div>
             <div class="dev-row dev-counts" id="dev-counts">no events yet</div>
           </div>
-        </section>
 
-        <!-- [bot-panel:control] Fires reset/compact/cancel/set_prompt against -->
-        <!-- whatever session is selected in the spectate <select>. Buttons  -->
-        <!-- disable when no live session is targeted.                       -->
-        <section class="file-panel bot-panel" data-panel="control">
-          <div class="file-panel-header">
-            <span>bot · control</span>
-            <span id="control-target" class="dev-status">no target</span>
-          </div>
-          <div class="file-panel-inner dev-panel-inner">
+          <!-- [bot-subpanel:control] Fires reset/compact/cancel/set_prompt against -->
+          <!-- whatever session is selected in the spectate <select>.               -->
+          <div class="nested-panel bot-subpanel" data-panel="control">
+            <div class="nested-header">
+              <span>control</span>
+              <span id="control-target" class="dev-status">no target</span>
+            </div>
             <div class="dev-row dev-row-btns">
               <button class="dev-btn" data-action="reset"   onclick="remoteControl('reset')">reset</button>
               <button class="dev-btn" data-action="compact" onclick="remoteControl('compact')">compact</button>
@@ -247,16 +286,14 @@
             </div>
             <div class="dev-row dev-counts" id="control-status">pick a session above</div>
           </div>
-        </section>
 
-        <!-- [bot-panel:inventory] Table of every known session with live/off status, -->
-        <!-- event count, last activity. Row-click pre-selects into spectate.        -->
-        <section class="file-panel bot-panel" data-panel="inventory">
-          <div class="file-panel-header">
-            <span>bot · sessions</span>
-            <button onclick="refreshSessionInventory()" title="Refresh inventory">↺</button>
-          </div>
-          <div class="file-panel-inner dev-panel-inner">
+          <!-- [bot-subpanel:inventory] Table of every known session; row-click -->
+          <!-- pre-selects into #spectate-select.                               -->
+          <div class="nested-panel bot-subpanel" data-panel="inventory">
+            <div class="nested-header">
+              <span>sessions</span>
+              <button onclick="refreshSessionInventory()" title="Refresh inventory">↺</button>
+            </div>
             <table class="inv-table" id="inv-table">
               <thead>
                 <tr><th>session</th><th>events</th><th>last</th><th>state</th></tr>
@@ -266,8 +303,9 @@
               </tbody>
             </table>
           </div>
-        </section>
-      </div>
+
+        </div>
+      </section>
     </div>
 
   </div>
