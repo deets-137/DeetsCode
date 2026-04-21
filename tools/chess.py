@@ -46,18 +46,22 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "chess_new",
             "description": (
-                "Start a new chess game in the current channel. Both players must be "
-                "specified. Use the literal string 'computer' for an AI-controlled "
-                "side. Returns a short game_id — quote this in future calls and in "
-                "your reply so players can reference the right game."
+                "Start a new chess game in the current channel. "
+                "IMPORTANT: white_id and black_id must be either the literal string "
+                "'computer' OR the caller's Discord user ID (the numeric `id` from the "
+                "current message envelope — a long digit string, not a display name). "
+                "Do NOT pass a nickname or display name as white_id/black_id. "
+                "After creating the game, DO NOT make the first move unless that side "
+                "is 'computer'. If the human plays White, wait for them to send a move. "
+                "Returns a short game_id — quote it in replies so players can reference it."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "white_id":   {"type": "string", "description": "Discord user ID for White, or 'computer'"},
-                    "black_id":   {"type": "string", "description": "Discord user ID for Black, or 'computer'"},
-                    "white_name": {"type": "string", "description": "Display name for White"},
-                    "black_name": {"type": "string", "description": "Display name for Black"},
+                    "white_id":   {"type": "string", "description": "Numeric Discord user id (from message envelope) or 'computer'. NEVER a display name."},
+                    "black_id":   {"type": "string", "description": "Numeric Discord user id (from message envelope) or 'computer'. NEVER a display name."},
+                    "white_name": {"type": "string", "description": "Display name to show for White (can be the user's nickname)"},
+                    "black_name": {"type": "string", "description": "Display name to show for Black (can be the user's nickname)"},
                 },
                 "required": ["white_id", "black_id", "white_name", "black_name"],
             },
@@ -69,9 +73,13 @@ TOOL_DEFINITIONS = [
             "name": "chess_move",
             "description": (
                 "Make a move in an active game. Accepts SAN (e.g. 'Nf3', 'O-O', 'exd5') "
-                "or UCI (e.g. 'g1f3'). Rejects illegal moves, moves when it's not your "
-                "turn, and moves after the game has ended. Optionally annotate the move "
-                "with a PGN symbol like '!', '?!', '!!', '?', '??'."
+                "or UCI (e.g. 'g1f3'). The mover's identity is taken automatically from "
+                "the current message envelope's `id` — you do NOT pass it. The tool "
+                "rejects the move if that id is not the side whose turn it is, if the "
+                "move is illegal, or if the game has ended. If the active side is "
+                "'computer', YOU call this tool on its behalf. Optionally annotate with "
+                "a PGN symbol like '!', '?!', '!!', '?', '??'. Auto-renders the board — "
+                "do NOT follow up with chess_board."
             ),
             "parameters": {
                 "type": "object",
@@ -88,7 +96,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "chess_board",
-            "description": "Show the current board for a game: ASCII diagram, FEN, whose turn, and status.",
+            "description": (
+                "Re-render the current board (ASCII + FEN + whose turn). "
+                "Only call this when the user explicitly asks to see the board again. "
+                "chess_move and chess_new already render — do NOT call this after them."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -121,7 +133,11 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "chess_resign",
-            "description": "Resign the game on behalf of the caller (player_id inferred from context). Ends the game; opposite side wins.",
+            "description": (
+                "Resign the game on behalf of the current speaker. Their Discord id is "
+                "taken automatically from the message envelope — do NOT pass it. Ends "
+                "the game; the opposite side wins."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -149,7 +165,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "chess_history",
-            "description": "Return the game as PGN — full move list with annotations and result.",
+            "description": "Return the full move list as PGN (standard chess notation) including annotations and the game result.",
             "parameters": {
                 "type": "object",
                 "properties": {
