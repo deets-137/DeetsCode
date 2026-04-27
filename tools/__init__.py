@@ -34,6 +34,7 @@ _MODE_PACKS: dict[str, str] = {
     "DeetsCode": "coding",
     "default":   "coding",  # backcompat alias for pre-rename sessions
     "chess":     "chess",
+    "blog":      "blog",
     # "dnd":   "dnd",    # future
     # "mafia": "mafia",  # future
 }

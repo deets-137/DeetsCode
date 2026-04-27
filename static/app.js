@@ -1102,4 +1102,496 @@ document.addEventListener("DOMContentLoaded", () => {
 
   renderSlashPanel();
   connect();
+  initBlogPanels();
 });
+
+
+// ─── Blog mode panels ─────────────────────────────────────────────────────
+//
+// Self-contained module for the DeetsOTD blog authoring hub. Visible only
+// when the active prompt is "blog" — the outer <section id="blog-ops"> gets
+// its `.mode-hidden` toggled by `applyModeVisibility`.
+//
+// State lives in this scope only (currentMode, currentDraft, lastSongHits).
+// Server contract: every action sends a `blog_*` WS message and the response
+// arrives as a `blog_*` WS event handled in the dispatcher below.
+// ──────────────────────────────────────────────────────────────────────────
+
+let currentMode = "DeetsCode";
+let currentDraft = null;     // the post object loaded into the editor, or a kind sentinel for new posts
+let lastSongHits = [];
+
+function isBlogMode() { return currentMode === "blog"; }
+
+// Per-mode panel visibility. Each entry is { hideInModes: [...] }.
+// Modularization pays off here — every panel is a self-contained <section>
+// keyed by an id, so toggling .mode-hidden hides it without touching layout.
+//
+// The blog view strips out panels that aren't relevant to blogging:
+//   - file tree (no project files in blog mode)
+//   - status (in-context files + task.md — neither applies)
+//   - bot-ops (Discord remote control)
+// Keeps the activity panel (tool calls / pending writes from the model when
+// summoned) and settings (model + mode picker).
+const _PANEL_HIDE_RULES = [
+  { id: "blog-ops",       showOnlyIn: ["blog"] },
+  { id: "bot-ops",        hideIn:     ["blog"] },
+  { id: "status-panel",   hideIn:     ["blog"] },
+];
+
+function applyModeVisibility() {
+  for (const r of _PANEL_HIDE_RULES) {
+    const el = document.getElementById(r.id);
+    if (!el) continue;
+    let hide;
+    if (r.showOnlyIn) hide = !r.showOnlyIn.includes(currentMode);
+    else if (r.hideIn) hide = r.hideIn.includes(currentMode);
+    else hide = false;
+    el.classList.toggle("mode-hidden", hide);
+  }
+  // The right column also contains a `.right-grid` wrapping the file tree.
+  // Hide its parent .file-panel (the file tree one — it has no id, so we
+  // resolve it via the tree's container).
+  const fileTree = document.getElementById("file-tree");
+  if (fileTree) {
+    const filePanel = fileTree.closest(".file-panel");
+    if (filePanel) filePanel.classList.toggle("mode-hidden", isBlogMode());
+  }
+}
+
+async function loadPromptModes() {
+  const sel = document.getElementById("prompt-select");
+  if (!sel) return;
+  try {
+    const r = await fetch("/api/prompts");
+    const { prompts } = await r.json();
+    sel.innerHTML = "";
+    for (const name of prompts) {
+      const opt = document.createElement("option");
+      opt.value = name;
+      opt.textContent = name;
+      sel.appendChild(opt);
+    }
+    const saved = localStorage.getItem("harness-mode") || "DeetsCode";
+    if (prompts.includes(saved)) sel.value = saved;
+    currentMode = sel.value;
+    applyModeVisibility();
+    // Sync the persisted mode to the server. The server defaults to DeetsCode
+    // on each new WS connection; without this, a sticky "blog" choice in
+    // localStorage would only update the UI while the server-side prompt
+    // and tool pack stayed wrong until the user re-touched the dropdown.
+    syncModeToServer();
+    if (isBlogMode()) refreshBlogDrafts();
+  } catch (e) { console.error("loadPromptModes:", e); }
+
+  sel.addEventListener("change", () => {
+    currentMode = sel.value;
+    localStorage.setItem("harness-mode", currentMode);
+    syncModeToServer();
+    applyModeVisibility();
+    if (isBlogMode()) {
+      refreshBlogDrafts();
+      refreshBlogComments();
+      refreshBlogPreview();
+    }
+  });
+}
+
+// Push the current mode to the server. Retries until the WS opens — handles
+// the page-load race where loadPromptModes() finishes before connect() does.
+function syncModeToServer() {
+  if (!currentMode) return;
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "set_prompt", prompt: currentMode }));
+    return;
+  }
+  setTimeout(syncModeToServer, 200);
+}
+
+// ── WS dispatcher for blog_* events ────────────────────────────────────────
+function handleBlogMessage(data) {
+  switch (data.type) {
+    case "blog_posts":           renderBlogList(data.posts); break;
+    case "blog_post":            loadDraftIntoEditor(data.post); break;
+    case "blog_post_saved":      onBlogPostSaved(data.post); break;
+    case "blog_post_deleted":    onBlogPostDeleted(data.slug); break;
+    case "blog_song_results":    renderSongResults(data.results || []); break;
+    case "blog_comments":        renderBlogComments(data.comments || []); break;
+    case "blog_comment_deleted": refreshBlogComments(); break;
+    case "blog_preview_url":     setPreviewUrl(data.url); break;
+    case "blog_error":           console.warn("blog error:", data); alertBlog(`${data.op}: ${data.error}`); break;
+  }
+}
+
+function alertBlog(msg) {
+  const box = document.getElementById("blog-editor-status");
+  if (box) box.textContent = msg;
+}
+
+function blogSend(msg) {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  ws.send(JSON.stringify(msg));
+}
+
+// ── Drafts list ────────────────────────────────────────────────────────────
+function refreshBlogDrafts() {
+  const kind   = (document.getElementById("blog-filter-kind")?.value) || "";
+  const status = (document.getElementById("blog-filter-status")?.value) || "";
+  const payload = { type: "blog_list_posts" };
+  if (kind)   payload.kind = kind;
+  if (status) payload.status = status;
+  blogSend(payload);
+}
+
+function renderBlogList(posts) {
+  const el = document.getElementById("blog-list");
+  if (!el) return;
+  if (!posts || !posts.length) {
+    el.innerHTML = '<div class="blog-empty">no posts</div>';
+    return;
+  }
+  el.innerHTML = "";
+  for (const p of posts) {
+    const row = document.createElement("div");
+    row.className = "blog-row";
+    row.dataset.slug = p.slug;
+    row.innerHTML = `
+      <span class="blog-kind blog-kind-${p.kind}">${p.kind}</span>
+      <span class="blog-row-title">${escapeHtml(p.title)}</span>
+      <span class="blog-row-meta">${p.date}</span>
+      <span class="blog-status blog-status-${p.status}">${p.status}</span>
+    `;
+    row.addEventListener("click", () => loadDraftIntoEditor(p));
+    el.appendChild(row);
+  }
+}
+
+// ── Editor ─────────────────────────────────────────────────────────────────
+function openBlogEditor(kind) {
+  currentDraft = { kind, slug: null, title: "", date: today(), meta: {}, body_md: "", locked: false, status: "draft" };
+  renderEditor();
+  const status = document.getElementById("blog-editor-status");
+  if (status) status.textContent = `new ${kind}`;
+}
+
+function loadDraftIntoEditor(p) {
+  if (!p) return;
+  currentDraft = JSON.parse(JSON.stringify(p));
+  renderEditor();
+  const status = document.getElementById("blog-editor-status");
+  if (status) status.textContent = `${p.status}: ${p.slug}`;
+}
+
+function today() {
+  const d = new Date();
+  return d.toISOString().slice(0, 10);
+}
+
+function renderEditor() {
+  const el = document.getElementById("blog-editor");
+  const titleEl = document.getElementById("blog-editor-title");
+  if (!el) return;
+  if (!currentDraft) {
+    el.innerHTML = '<div class="blog-empty">click + song / + movie / + journal above, or pick a draft from the list.</div>';
+    return;
+  }
+  const k = currentDraft.kind;
+  if (titleEl) titleEl.textContent = `${k} editor`;
+  const m = currentDraft.meta || {};
+  let kindFields = "";
+  if (k === "song") {
+    kindFields = `
+      <label class="blog-field"><span>artist</span>
+        <input type="text" data-meta="artist" value="${escapeAttr(m.artist || "")}" /></label>
+      <label class="blog-field"><span>album</span>
+        <input type="text" data-meta="album" value="${escapeAttr(m.album || "")}" /></label>
+      <label class="blog-field"><span>genre</span>
+        <input type="text" data-meta="genre" value="${escapeAttr(m.genre || "")}" /></label>
+      <label class="blog-field"><span>length (sec)</span>
+        <input type="number" data-meta="length_seconds" value="${m.length_seconds || ""}" /></label>
+      <label class="blog-field"><span>iTunes URL</span>
+        <input type="url" data-meta="itunes_url" value="${escapeAttr(m.itunes_url || "")}" /></label>
+      <label class="blog-field"><span>art URL</span>
+        <input type="url" data-meta="art_url" value="${escapeAttr(m.art_url || "")}" /></label>
+    `;
+  } else if (k === "movie") {
+    kindFields = `
+      <label class="blog-field"><span>director</span>
+        <input type="text" data-meta="director" value="${escapeAttr(m.director || "")}" /></label>
+      <label class="blog-field"><span>year</span>
+        <input type="number" data-meta="year" value="${m.year || ""}" /></label>
+      <label class="blog-field"><span>length (min)</span>
+        <input type="number" data-meta="length_minutes" value="${m.length_minutes || ""}" /></label>
+      <label class="blog-field"><span>genre</span>
+        <input type="text" data-meta="genre" value="${escapeAttr(m.genre || "")}" /></label>
+      <label class="blog-field"><span>rating (0-10, .5 steps)</span>
+        <input type="number" step="0.5" min="0" max="10" data-meta="rating" value="${m.rating ?? ""}" /></label>
+    `;
+  }
+  const showLock = (k === "journal");
+  const showBody = (k !== "song");
+  const showMedia = true;
+
+  el.innerHTML = `
+    <label class="blog-field"><span>title</span>
+      <input id="blog-edit-title" type="text" value="${escapeAttr(currentDraft.title || "")}" /></label>
+    <label class="blog-field"><span>date</span>
+      <input id="blog-edit-date" type="date" value="${escapeAttr(currentDraft.date || today())}" /></label>
+    ${kindFields}
+    ${showBody ? `
+      <label class="blog-field blog-field-wide"><span>body (markdown)</span>
+        <textarea id="blog-edit-body" rows="6">${escapeHtml(currentDraft.body_md || "")}</textarea></label>
+    ` : ""}
+    ${showLock ? `
+      <label class="blog-field blog-field-inline">
+        <input id="blog-edit-locked" type="checkbox" ${currentDraft.locked ? "checked" : ""} />
+        <span>locked (passphrase-gated)</span>
+      </label>
+    ` : ""}
+    ${showMedia ? `
+      <label class="blog-field"><span>media path (local file to attach)</span>
+        <input id="blog-edit-media" type="text" placeholder="C:\\path\\to\\image.jpg" />
+        <span class="blog-field-hint">${currentDraft.media_path ? `current: ${escapeHtml(currentDraft.media_path)}` : "none attached"}</span>
+      </label>
+    ` : ""}
+    <div class="dev-row dev-row-btns">
+      <button class="dev-btn" onclick="saveBlogDraft()">save draft</button>
+      ${currentDraft.slug ? `
+        ${currentDraft.status === "published"
+          ? `<button class="dev-btn" onclick="unpublishBlogDraft()">unpublish</button>`
+          : `<button class="dev-btn" onclick="publishBlogDraft()">publish</button>`}
+        <button class="dev-btn" onclick="deleteBlogDraft()">delete</button>
+      ` : ""}
+    </div>
+  `;
+}
+
+function readEditorState() {
+  const titleEl = document.getElementById("blog-edit-title");
+  const dateEl  = document.getElementById("blog-edit-date");
+  const bodyEl  = document.getElementById("blog-edit-body");
+  const lockEl  = document.getElementById("blog-edit-locked");
+
+  const meta = {};
+  document.querySelectorAll("#blog-editor [data-meta]").forEach(inp => {
+    const key = inp.dataset.meta;
+    let val = inp.value;
+    if (val === "") return;
+    if (inp.type === "number") val = Number(val);
+    meta[key] = val;
+  });
+
+  return {
+    title: titleEl?.value || "",
+    date:  dateEl?.value  || today(),
+    body_md: bodyEl ? bodyEl.value : null,
+    locked: !!(lockEl && lockEl.checked),
+    meta,
+  };
+}
+
+function saveBlogDraft() {
+  if (!currentDraft) return;
+  const state = readEditorState();
+  if (!state.title.trim()) { alertBlog("title required"); return; }
+  if (currentDraft.slug) {
+    blogSend({
+      type: "blog_update_post",
+      slug: currentDraft.slug,
+      title: state.title,
+      date:  state.date,
+      body_md: state.body_md,
+      locked: state.locked,
+      meta: state.meta,
+    });
+  } else {
+    blogSend({
+      type: "blog_create_post",
+      kind: currentDraft.kind,
+      title: state.title,
+      date:  state.date,
+      body_md: state.body_md,
+      locked: state.locked,
+      meta: state.meta,
+    });
+  }
+
+  // If a media path was specified, attach it after save.
+  const mediaEl = document.getElementById("blog-edit-media");
+  const mediaPath = mediaEl?.value.trim();
+  if (mediaPath) {
+    pendingMediaAttach = mediaPath;
+  }
+}
+
+let pendingMediaAttach = null;
+
+function publishBlogDraft() {
+  if (!currentDraft?.slug) return;
+  blogSend({ type: "blog_publish", slug: currentDraft.slug });
+}
+function unpublishBlogDraft() {
+  if (!currentDraft?.slug) return;
+  blogSend({ type: "blog_unpublish", slug: currentDraft.slug });
+}
+function deleteBlogDraft() {
+  if (!currentDraft?.slug) return;
+  if (!confirm(`Delete "${currentDraft.title}" and its comments?`)) return;
+  blogSend({ type: "blog_delete_post", slug: currentDraft.slug });
+}
+
+function onBlogPostSaved(p) {
+  currentDraft = p;
+  if (pendingMediaAttach) {
+    blogSend({ type: "blog_attach_media", slug: p.slug, src_path: pendingMediaAttach });
+    pendingMediaAttach = null;
+    return;  // wait for next blog_post_saved
+  }
+  renderEditor();
+  const status = document.getElementById("blog-editor-status");
+  if (status) status.textContent = `saved: ${p.slug} [${p.status}]`;
+  refreshBlogDrafts();
+}
+
+function onBlogPostDeleted(slug) {
+  if (currentDraft?.slug === slug) {
+    currentDraft = null;
+    renderEditor();
+  }
+  refreshBlogDrafts();
+}
+
+// ── Song lookup ────────────────────────────────────────────────────────────
+function blogLookupSong() {
+  const q = document.getElementById("blog-song-query")?.value.trim();
+  if (!q) return;
+  blogSend({ type: "blog_lookup_song", query: q, limit: 10 });
+}
+
+function renderSongResults(results) {
+  lastSongHits = results;
+  const el = document.getElementById("blog-song-results");
+  if (!el) return;
+  if (!results.length) {
+    el.innerHTML = '<div class="blog-empty">no matches</div>';
+    return;
+  }
+  el.innerHTML = "";
+  results.forEach((r, i) => {
+    const secs = r.length_ms ? Math.round(r.length_ms / 1000) : null;
+    const len = secs ? `${Math.floor(secs / 60)}:${String(secs % 60).padStart(2, "0")}` : "";
+    const row = document.createElement("div");
+    row.className = "blog-song-hit";
+    row.innerHTML = `
+      ${r.art_url ? `<img class="blog-song-art" src="${escapeAttr(r.art_url)}" alt="" loading="lazy" />` : `<div class="blog-song-art blog-song-art-placeholder"></div>`}
+      <div class="blog-song-meta">
+        <div class="blog-song-title">${escapeHtml(r.title || "")}</div>
+        <div class="blog-song-sub">${escapeHtml(r.artist || "")} · ${escapeHtml(r.album || "")} · ${escapeHtml(r.genre || "")}${len ? ` · ${len}` : ""}</div>
+      </div>
+      <button class="dev-btn" onclick="applyBlogSongHit(${i})">use</button>
+    `;
+    el.appendChild(row);
+  });
+}
+
+function applyBlogSongHit(i) {
+  const hit = lastSongHits[i];
+  if (!hit) return;
+  // If editor is empty / not a song draft, start a new song draft.
+  if (!currentDraft || currentDraft.kind !== "song") {
+    openBlogEditor("song");
+  }
+  const seconds = hit.length_ms ? Math.round(hit.length_ms / 1000) : null;
+  currentDraft.title = hit.title || currentDraft.title;
+  currentDraft.meta = {
+    ...(currentDraft.meta || {}),
+    artist:         hit.artist,
+    album:          hit.album,
+    genre:          hit.genre,
+    length_seconds: seconds,
+    itunes_url:     hit.itunes_url,
+    art_url:        hit.art_url,
+  };
+  renderEditor();
+}
+
+// ── Comments inbox ─────────────────────────────────────────────────────────
+function refreshBlogComments() {
+  blogSend({ type: "blog_list_comments", limit: 100 });
+}
+
+function renderBlogComments(comments) {
+  const el = document.getElementById("blog-comments");
+  if (!el) return;
+  if (!comments.length) {
+    el.innerHTML = '<div class="blog-empty">no comments yet</div>';
+    return;
+  }
+  el.innerHTML = "";
+  for (const c of comments) {
+    const row = document.createElement("div");
+    row.className = "blog-comment-row";
+    row.innerHTML = `
+      <div class="blog-comment-head">
+        <span class="blog-comment-author">${escapeHtml(c.author)}</span>
+        <span class="blog-comment-time">${escapeHtml(c.created_at)}</span>
+      </div>
+      <div class="blog-comment-body">${escapeHtml(c.body)}</div>
+      <div class="blog-comment-foot">
+        <span class="blog-comment-post">post: ${c.post_id.slice(0, 8)}</span>
+        <button class="dev-btn" onclick="deleteBlogComment('${c.id}')">delete</button>
+      </div>
+    `;
+    el.appendChild(row);
+  }
+}
+
+function deleteBlogComment(id) {
+  if (!confirm("delete comment?")) return;
+  blogSend({ type: "blog_delete_comment", comment_id: id });
+}
+
+// ── Preview iframe ─────────────────────────────────────────────────────────
+function refreshBlogPreview() {
+  const u = document.getElementById("blog-preview-url")?.value || "http://localhost:8080";
+  setPreviewUrl(u);
+}
+function setPreviewUrl(url) {
+  const frame = document.getElementById("blog-preview-frame");
+  const open  = document.getElementById("blog-preview-open");
+  const inp   = document.getElementById("blog-preview-url");
+  if (frame) frame.src = url;
+  if (open)  open.href = url;
+  if (inp)   inp.value = url;
+}
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function escapeAttr(s) {
+  return String(s ?? "")
+    .replace(/&/g, "&amp;").replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+
+function initBlogPanels() {
+  loadPromptModes();
+  // The connect()'s ws.onmessage already routes events; we hook in by
+  // wrapping the existing handler so we don't have to edit it inline.
+  const origConnect = window.connect;
+  // No-op: handleBlogMessage is invoked from the patched ws.onmessage
+  // below, set up after the WS connects.
+  const tryAttach = () => {
+    if (!ws) return setTimeout(tryAttach, 200);
+    const prev = ws.onmessage;
+    ws.onmessage = (event) => {
+      if (typeof prev === "function") prev(event);
+      try {
+        const data = JSON.parse(event.data);
+        if (data && typeof data.type === "string" && data.type.startsWith("blog_")) {
+          handleBlogMessage(data);
+        }
+      } catch (e) { /* ignore */ }
+    };
+  };
+  tryAttach();
+}
+
