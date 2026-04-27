@@ -1004,6 +1004,77 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_json({"type": "error", "content": f"Compact failed: {e}"})
                 continue
 
+            # ── Blog panel ops (mode='blog') ──────────────────────────────
+            # All blog_* messages share the service layer with tools/blog.py,
+            # so panel actions and model actions stay in sync against the
+            # same SQLite. The panels can run without ever talking to the model.
+            if isinstance(data.get("type"), str) and data["type"].startswith("blog_"):
+                try:
+                    from tools import blog_service as _blog_svc
+                except Exception as e:
+                    await ws.send_json({"type": "blog_error", "op": data["type"], "error": f"blog service load failed: {e}"})
+                    continue
+                op = data["type"]
+                req_id = data.get("req_id")
+                try:
+                    if op == "blog_list_posts":
+                        payload = _blog_svc.list_posts(
+                            kind=data.get("kind"),
+                            status=data.get("status"),
+                            limit=int(data.get("limit") or 200),
+                        )
+                        await ws.send_json({"type": "blog_posts", "req_id": req_id, "posts": payload})
+                    elif op == "blog_get_post":
+                        payload = _blog_svc.get_post(data["slug"])
+                        await ws.send_json({"type": "blog_post", "req_id": req_id, "post": payload})
+                    elif op == "blog_create_post":
+                        p = _blog_svc.create_post(
+                            kind=data["kind"],
+                            title=data["title"],
+                            date=data.get("date"),
+                            meta=data.get("meta") or {},
+                            body_md=data.get("body_md"),
+                            locked=bool(data.get("locked", False)),
+                            slug=data.get("slug"),
+                        )
+                        await ws.send_json({"type": "blog_post_saved", "req_id": req_id, "post": p})
+                    elif op == "blog_update_post":
+                        slug = data["slug"]
+                        fields = {k: v for k, v in data.items()
+                                  if k not in {"type", "slug", "req_id"}}
+                        p = _blog_svc.update_post(slug, **fields)
+                        await ws.send_json({"type": "blog_post_saved", "req_id": req_id, "post": p})
+                    elif op == "blog_publish":
+                        p = _blog_svc.publish(data["slug"])
+                        await ws.send_json({"type": "blog_post_saved", "req_id": req_id, "post": p})
+                    elif op == "blog_unpublish":
+                        p = _blog_svc.unpublish(data["slug"])
+                        await ws.send_json({"type": "blog_post_saved", "req_id": req_id, "post": p})
+                    elif op == "blog_delete_post":
+                        _blog_svc.delete_post(data["slug"])
+                        await ws.send_json({"type": "blog_post_deleted", "req_id": req_id, "slug": data["slug"]})
+                    elif op == "blog_attach_media":
+                        p = _blog_svc.attach_media(data["slug"], data["src_path"])
+                        await ws.send_json({"type": "blog_post_saved", "req_id": req_id, "post": p})
+                    elif op == "blog_lookup_song":
+                        results = await _blog_svc.lookup_song(
+                            data["query"], limit=int(data.get("limit") or 10)
+                        )
+                        await ws.send_json({"type": "blog_song_results", "req_id": req_id, "results": results})
+                    elif op == "blog_list_comments":
+                        cs = _blog_svc.list_recent_comments(limit=int(data.get("limit") or 100))
+                        await ws.send_json({"type": "blog_comments", "req_id": req_id, "comments": cs})
+                    elif op == "blog_delete_comment":
+                        _blog_svc.delete_comment(data["comment_id"])
+                        await ws.send_json({"type": "blog_comment_deleted", "req_id": req_id, "comment_id": data["comment_id"]})
+                    elif op == "blog_preview_url":
+                        await ws.send_json({"type": "blog_preview_url", "req_id": req_id, "url": _blog_svc.preview_url()})
+                    else:
+                        await ws.send_json({"type": "blog_error", "op": op, "error": "unknown op"})
+                except Exception as e:
+                    await ws.send_json({"type": "blog_error", "op": op, "req_id": req_id, "error": str(e)})
+                continue
+
             if data["type"] == "set_packs":
                 incoming = data.get("names", [])
                 if isinstance(incoming, list):

@@ -1282,3 +1282,240 @@ input:checked + .toggle-slider:before {
 .inv-state.live { background: rgba(80, 160, 80, 0.25); color: #2a5c2a; }
 .inv-state.off  { background: rgba(0,0,0,0.06); opacity: 0.6; }
 .inv-empty { text-align: center; opacity: 0.5; padding: 12px; }
+
+
+/* ─── Blog ops panel ──────────────────────────────────────────────────────
+   Authoring hub for the DeetsOTD blog. Visible only when mode === "blog".
+   All colors/sizes pull from theme.css tokens; no literals. The blog FE
+   has its own theme.css over in ~/Documents/blog — do not cross-reference
+   tokens between the two. */
+
+.mode-hidden { display: none !important; }
+
+.blog-ops-panel { display: flex; flex-direction: column; }
+.blog-ops-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 8px;
+  overflow-y: auto;
+}
+
+.blog-subpanel { padding: 8px 10px; }
+.blog-subpanel .nested-header { gap: 6px; }
+
+.blog-empty {
+  font-size: 11px;
+  font-style: italic;
+  color: var(--response-text);
+  opacity: 0.5;
+  padding: 8px 4px;
+}
+
+/* Drafts list */
+.blog-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.blog-row {
+  display: grid;
+  grid-template-columns: 56px 1fr auto auto;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  font-size: 11px;
+  transition: background 0.15s ease;
+}
+.blog-row:hover { background: rgba(255, 255, 255, 0.10); }
+
+.blog-kind {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid var(--glass-border);
+  text-align: center;
+}
+.blog-kind-song    { color: var(--response-text); }
+.blog-kind-movie   { color: var(--response-text); }
+.blog-kind-journal { color: var(--response-text); }
+
+.blog-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--response-text);
+}
+.blog-row-meta {
+  font-family: 'Consolas', 'Menlo', monospace;
+  font-size: 10px;
+  opacity: 0.6;
+}
+.blog-status {
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  border: 1px solid var(--glass-border);
+}
+.blog-status-draft     { opacity: 0.6; }
+.blog-status-published { background: rgba(255, 255, 255, 0.10); }
+
+/* Editor form */
+.blog-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+.blog-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 10.5px;
+  color: var(--response-text);
+}
+.blog-field > span {
+  opacity: 0.7;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 9.5px;
+}
+.blog-field input[type="text"],
+.blog-field input[type="url"],
+.blog-field input[type="number"],
+.blog-field input[type="date"],
+.blog-field textarea {
+  background: var(--textbox-bg);
+  color: var(--textbox-text);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 11.5px;
+  outline: none;
+}
+.blog-field input:focus,
+.blog-field textarea:focus { box-shadow: var(--focus-glow); }
+
+.blog-field textarea { resize: vertical; min-height: 80px; font-family: 'Consolas', 'Menlo', monospace; font-size: 11px; }
+
+.blog-field-inline {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.blog-field-inline > span { text-transform: none; letter-spacing: 0; font-size: 11px; }
+
+.blog-field-hint {
+  font-size: 10px;
+  font-family: 'Consolas', 'Menlo', monospace;
+  opacity: 0.55;
+  margin-top: 2px;
+}
+
+/* Song lookup */
+.dev-input {
+  flex: 1;
+  background: var(--textbox-bg);
+  color: var(--textbox-text);
+  border: 1px solid var(--glass-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-family: 'Aptos', 'Segoe UI', sans-serif;
+  font-size: 11.5px;
+  outline: none;
+}
+.dev-input:focus { box-shadow: var(--focus-glow); }
+
+.blog-song-results {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 6px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+.blog-song-hit {
+  display: grid;
+  grid-template-columns: 36px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+}
+.blog-song-art {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  object-fit: cover;
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid var(--glass-border);
+}
+.blog-song-art-placeholder { background: rgba(255, 255, 255, 0.05); }
+.blog-song-meta { min-width: 0; }
+.blog-song-title {
+  font-size: 11.5px;
+  color: var(--response-text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.blog-song-sub {
+  font-size: 10px;
+  opacity: 0.65;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Comments inbox */
+.blog-comments {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.blog-comment-row {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: rgba(255, 255, 255, 0.04);
+  font-size: 11px;
+}
+.blog-comment-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 2px;
+}
+.blog-comment-author { font-weight: 600; color: var(--response-text); }
+.blog-comment-time   { font-family: 'Consolas', 'Menlo', monospace; font-size: 10px; opacity: 0.55; }
+.blog-comment-body   { white-space: pre-wrap; color: var(--response-text); }
+.blog-comment-foot {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 4px;
+  font-size: 10px;
+  opacity: 0.6;
+}
+.blog-comment-post   { font-family: 'Consolas', 'Menlo', monospace; }
+
+/* Preview iframe */
+.blog-preview-frame {
+  width: 100%;
+  height: 360px;
+  border: 1px solid var(--glass-border);
+  border-radius: 8px;
+  background: var(--textbox-bg);
+  margin-top: 6px;
+}
