@@ -410,9 +410,14 @@ body::after {
   height: auto;
 }
 
-/* Info (reference) panel gets room to breathe so packs chips don't get clipped. */
-.context-column > .info-panel {
+/* Info (reference) panel gets room to breathe so packs chips don't get clipped.
+   Reference now lives at the bottom of .middle-column too — same min-height. */
+.context-column > .info-panel,
+.middle-column > .info-panel {
   min-height: 300px;
+}
+.middle-column > .info-panel {
+  width: 100%;
 }
 
 /* Status panel: in-context files + task as side-by-side nested sub-panels */
@@ -445,7 +450,8 @@ body::after {
 }
 
 /* ── Combined info panel (knowledge packs + slash commands) ── */
-.context-column > .info-panel {
+.context-column > .info-panel,
+.middle-column > .info-panel {
   flex: 1 1 auto;
   height: auto;
   min-height: 0;
@@ -852,7 +858,7 @@ input:checked + .toggle-slider:before {
 
 .model-select option {
   background: var(--panel-outer);
-  color: #2a2a2a;
+  color: var(--textbox-text);
 }
 
 /* ── Context usage (inlined inside the model settings panel) ── */
@@ -1171,7 +1177,8 @@ input:checked + .toggle-slider:before {
 /* inventory). Designed so the whole block can later be lifted into its own   */
 /* module/partial — all shared helper classes (dev-row, dev-btn, inv-*) are   */
 /* scoped here so modularizing means moving these rules together.             */
-.right-column > .bot-ops-panel {
+.right-column > .bot-ops-panel,
+.right-column > .blog-ops-panel {
   flex: 0 0 auto;
   align-self: stretch;
   width: 100%;
@@ -1199,7 +1206,7 @@ input:checked + .toggle-slider:before {
   padding: 5px 8px;
   font-family: monospace;
   font-size: 11px;
-  color: #2a2a2a;
+  color: var(--textbox-text);
   outline: none;
   min-width: 0;
 }
@@ -1211,7 +1218,7 @@ input:checked + .toggle-slider:before {
   font-family: 'Aptos', 'Segoe UI', sans-serif;
   font-size: 11px;
   cursor: pointer;
-  color: #2a2a2a;
+  color: var(--textbox-text);
 }
 .dev-btn:hover { filter: brightness(0.95); }
 .dev-status {
@@ -1293,22 +1300,40 @@ input:checked + .toggle-slider:before {
 .mode-hidden { display: none !important; }
 
 .blog-ops-panel { display: flex; flex-direction: column; }
+/* With context-column hidden in blog mode the panel becomes wide enough for
+   a two-column bento. Subpanels are tagged via data-panel — drafts/editor
+   sit on the top row, song-lookup/comments share the mid row, preview spans
+   full width at the bottom. */
 .blog-ops-inner {
-  display: flex;
-  flex-direction: column;
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) minmax(280px, 1.1fr);
   gap: 10px;
   padding: 8px;
   overflow-y: auto;
 }
+.blog-ops-inner > [data-panel="drafts"]       { grid-column: 1; }
+.blog-ops-inner > [data-panel="editor"]       { grid-column: 2; }
+.blog-ops-inner > [data-panel="song-lookup"]  { grid-column: 1; }
+.blog-ops-inner > [data-panel="movie-lookup"] { grid-column: 2; }
+.blog-ops-inner > [data-panel="passphrase"]   { grid-column: 1 / -1; }
+.blog-ops-inner > [data-panel="comments"]     { grid-column: 1 / -1; }
+.blog-ops-inner > [data-panel="preview"]      { grid-column: 1 / -1; }
+@media (max-width: 1100px) {
+  .blog-ops-inner { grid-template-columns: 1fr; }
+  .blog-ops-inner > [data-panel] { grid-column: 1 !important; }
+}
 
 .blog-subpanel { padding: 8px 10px; }
-.blog-subpanel .nested-header { gap: 6px; }
+/* nested-header globally is opacity 0.55, which disappears on light themes
+   where --response-text already lands close to the glass background. Lift
+   it (and any other low-contrast bits) for the blog panel only. */
+.blog-subpanel .nested-header { gap: 6px; opacity: 0.95; }
 
 .blog-empty {
   font-size: 11px;
   font-style: italic;
   color: var(--response-text);
-  opacity: 0.5;
+  opacity: 0.75;
   padding: 8px 4px;
 }
 
@@ -1359,7 +1384,8 @@ input:checked + .toggle-slider:before {
 .blog-row-meta {
   font-family: 'Consolas', 'Menlo', monospace;
   font-size: 10px;
-  opacity: 0.6;
+  color: var(--response-text);
+  opacity: 0.85;
 }
 .blog-status {
   font-size: 9.5px;
@@ -1385,7 +1411,8 @@ input:checked + .toggle-slider:before {
   color: var(--response-text);
 }
 .blog-field > span {
-  opacity: 0.7;
+  opacity: 0.95;
+  color: var(--response-text);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   font-size: 9.5px;
@@ -1419,8 +1446,34 @@ input:checked + .toggle-slider:before {
 .blog-field-hint {
   font-size: 10px;
   font-family: 'Consolas', 'Menlo', monospace;
-  opacity: 0.55;
+  color: var(--response-text);
+  opacity: 0.8;
   margin-top: 2px;
+}
+
+.blog-drop {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 56px;
+  padding: 10px 12px;
+  border: 1px dashed var(--glass-border);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease;
+}
+.blog-drop:hover { background: rgba(255, 255, 255, 0.07); }
+.blog-drop-hot {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: var(--accent, #fff);
+  box-shadow: var(--focus-glow);
+}
+.blog-drop-label {
+  font-size: 11px;
+  color: var(--response-text);
+  opacity: 0.85;
+  pointer-events: none;
 }
 
 /* Song lookup */
@@ -1472,7 +1525,8 @@ input:checked + .toggle-slider:before {
 }
 .blog-song-sub {
   font-size: 10px;
-  opacity: 0.65;
+  color: var(--response-text);
+  opacity: 0.85;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 
@@ -1498,7 +1552,7 @@ input:checked + .toggle-slider:before {
   margin-bottom: 2px;
 }
 .blog-comment-author { font-weight: 600; color: var(--response-text); }
-.blog-comment-time   { font-family: 'Consolas', 'Menlo', monospace; font-size: 10px; opacity: 0.55; }
+.blog-comment-time   { font-family: 'Consolas', 'Menlo', monospace; font-size: 10px; color: var(--response-text); opacity: 0.8; }
 .blog-comment-body   { white-space: pre-wrap; color: var(--response-text); }
 .blog-comment-foot {
   display: flex;
@@ -1506,7 +1560,8 @@ input:checked + .toggle-slider:before {
   align-items: center;
   margin-top: 4px;
   font-size: 10px;
-  opacity: 0.6;
+  color: var(--response-text);
+  opacity: 0.8;
 }
 .blog-comment-post   { font-family: 'Consolas', 'Menlo', monospace; }
 

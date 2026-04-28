@@ -38,9 +38,13 @@ reviewed.
 ### Journals
 - Title = the header.
 - `body_md` = the entry, Markdown.
-- Set `locked: true` when the user signals it's private. Locked entries
-  show as blurred placeholders to public visitors until they unlock with
-  the site passphrase.
+
+### Locking
+`locked: true` works on **any** kind (song, movie, journal). A locked post
+shows as a placeholder card on the public site until the visitor enters the
+site-wide passphrase. The passphrase itself is set in the harness blog-ops
+"passphrase" panel (writes to `~/Documents/blog/.env`). Set `locked: true`
+when the user signals the post is private.
 
 ## Voice
 

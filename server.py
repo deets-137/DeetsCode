@@ -1056,11 +1056,21 @@ async def websocket_endpoint(ws: WebSocket):
                     elif op == "blog_attach_media":
                         p = _blog_svc.attach_media(data["slug"], data["src_path"])
                         await ws.send_json({"type": "blog_post_saved", "req_id": req_id, "post": p})
+                    elif op == "blog_attach_media_blob":
+                        import base64
+                        raw = base64.b64decode(data["content_b64"])
+                        p = _blog_svc.attach_media_bytes(data["slug"], data["filename"], raw)
+                        await ws.send_json({"type": "blog_post_saved", "req_id": req_id, "post": p})
                     elif op == "blog_lookup_song":
                         results = await _blog_svc.lookup_song(
                             data["query"], limit=int(data.get("limit") or 10)
                         )
                         await ws.send_json({"type": "blog_song_results", "req_id": req_id, "results": results})
+                    elif op == "blog_lookup_movie":
+                        results = await _blog_svc.lookup_movie(
+                            data["query"], limit=int(data.get("limit") or 5)
+                        )
+                        await ws.send_json({"type": "blog_movie_results", "req_id": req_id, "results": results})
                     elif op == "blog_list_comments":
                         cs = _blog_svc.list_recent_comments(limit=int(data.get("limit") or 100))
                         await ws.send_json({"type": "blog_comments", "req_id": req_id, "comments": cs})
@@ -1069,6 +1079,17 @@ async def websocket_endpoint(ws: WebSocket):
                         await ws.send_json({"type": "blog_comment_deleted", "req_id": req_id, "comment_id": data["comment_id"]})
                     elif op == "blog_preview_url":
                         await ws.send_json({"type": "blog_preview_url", "req_id": req_id, "url": _blog_svc.preview_url()})
+                    elif op == "blog_get_passphrase":
+                        await ws.send_json({
+                            "type": "blog_passphrase", "req_id": req_id,
+                            "value": _blog_svc.get_passphrase(),
+                        })
+                    elif op == "blog_set_passphrase":
+                        v = _blog_svc.set_passphrase(str(data.get("value") or ""))
+                        await ws.send_json({
+                            "type": "blog_passphrase", "req_id": req_id,
+                            "value": v, "saved": True,
+                        })
                     else:
                         await ws.send_json({"type": "blog_error", "op": op, "error": "unknown op"})
                 except Exception as e:

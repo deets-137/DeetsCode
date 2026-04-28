@@ -15,6 +15,7 @@ layer ships them straight to the browser.
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
 import subprocess
@@ -31,18 +32,62 @@ _BLOG_IMPORTED = False
 
 
 def _ensure_blog_on_path() -> None:
+    """Make the blog repo importable from the harness process.
+
+    The blog's `app.settings` uses pydantic-settings with relative defaults
+    (`./data/blog.sqlite`, `./data/media`) that are resolved against the CWD
+    of whatever process imports it. From the harness, that CWD is the harness
+    dir, which means SQLite would try to open a non-existent path. Pin DB_PATH
+    and MEDIA_DIR to absolute paths under BLOG_DIR before the import so the
+    blog-side `Settings()` instance picks up the correct location.
+    """
     global _BLOG_IMPORTED
     if _BLOG_IMPORTED:
         return
-    blog_dir = str(paths.BLOG_DIR)
-    if blog_dir not in sys.path:
-        sys.path.insert(0, blog_dir)
+    blog_dir = paths.BLOG_DIR
+    db_path = blog_dir / "data" / "blog.sqlite"
+    media_dir = blog_dir / "data" / "media"
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    media_dir.mkdir(parents=True, exist_ok=True)
+    # Load BLOG_DIR/.env into os.environ first so pydantic-settings (which
+    # would otherwise look for `.env` relative to harness CWD and miss it)
+    # picks up TMDB_API_KEY, JOURNAL_PASSPHRASE, etc. We set these only when
+    # not already in the environment, so a parent shell can still override.
+    env_file = blog_dir / ".env"
+    if env_file.is_file():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            k, _, v = line.partition("=")
+            k = k.strip()
+            v = v.strip().strip('"').strip("'")
+            if k:
+                os.environ.setdefault(k, v)
+    # Hard-override (not setdefault) — guards against a stray relative DB_PATH
+    # leaking in from harness/.env or a parent shell that would otherwise win
+    # over our default and put SQLite at the wrong CWD-relative path.
+    os.environ["DB_PATH"]   = str(db_path)
+    os.environ["MEDIA_DIR"] = str(media_dir)
+    blog_dir_str = str(blog_dir)
+    if blog_dir_str not in sys.path:
+        sys.path.insert(0, blog_dir_str)
     _BLOG_IMPORTED = True
 
 
+_REPO_INITED = False
+
+
 def _repo():
+    global _REPO_INITED
     _ensure_blog_on_path()
     from app import repo  # type: ignore
+    if not _REPO_INITED:
+        # Idempotent — applies schema if the DB file is fresh, no-op otherwise.
+        # Belt-and-suspenders in case the harness hits the DB before the blog
+        # server has had a chance to run its lifespan startup.
+        repo.init_db()
+        _REPO_INITED = True
     return repo
 
 
@@ -50,6 +95,12 @@ def _itunes():
     _ensure_blog_on_path()
     from app import itunes  # type: ignore
     return itunes
+
+
+def _tmdb():
+    _ensure_blog_on_path()
+    from app import tmdb  # type: ignore
+    return tmdb
 
 
 # ── Slug helpers ─────────────────────────────────────────────────────────────
@@ -170,6 +221,29 @@ def attach_media(slug: str, src_path: str | Path) -> dict[str, Any]:
     return repo.get_post_by_slug(slug)  # type: ignore[return-value]
 
 
+def attach_media_bytes(slug: str, filename: str, content: bytes) -> dict[str, Any]:
+    """Write raw bytes (from a drag-drop upload) into the blog's media dir
+    and set posts.media_path. Sibling of attach_media — no source path on disk.
+    """
+    repo = _repo()
+    p = repo.get_post_by_slug(slug)
+    if not p:
+        raise LookupError(f"no post with slug '{slug}'")
+
+    safe_name = Path(filename).name  # strip any directory components
+    if not safe_name or safe_name in (".", ".."):
+        raise ValueError(f"invalid filename: {filename!r}")
+
+    media_root = paths.BLOG_DIR / "data" / "media" / p["id"]
+    media_root.mkdir(parents=True, exist_ok=True)
+    dest = media_root / safe_name
+    dest.write_bytes(content)
+
+    rel_url = f"/media/{p['id']}/{safe_name}"
+    repo.update_post(p["id"], media_path=rel_url)
+    return repo.get_post_by_slug(slug)  # type: ignore[return-value]
+
+
 # ── Comments ─────────────────────────────────────────────────────────────────
 
 def list_recent_comments(limit: int = 50) -> list[dict[str, Any]]:
@@ -199,10 +273,63 @@ def lookup_song_sync(query: str, limit: int = 10) -> list[dict[str, Any]]:
     return asyncio.run(lookup_song(query, limit=limit))
 
 
+# ── TMDB Search (async) ──────────────────────────────────────────────────────
+
+async def lookup_movie(query: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Search TMDB and enrich with director/runtime per hit."""
+    return await _tmdb().search_with_details(query, limit=limit)
+
+
+def lookup_movie_sync(query: str, limit: int = 5) -> list[dict[str, Any]]:
+    return asyncio.run(lookup_movie(query, limit=limit))
+
+
 # ── Preview / deploy ─────────────────────────────────────────────────────────
 
 def preview_url(port: int = 8080) -> str:
     return f"http://localhost:{port}"
+
+
+def get_passphrase() -> str:
+    """Read the site-wide journal/lock passphrase from BLOG_DIR/.env.
+    Falls back to the live os.environ value (which we mirror on import).
+    """
+    _ensure_blog_on_path()
+    env_file = paths.BLOG_DIR / ".env"
+    if env_file.is_file():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if line.startswith("JOURNAL_PASSPHRASE="):
+                return line.split("=", 1)[1].strip().strip('"').strip("'")
+    return os.environ.get("JOURNAL_PASSPHRASE", "")
+
+
+def set_passphrase(value: str) -> str:
+    """Update JOURNAL_PASSPHRASE in BLOG_DIR/.env (creating the file if
+    needed) and refresh os.environ so the running blog Settings() picks
+    it up on its next read. Returns the new value.
+
+    NOTE: pydantic-settings caches `Settings()` at module import time, so
+    the public blog server still needs a restart for /unlock to use the
+    new passphrase. This function makes the change durable; the harness
+    UI surfaces a "restart blog server" hint after a write.
+    """
+    _ensure_blog_on_path()
+    env_file = paths.BLOG_DIR / ".env"
+    new_lines: list[str] = []
+    found = False
+    if env_file.is_file():
+        for line in env_file.read_text(encoding="utf-8").splitlines():
+            if line.strip().startswith("JOURNAL_PASSPHRASE="):
+                new_lines.append(f"JOURNAL_PASSPHRASE={value}")
+                found = True
+            else:
+                new_lines.append(line)
+    if not found:
+        new_lines.append(f"JOURNAL_PASSPHRASE={value}")
+    env_file.write_text("\n".join(new_lines) + "\n", encoding="utf-8")
+    os.environ["JOURNAL_PASSPHRASE"] = value
+    return value
 
 
 def run_deploy() -> dict[str, Any]:

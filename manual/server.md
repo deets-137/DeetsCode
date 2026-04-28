@@ -12,6 +12,9 @@ single user, state in module globals + per-WebSocket locals + SQLite.
 | GET    | `/pending`   | `{writes: {path: content}}` (debug)         | manual curl only    |
 | GET    | `/api/prompts` | `{prompts: [name, …]}`                    | mode picker         |
 | GET    | `/models`    | Ollama model list                           | model picker        |
+| GET    | `/api/events/sessions` | `{sessions: [{session_id, events, last_ts, live}]}` | bot-ops inventory panel |
+| GET    | `/api/events/{sid}`    | tail of recorded frames for a session     | bot-ops spectate panel  |
+| POST   | `/api/session/{sid}/control` | `{action, ...}` → routes to live session's control queue | bot-ops control panel, external scripts |
 | WS     | `/ws`        | bidirectional JSON events                   | `app.js connect()`  |
 | GET    | `/*`         | static files under `static/`                | browser             |
 
@@ -35,6 +38,7 @@ with a `type` the client's `ws.onmessage` switches on.
 | `compact`        | —                           | summarize + replace `messages` with a 2-entry summary         |
 | `apply_writes`   | —                           | flushes `pending_writes` to disk                              |
 | `reject_writes`  | —                           | drops `pending_writes`                                        |
+| `remote_control` | `target_session_id: str, action: str, prompt?: str` | routes action to another live session via its control queue (see Cross-session control) |
 
 ### Server → client
 
@@ -61,7 +65,7 @@ exception. The client relies on this to un-gray the input.
 
 ## The agent loop
 
-`_agent_loop_impl(ws, user_content, messages, state, selected_packs, selected_prompt, session_id, user_id)`:
+`_agent_loop_impl(ws, user_content, messages, state, selected_packs, selected_prompt, session_id, user_name)`:
 
 1. Reads `prompts/<selected_prompt>.md` (so edits take effect without restart).
 2. Substitutes `{project_dir}` and `{file_tree}` (tree is cached on `state` — built once per turn, not per iteration).
@@ -99,10 +103,10 @@ Schemas live in `tools/core.py` (always loaded) and per-mode packs in
 Dispatched by name via the unified signature:
 
 ```python
-execute(name, args, session_id, project_dir, user_id=None) -> str
+execute(name, args, session_id, project_dir, user_name=None) -> str
 ```
 
-Core tools ignore `session_id` / `user_id`. Game packs use them for
+Core tools ignore `session_id` / `user_name`. Game packs use them for
 per-channel state and per-player action enforcement.
 
 ### Current tools
@@ -114,6 +118,7 @@ per-channel state and per-player action enforcement.
 - `update_task(content?)` — writes `task.md` (markdown checklist). Empty `content` returns the current file.
 - `list_packs()` — manifest of available reference packs and their sections.
 - `load_pack(name, section?)` — pull a pack (or one `## ` section) into context.
+- `register_path(name, value, kind)` — append/replace a constant in `paths.py`. Single source of truth for filesystem paths; see `manual/tools.md`.
 
 **DeetsCode pack (mode = "DeetsCode"):**
 - `write_file(path, content)` — queues into `pending_writes`, never touches disk.
@@ -139,6 +144,40 @@ as a `slash` WS message. The server runs the named tool directly — the model
 is never called, nothing is added to `messages`. See `_slash_execute` in
 `server.py` for the allowlist. Destructive/write-queuing tools are
 intentionally not reachable this way.
+
+## Cross-session control
+
+The WS handler at `/ws` registers a per-session `asyncio.Queue` in the module-
+level dict `_session_control` as soon as its `session_id` is known. The main
+receive loop races `ws.receive_json()` against `control_queue.get()` with
+`asyncio.wait(..., return_when=FIRST_COMPLETED)` so injected frames are
+processed exactly like a frame the client sent.
+
+Entry points for injecting a frame into another session:
+
+- `enqueue_session_control(target_session_id, action, **extra) -> str` —
+  validates `action` against `_REMOTE_CONTROL_ACTIONS`
+  (`reset`, `compact`, `cancel`, `set_prompt`), translates it into the
+  matching WS frame, puts it on the target's queue. Raises `RemoteControlError`
+  with a human string if the session is not live or the action is unknown.
+  Returns a short confirmation string.
+- `list_live_sessions() -> list[str]` — snapshot of keys in `_session_control`.
+  Used by `/api/events/sessions` to set each row's `live` flag.
+
+Both are consumed by:
+
+- The `remote_control` WS message type (lets the web UI fire control actions
+  at Discord bot sessions).
+- The `POST /api/session/{sid}/control` HTTP route (same thing for external
+  scripts or a future separate control surface).
+
+On WS disconnect the `finally` block pops `_session_control[session_id]` only
+if the registered queue is still its own — preserves the "latest connection
+wins" semantics if a second tab connected with the same session_id.
+
+Keep this path modular. Any new control-panel or observability surface should
+call `enqueue_session_control` rather than reimplementing the validation and
+translation inline.
 
 ## Compact
 
