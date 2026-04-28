@@ -1,3 +1,3 @@
-- [x] Add marked.js CDN to index.html
-- [x] Update app.js to use marked.parse() for response text
-- [/] Add markdown element CSS to style.css
+- [/] Acknowledge greeting and set up new campaign
+- [ ] Initialize new campaign_state.json
+- [ ] Start the adventure

@@ -150,6 +150,27 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "blog_lookup_movie",
+            "description": (
+                "Search TMDB for a movie. Returns up to N candidates with "
+                "{title, year, director, length_minutes, genre, genres, "
+                "poster_url, tmdb_url, overview}. Pre-fills movie-post "
+                "metadata; pass the chosen result's fields into blog_new_post "
+                "as `fields={director, year, length_minutes, genre, rating}`."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Free-text query, e.g. 'parasite 2019'"},
+                    "limit": {"type": "integer", "description": "Max candidates (default 5)."},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "blog_lookup_song",
             "description": (
                 "Search iTunes for a song. Returns up to N candidates with "
@@ -272,6 +293,23 @@ def execute_tool(
         if name == "blog_attach_media":
             p = svc.attach_media(args["slug"], args["src_path"])
             return f"Media attached.\n{_summary(p)}"
+
+        if name == "blog_lookup_movie":
+            limit = int(args.get("limit") or 5)
+            results = svc.lookup_movie_sync(args["query"], limit=limit)
+            if not results:
+                return "No matches."
+            lines = [f"{len(results)} result(s):"]
+            for i, r in enumerate(results, 1):
+                yr = f" ({r['year']})" if r.get("year") else ""
+                rt = f" · {r['length_minutes']} min" if r.get("length_minutes") else ""
+                lines.append(
+                    f"  {i}. {r.get('title')}{yr} — dir. {r.get('director') or '?'}"
+                    f" · {r.get('genre') or ''}{rt}"
+                )
+                lines.append(f"     poster: {r.get('poster_url')}")
+                lines.append(f"     tmdb:   {r.get('tmdb_url')}")
+            return "\n".join(lines)
 
         if name == "blog_lookup_song":
             limit = int(args.get("limit") or 5)

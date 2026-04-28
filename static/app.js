@@ -1137,6 +1137,10 @@ const _PANEL_HIDE_RULES = [
   { id: "blog-ops",       showOnlyIn: ["blog"] },
   { id: "bot-ops",        hideIn:     ["blog"] },
   { id: "status-panel",   hideIn:     ["blog"] },
+  // Status is the only resident of the context column now (reference moved
+  // to the middle column), so collapse the column entirely in blog mode to
+  // hand its width to the blog-ops panel on the right.
+  { id: "context-column", hideIn:     ["blog"] },
 ];
 
 function applyModeVisibility() {
@@ -1151,11 +1155,15 @@ function applyModeVisibility() {
   }
   // The right column also contains a `.right-grid` wrapping the file tree.
   // Hide its parent .file-panel (the file tree one — it has no id, so we
-  // resolve it via the tree's container).
+  // resolve it via the tree's container). Also collapse the .right-grid
+  // wrapper itself, otherwise the parent's flex `gap` leaves a phantom slot
+  // that pushes the blog panel down out of alignment with the other columns.
   const fileTree = document.getElementById("file-tree");
   if (fileTree) {
     const filePanel = fileTree.closest(".file-panel");
     if (filePanel) filePanel.classList.toggle("mode-hidden", isBlogMode());
+    const rightGrid = fileTree.closest(".right-grid");
+    if (rightGrid) rightGrid.classList.toggle("mode-hidden", isBlogMode());
   }
 }
 
@@ -1181,7 +1189,10 @@ async function loadPromptModes() {
     // localStorage would only update the UI while the server-side prompt
     // and tool pack stayed wrong until the user re-touched the dropdown.
     syncModeToServer();
-    if (isBlogMode()) refreshBlogDrafts();
+    if (isBlogMode()) {
+      refreshBlogDrafts();
+      refreshBlogPassphrase();
+    }
   } catch (e) { console.error("loadPromptModes:", e); }
 
   sel.addEventListener("change", () => {
@@ -1193,6 +1204,7 @@ async function loadPromptModes() {
       refreshBlogDrafts();
       refreshBlogComments();
       refreshBlogPreview();
+      refreshBlogPassphrase();
     }
   });
 }
@@ -1216,9 +1228,11 @@ function handleBlogMessage(data) {
     case "blog_post_saved":      onBlogPostSaved(data.post); break;
     case "blog_post_deleted":    onBlogPostDeleted(data.slug); break;
     case "blog_song_results":    renderSongResults(data.results || []); break;
+    case "blog_movie_results":   renderMovieResults(data.results || []); break;
     case "blog_comments":        renderBlogComments(data.comments || []); break;
     case "blog_comment_deleted": refreshBlogComments(); break;
     case "blog_preview_url":     setPreviewUrl(data.url); break;
+    case "blog_passphrase":      onBlogPassphrase(data); break;
     case "blog_error":           console.warn("blog error:", data); alertBlog(`${data.op}: ${data.error}`); break;
   }
 }
@@ -1326,9 +1340,16 @@ function renderEditor() {
         <input type="text" data-meta="genre" value="${escapeAttr(m.genre || "")}" /></label>
       <label class="blog-field"><span>rating (0-10, .5 steps)</span>
         <input type="number" step="0.5" min="0" max="10" data-meta="rating" value="${m.rating ?? ""}" /></label>
+      <label class="blog-field"><span>poster URL</span>
+        <input type="url" data-meta="poster_url" value="${escapeAttr(m.poster_url || "")}" /></label>
+      <label class="blog-field"><span>TMDB URL</span>
+        <input type="url" data-meta="tmdb_url" value="${escapeAttr(m.tmdb_url || "")}" /></label>
     `;
   }
-  const showLock = (k === "journal");
+  // Lock is now site-wide: any kind can be passphrase-gated. The passphrase
+  // itself lives in BLOG_DIR/.env (JOURNAL_PASSPHRASE) — manage it from the
+  // [blog-subpanel:passphrase] section.
+  const showLock = true;
   const showBody = (k !== "song");
   const showMedia = true;
 
@@ -1349,10 +1370,18 @@ function renderEditor() {
       </label>
     ` : ""}
     ${showMedia ? `
-      <label class="blog-field"><span>media path (local file to attach)</span>
-        <input id="blog-edit-media" type="text" placeholder="C:\\path\\to\\image.jpg" />
-        <span class="blog-field-hint">${currentDraft.media_path ? `current: ${escapeHtml(currentDraft.media_path)}` : "none attached"}</span>
-      </label>
+      <div class="blog-field"><span>media</span>
+        <div class="blog-drop" id="blog-drop"
+             ondragover="event.preventDefault();this.classList.add('blog-drop-hot')"
+             ondragleave="this.classList.remove('blog-drop-hot')"
+             ondrop="onBlogDrop(event)"
+             onclick="document.getElementById('blog-drop-input').click()">
+          <span class="blog-drop-label">drop image here, or click to choose</span>
+          <input id="blog-drop-input" type="file" accept="image/*" hidden
+                 onchange="onBlogFilePicked(event)" />
+        </div>
+        <span class="blog-field-hint" id="blog-drop-hint">${currentDraft.media_path ? `current: ${escapeHtml(currentDraft.media_path)}` : "none attached"}</span>
+      </div>
     ` : ""}
     <div class="dev-row dev-row-btns">
       <button class="dev-btn" onclick="saveBlogDraft()">save draft</button>
@@ -1416,15 +1445,48 @@ function saveBlogDraft() {
     });
   }
 
-  // If a media path was specified, attach it after save.
-  const mediaEl = document.getElementById("blog-edit-media");
-  const mediaPath = mediaEl?.value.trim();
-  if (mediaPath) {
-    pendingMediaAttach = mediaPath;
-  }
+  // pendingMediaBlob (set by drag-drop / file picker) is attached after save.
 }
 
-let pendingMediaAttach = null;
+let pendingMediaBlob = null;  // { filename, content_b64 }
+
+function onBlogDrop(e) {
+  e.preventDefault();
+  const el = document.getElementById("blog-drop");
+  if (el) el.classList.remove("blog-drop-hot");
+  const f = e.dataTransfer?.files?.[0];
+  if (f) stageBlogMedia(f);
+}
+
+function onBlogFilePicked(e) {
+  const f = e.target.files?.[0];
+  if (f) stageBlogMedia(f);
+}
+
+function stageBlogMedia(file) {
+  if (!file.type.startsWith("image/")) {
+    alertBlog("not an image file");
+    return;
+  }
+  const reader = new FileReader();
+  reader.onload = () => {
+    // result is "data:<mime>;base64,<b64>"
+    const b64 = String(reader.result).split(",", 2)[1] || "";
+    pendingMediaBlob = { filename: file.name, content_b64: b64 };
+    const hint = document.getElementById("blog-drop-hint");
+    if (hint) hint.textContent = `staged: ${file.name} (${Math.round(file.size / 1024)} KB) — saves on next 'save draft'`;
+    // If there's already a saved draft, attach immediately.
+    if (currentDraft?.slug) flushPendingMedia(currentDraft.slug);
+  };
+  reader.readAsDataURL(file);
+}
+
+function flushPendingMedia(slug) {
+  if (!pendingMediaBlob) return false;
+  blogSend({ type: "blog_attach_media_blob", slug, ...pendingMediaBlob });
+  pendingMediaBlob = null;
+  return true;
+}
 
 function publishBlogDraft() {
   if (!currentDraft?.slug) return;
@@ -1442,10 +1504,8 @@ function deleteBlogDraft() {
 
 function onBlogPostSaved(p) {
   currentDraft = p;
-  if (pendingMediaAttach) {
-    blogSend({ type: "blog_attach_media", slug: p.slug, src_path: pendingMediaAttach });
-    pendingMediaAttach = null;
-    return;  // wait for next blog_post_saved
+  if (flushPendingMedia(p.slug)) {
+    return;  // wait for next blog_post_saved with media_path set
   }
   renderEditor();
   const status = document.getElementById("blog-editor-status");
@@ -1513,6 +1573,90 @@ function applyBlogSongHit(i) {
     art_url:        hit.art_url,
   };
   renderEditor();
+}
+
+// ── Movie lookup (TMDB) ───────────────────────────────────────────────────
+let lastMovieHits = [];
+
+function blogLookupMovie() {
+  const q = document.getElementById("blog-movie-query")?.value.trim();
+  if (!q) return;
+  blogSend({ type: "blog_lookup_movie", query: q, limit: 5 });
+}
+
+function renderMovieResults(results) {
+  lastMovieHits = results;
+  const el = document.getElementById("blog-movie-results");
+  if (!el) return;
+  if (!results.length) {
+    el.innerHTML = '<div class="blog-empty">no matches</div>';
+    return;
+  }
+  el.innerHTML = "";
+  results.forEach((r, i) => {
+    const yr = r.year ? ` (${r.year})` : "";
+    const rt = r.length_minutes ? ` · ${r.length_minutes} min` : "";
+    const row = document.createElement("div");
+    row.className = "blog-song-hit";
+    row.innerHTML = `
+      ${r.poster_url ? `<img class="blog-song-art" src="${escapeAttr(r.poster_url)}" alt="" loading="lazy" />` : `<div class="blog-song-art blog-song-art-placeholder"></div>`}
+      <div class="blog-song-meta">
+        <div class="blog-song-title">${escapeHtml(r.title || "")}${escapeHtml(yr)}</div>
+        <div class="blog-song-sub">dir. ${escapeHtml(r.director || "?")} · ${escapeHtml(r.genre || "")}${escapeHtml(rt)}</div>
+      </div>
+      <button class="dev-btn" onclick="applyBlogMovieHit(${i})">use</button>
+    `;
+    el.appendChild(row);
+  });
+}
+
+function applyBlogMovieHit(i) {
+  const hit = lastMovieHits[i];
+  if (!hit) return;
+  if (!currentDraft || currentDraft.kind !== "movie") {
+    openBlogEditor("movie");
+  }
+  currentDraft.title = hit.title || currentDraft.title;
+  currentDraft.meta = {
+    ...(currentDraft.meta || {}),
+    director:       hit.director,
+    year:           hit.year,
+    length_minutes: hit.length_minutes,
+    genre:          hit.genre,
+    poster_url:     hit.poster_url,
+    tmdb_url:       hit.tmdb_url,
+  };
+  renderEditor();
+}
+
+// ── Passphrase (site-wide lock for any kind) ───────────────────────────────
+let _blogPassRevealed = false;
+
+function refreshBlogPassphrase() {
+  blogSend({ type: "blog_get_passphrase" });
+}
+
+function saveBlogPassphrase() {
+  const inp = document.getElementById("blog-pass-input");
+  if (!inp) return;
+  const v = inp.value;
+  blogSend({ type: "blog_set_passphrase", value: v });
+}
+
+function toggleBlogPassReveal() {
+  const inp = document.getElementById("blog-pass-input");
+  const btn = document.getElementById("blog-pass-toggle");
+  if (!inp || !btn) return;
+  _blogPassRevealed = !_blogPassRevealed;
+  inp.type = _blogPassRevealed ? "text" : "password";
+  btn.textContent = _blogPassRevealed ? "hide" : "show";
+}
+
+function onBlogPassphrase(data) {
+  const inp = document.getElementById("blog-pass-input");
+  if (inp) inp.value = data.value || "";
+  const status = document.getElementById("blog-pass-status");
+  if (status) status.textContent = data.saved ? "saved · live now" : "";
 }
 
 // ── Comments inbox ─────────────────────────────────────────────────────────
