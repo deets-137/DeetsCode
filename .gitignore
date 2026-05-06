@@ -15,9 +15,16 @@ config.py
 # Claude Code session data
 .claude/
 
+# Editor / IDE
+.obsidian/
+.vscode/
+.idea/
+
 # Runtime state
 task.md
 friction.md
+/campaign_state.json
+/sessions/
 storage.db
 storage.db-journal
 storage.db-wal
