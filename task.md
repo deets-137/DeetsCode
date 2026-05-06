@@ -1,3 +1,0 @@
-- [/] Acknowledge greeting and set up new campaign
-- [ ] Initialize new campaign_state.json
-- [ ] Start the adventure
