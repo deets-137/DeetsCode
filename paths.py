@@ -42,3 +42,5 @@ TASK_FILENAME = "task.md"
 CAMPAIGN_STATE_FILENAME = "campaign_state.json"
 DND_SUBDIR = "dnd"
 PROJECT_MANUAL_SUBDIR = "manual"
+# Runtime: last model picked in the UI; persists across server restarts.
+ACTIVE_MODEL_FILE: Path = HARNESS_ROOT / "active_model.txt"

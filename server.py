@@ -184,7 +184,18 @@ client = AsyncOpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 project_dir: Path = Path(".").resolve()
 packs_dir: Path = paths.PACKS_DIR
 auto_apply_enabled: bool = False
-current_model: str = MODEL
+
+
+def _load_active_model() -> str:
+    # Last UI pick wins over config.MODEL (the boot fallback).
+    try:
+        saved = paths.ACTIVE_MODEL_FILE.read_text(encoding="utf-8").strip()
+        return saved or MODEL
+    except (FileNotFoundError, OSError):
+        return MODEL
+
+
+current_model: str = _load_active_model()
 current_temperature: float = TEMPERATURE
 current_context_length: int = 32768
 DEFAULT_NUM_CTX = 32768
@@ -1171,6 +1182,10 @@ async def websocket_endpoint(ws: WebSocket):
                 if new_model:
                     current_model = new_model
                     current_context_length = await fetch_context_length(current_model)
+                    try:
+                        paths.ACTIVE_MODEL_FILE.write_text(current_model + "\n", encoding="utf-8")
+                    except OSError as e:
+                        await ws.send_json({"type": "info", "content": f"(warning: could not persist model choice: {e})"})
                     await ws.send_json({"type": "info", "content": f"Switched model to {current_model} (ctx: {current_context_length:,})"})
                     await ws.send_json({"type": "ctx_length", "max": current_context_length})
                 continue

@@ -37,3 +37,4 @@ manual/
 # OS
 .DS_Store
 Thumbs.db
+active_model.txt
