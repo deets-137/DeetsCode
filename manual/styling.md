@@ -5,8 +5,11 @@ refresh; no build.
 
 ## Themes
 
-`<html data-theme="1">` (rose) or `<html data-theme="2">` (slate).
-`setTheme(id)` in app.js updates the attribute and persists to localStorage.
+Themes are CSS-only: each is a `[data-theme="N"] { ... }` block in
+`static/theme.css`. The picker UI is auto-populated from that file by the
+`/api/themes` endpoint — **you do NOT need to touch index.html or app.js
+when adding a theme.** `setTheme(id)` updates the `<html>` attribute and
+persists to localStorage.
 
 ### Variables every theme must define
 
@@ -19,6 +22,7 @@ refresh; no build.
 | `--panel-input`     | translucent bg of nested input panels             |
 | `--panel-response`  | translucent bg of response panel                  |
 | `--textbox-bg`      | opaque fill of the input textareas                |
+| `--textbox-text`    | input text color                                  |
 | `--response-box-bg` | opaque fill of the response box                   |
 | `--response-text`   | assistant text color                              |
 | `--divider`         | hairline separators, accent borders               |
@@ -27,8 +31,45 @@ refresh; no build.
 | `--glass-shadow`    | layered drop + ambient shadow                     |
 | `--focus-glow`      | ring around focused left-panel                    |
 
-Adding a theme: copy one of the blocks in `theme.css`, swap the values, add a
-new `<div class="theme-option" onclick="setTheme('3')">…</div>` to index.html.
+### Adding a theme (model recipe)
+
+To add theme N (where N = next-unused id), make **one** tool call:
+
+```
+insert_to_file(
+  path="static/theme.css",
+  position="end",
+  content="""
+[data-theme="N"] {
+  /* one-line description of the vibe */
+  --canvas:           #...;
+  --canvas-blob-1:    #...;
+  --canvas-blob-2:    #...;
+  --panel-outer:      rgba(...);
+  --panel-input:      rgba(...);
+  --panel-response:   rgba(...);
+  --textbox-bg:       #...;
+  --textbox-text:     #...;
+  --response-box-bg:  #...;
+  --response-text:    #...;
+  --divider:          #...;
+  --glass-border:     rgba(...);
+  --glass-highlight:  rgba(...);
+  --glass-shadow:     0 10px 30px rgba(...), 0 2px 6px rgba(...);
+  --focus-glow:       0 0 0 1px rgba(...), 0 0 24px 2px rgba(...);
+}
+"""
+)
+```
+
+Notes:
+- Use `position="end"` — never reach for `edit_file` here. There is no
+  unique anchor at the end of `theme.css` and trying to construct one is a
+  trap. Append is the right shape.
+- All 15 vars are required. Missing ones inherit from the previous theme
+  block via the cascade and look subtly broken.
+- After the insert lands, the user reloads the page; the new swatch row
+  appears in the picker automatically.
 
 ## The glass recipe
 
