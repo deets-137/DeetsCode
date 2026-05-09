@@ -8,41 +8,54 @@ contradicts something said in chat, this file wins (or update it).
 
 ## Handoff — start here
 
-**Status as of 2026-05-09:** phases 0 → 3 complete (pending screenshot
-verification). Region shell, loader skeleton, panel routes, tier-0
-reference (`clock`), tier-3 reference (`ollama_ps`), direct-DOM render
-path for tier 1/3, and the first piece of `harness.*` (`harness.refresh`)
-are all landed. **Next session: verify phase 3 with a real screenshot,
-then fan out parallel agents for phase 4 migrations.**
+**Status as of 2026-05-09:** phases 0 → 7 essentially complete in a single
+overnight session. Every panel except `chat` is migrated. The
+`chat` panel (whole left column — textarea, response, WS lifecycle) was
+deliberately deferred because migrating it without iterative human
+verification risks breaking the harness's main loop. **Next session:
+migrate `chat`, then commit + open PR.**
 
 **What already exists — do not rebuild:**
 
 - `paths.PANELS_DIR` = `panels/`, `paths.PANEL_LAYOUT_FILE` =
   `layout/panel_layout.json`. Registered.
-- [layout/panel_layout.json](layout/panel_layout.json) — schema-v1 layout,
-  4 regions, 9 instances (8 legacy + clock).
+- [layout/panel_layout.json](layout/panel_layout.json) — 4 regions,
+  12 panel instances (1 legacy: chat). Mode_overrides for blog mode.
 - [panels/loader.py](../panels/loader.py) — Pydantic `PanelManifest` /
   `PanelLayout`, `discover()`, `registry()`, `errors()`, `get(name)`,
   `panel_dir(name)`, `load_layout()`, `render_view(name)` (handles tier 1
   and tier 3 — tier 3 hot-reloads the handler module each call).
 - [server.py](../server.py) — routes: `/api/panels`, `/api/panels/{name}`,
   `/api/panels/reload`, `/api/layout`, `/panels/{name}/view`,
-  `/panels/{name}/static/{file:path}`. Discovery runs at import time.
-- [static/panel-shell.js](../static/panel-shell.js) — fetches layout +
-  manifests, builds region grid, hoists legacy DOM via `dom_id`, renders
-  real `panel:` instances. **Tier 0** iframes to `manifest.url`. **Tier
-  1/3** fetch `/panels/<name>/view` and inject into a `.panel-content`
-  wrapper (host CSS wins; no shadow DOM — see decisions log). Inline
-  scripts re-execute via clone-and-replace on every fetch.
-- `window.harness.refresh(name, seconds)` — exposed by panel-shell.js.
-  v1's polling primitive for tier-1/3 panels; self-deregisters when the
-  content node disappears.
-- [panels/clock/](../panels/clock/) — tier-0 reference panel. Self-served
-  iframe content at `static/clock.html`.
-- [panels/ollama_ps/](../panels/ollama_ps/) — tier-3 reference panel.
-  `server.py` parses `ollama ps`, `view()` returns one bar per running
-  model, refresh via `harness.refresh('ollama_ps', 5)`. Model future
-  tier-3 panels on this one.
+  `/panels/{name}/static/{file:path}`. Visible `_panel_error_html()`
+  placeholder for view() failures. Discovery runs at import time.
+- [static/panel-shell.js](../static/panel-shell.js) — region grid,
+  legacy hoist, real panel render. **Tier 0** → iframe to `manifest.url`.
+  **Tier 1/3** → fetch + direct DOM injection into `.panel-content`
+  wrapper (host CSS wins, no shadow DOM). Inline scripts re-execute via
+  clone-and-replace on each fetch. Subscriptions wiped on every fetch
+  via `harness._clearPanelSubs(name)` so refreshes don't leak listeners.
+- `window.harness.*` API:
+  - `refresh(name, seconds)` — recurring poll
+  - `refreshNow(name)` — one-shot fetch
+  - `subscribe(panel, event, callback)` — WS event bridge (app.js's
+    `ws.onmessage` fans out via `harness._dispatch`)
+- All panels:
+  - **clock** (tier 0) — self-served iframe
+  - **ollama_ps** (tier 3) — `ollama ps` parser, polling refresh
+  - **task_list** (tier 3) — task.md checklist
+  - **in_context_files** (tier 3) — reads `tools.read_files`
+  - **knowledge_packs** (tier 3) — hybrid: chrome + #packs-chips
+  - **slash_commands** (tier 1) — self-contained, localStorage state
+  - **pending_writes** (tier 3) — first WS-subscribing panel
+  - **tool_log** (tier 3) — hybrid: chrome + #tool-panel-inner
+  - **files** (tier 3, anchored) — hybrid: chrome + #file-tree
+  - **settings** (tier 3, anchored) — full bento (model + customization);
+    NOT split into settings_model/settings_custom (deviation from doc;
+    revisit when sub-region primitive lands)
+  - **bot_ops** (tier 3, anchored) — single panel with three subsections
+  - **blog_ops** (tier 3) — single panel with seven subsections, mode-gated
+- `chat` is the **only** remaining legacy `dom_id` instance.
 
 **Read these sections in order before writing any code:**
 
@@ -456,7 +469,7 @@ This phase is the first place where it's safe to delete a section of
       `window.harness.refresh` is a function. Re-screenshot when the
       preview MCP cooperates.
 
-### Phase 4 — Migration: easy / unimportant panels first
+### Phase 4 — Migration: easy / unimportant panels first ✓
 
 Migrate in this order. Each one validates a different aspect of the loader.
 After each migration: visible UI parity, rip out the old hardcoded markup +
@@ -487,7 +500,7 @@ gone from `index.html`. **Quality gate before continuing:** layout still
 renders; blog mode still hides what it should; nothing in app.js calls
 removed DOM ids.
 
-### Phase 4.5 — Migration: anchored panels (chat, settings, files)
+### Phase 4.5 — Migration: anchored panels (chat, settings, files) ✓ (chat deferred)
 
 These are anchored — always present, can't be removed by layout edits — and
 they contain interactive controls that talk back to the harness. Migrate
@@ -506,7 +519,7 @@ bridge is built (so anchored panels with controls can use it).
 top-level `index.html` body is generated from the layout config. The
 hardcoded `canvas` markup is gone.
 
-### Phase 5 — Migration: activity panels (medium difficulty)
+### Phase 5 — Migration: activity panels (medium difficulty) ✓
 
 5. **`pending_writes`** (currently `#pending-panel`).
    Tier 3. Lists queued writes + approve/reject buttons. *Tests:* panels
@@ -520,7 +533,7 @@ hardcoded `canvas` markup is gone.
    Tier 3. Live tool_call/tool_result stream. *Tests:* high-frequency update
    panels. Same event-subscription API as above.
 
-### Phase 6 — Migration: heavy mode-specific panels
+### Phase 6 — Migration: heavy mode-specific panels ✓
 
 8. **`bot_ops`** (currently `#bot-ops`).
    Big, has cross-panel signals (`#spectate-select`). Migrate as a single
@@ -534,18 +547,42 @@ hardcoded `canvas` markup is gone.
    one tier-3 panel with `mode_overrides` in layout config showing it only
    in blog mode.
 
-### Phase 7 — Polish & forward-looking
+### Phase 7 — Polish & forward-looking ✓ (partial)
 
 - [ ] Install-time permissions display (CLI prompt for now): when the loader
       sees a new panel folder, dump its declared permissions and ask
       "approve y/N", store result in `panels/<name>/.installed.json`.
-- [ ] `panel-error` placeholder rendering when `view()` raises.
-- [ ] Update [CLAUDE.md](../CLAUDE.md) with a "Panels" section describing the
-      structure, where to add a new panel, and the dogfooded examples.
+- [x] `panel-error` placeholder rendering when `view()` raises. server.py
+      `_panel_error_html()` returns visible red-tinted error block with
+      optional traceback `<details>` — no more silent failures.
+- [x] Update [CLAUDE.md](../CLAUDE.md) with a "Panels" section describing
+      the structure, where to add a new panel, and the dogfooded examples.
 - [ ] Layout drag-rearrange UI (stretch — only if it pays for itself).
 - [ ] Tier 2 subprocess panels (when needed).
 - [ ] Dynamic resize via panel→harness postMessage (when needed).
 - [ ] Auth/passphrase gate (only when shared-host mode is actually wanted).
+
+### Outstanding work
+
+- **chat panel migration.** The whole left column (textarea + response +
+  WS lifecycle) is the only remaining `dom_id`'d legacy block. Risk:
+  app.js's `connect()` and the entire `ws.onmessage` switch statement
+  reference `#chat-textbox`, `#response-text`, `#stop-btn` — moving them
+  into a panel handler means either keeping app.js's references valid via
+  the hybrid pattern (panel renders chrome containing those IDs) OR
+  refactoring `connect()` to be re-callable post-hydration. Hybrid is
+  the safer first cut.
+- **settings split.** Currently one `settings` panel (model + customization
+  bento). Doc originally specified `settings_model` + `settings_custom`.
+  Blocked on v1 regions stacking vertically — splitting would stack them
+  instead of the bento side-by-side. Add a `subgrid` region primitive
+  (or horizontal sub-region) and revisit.
+- **install-time permissions display.** Phase 7 polish item not done; v1
+  is still the honor system.
+- **Subscriber API for app.js handlers.** Several existing app.js
+  handlers (`addToolEntry`, `refreshPacks`, etc.) still live globally
+  rather than in their panels. Hybrid is OK for now; consolidate into
+  the panel modules when chat migration forces a broader app.js cleanup.
 
 ---
 
@@ -679,3 +716,45 @@ process. Flags for the future:
   This is the first piece of the `harness.*` API surface promised in the
   trajectory section. Future iframe panels will get the same call shape via
   postMessage proxy.
+- **2026-05-09** — **Tier-3 panels reach harness state via `import server`**
+  (or `import tools`, etc.) at call time. The loader re-imports the
+  handler module on every request, so module-level reads like
+  `server.project_dir` are always live. No `request.app.state` plumbing
+  needed in v1. Document this as the contract — when shared-host mode
+  arrives and tier-3 untrusted panels can't be allowed direct module
+  access, swap to a thin `harness_state` facade.
+- **2026-05-09** — **`harness.subscribe(panel, event, callback)` is the WS
+  event bridge.** Subscriptions are keyed by panel name so `fetchAndInject`
+  can wipe stale subs on every re-render via `harness._clearPanelSubs(panel)`
+  — no listener leaks. `app.js`'s `ws.onmessage` calls
+  `harness._dispatch(msg.type, msg)` *after* the legacy switch, so existing
+  handlers always run first and panels are additive. Companion
+  `harness.refreshNow(name)` for one-shot fetches in event handlers.
+- **2026-05-09** — **Settings is one panel, not two.** Doc originally
+  specified `settings_model` + `settings_custom`. v1 regions stack
+  vertically; splitting into two panels would stack the bento sections
+  instead of placing them side-by-side. One `settings` panel ships now;
+  split when a horizontal sub-region or `subgrid` primitive lands.
+- **2026-05-09** — **Hybrid pattern for legacy-glue panels.** Panels like
+  `tool_log`, `pending_writes`, `knowledge_packs`, `files`, and the big
+  `bot_ops`/`blog_ops` panels render their chrome plus the legacy DOM ids
+  the existing app.js handlers expect. Inline scripts kick the relevant
+  initializer (`refreshTree`, `refreshSpectateSessions`, etc.) on
+  hydration. Lets us migrate the layout without rewriting all of app.js
+  in one pass — the panels OWN the markup; the JS migration is incremental.
+  Null-guarded all the global handlers that touch removed legacy ids so
+  they no-op gracefully during the hybrid era.
+- **2026-05-09** — **Per-instance mode visibility moves to
+  `[data-instance="..."]` selectors.** `app.js`'s `_PANEL_HIDE_RULES`
+  used legacy DOM ids (`#blog-ops`, `#bot-ops`); rewritten to query
+  `[data-instance="..."]` so it works for real panel instances (the
+  panel-shell wrapper sets that attribute). Layout-config
+  `mode_overrides` covers region-level + simple instance-hidden cases;
+  `_PANEL_HIDE_RULES` covers the more expressive "show only in mode X"
+  pattern that the layout schema doesn't yet support.
+- **2026-05-09** — **`chat` panel migration deferred.** The entire left
+  column (textarea + response box + WS lifecycle in `connect()`) was left
+  as the last `dom_id` legacy instance. Migrating it without iterative
+  human verification risks breaking the harness's main loop (the WS
+  handler that drives every other panel). Will be the first thing to
+  pick up next session.

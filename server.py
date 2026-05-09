@@ -746,16 +746,48 @@ async def reload_panels():
 
 @app.get("/panels/{name}/view", response_class=HTMLResponse)
 async def panel_view(name: str):
+    import html as _html
     m = _panel_loader.get(name)
     if m is None:
-        return HTMLResponse(f"<!-- panel not found: {name} -->", status_code=404)
+        return HTMLResponse(_panel_error_html(name, "panel not found"), status_code=404)
     if m.tier in (0, 2):
-        return HTMLResponse(f"<!-- panel {name} is tier {m.tier}; no host view -->", status_code=400)
+        return HTMLResponse(
+            _panel_error_html(name, f"tier {m.tier} has no host-rendered view"),
+            status_code=400,
+        )
     try:
-        html = await _panel_loader.render_view(name)
+        html_body = await _panel_loader.render_view(name)
     except _panel_loader.PanelLoadError as e:
-        return HTMLResponse(f"<!-- panel-error {name}: {e} -->", status_code=500)
-    return HTMLResponse(html)
+        return HTMLResponse(_panel_error_html(name, str(e)), status_code=500)
+    except Exception as e:  # noqa: BLE001 — panel handler failures shouldn't kill the page
+        import traceback
+        return HTMLResponse(
+            _panel_error_html(name, f"{type(e).__name__}: {e}", traceback.format_exc()),
+            status_code=500,
+        )
+    return HTMLResponse(html_body)
+
+
+def _panel_error_html(name: str, msg: str, trace: str = "") -> str:
+    """Visible error placeholder so a broken panel surfaces in the UI instead
+    of silently rendering nothing."""
+    import html as _html
+    body = f'<div class="panel-error-msg">{_html.escape(msg)}</div>'
+    if trace:
+        body += f'<details class="panel-error-trace"><summary>traceback</summary><pre>{_html.escape(trace)}</pre></details>'
+    return f"""
+<style>
+  [data-panel-content="{name}"] .panel-error-frame {{ padding: 10px; font-family: monospace; font-size: 11px; color: #ff7676; background: rgba(255, 0, 0, 0.06); border-radius: 4px; }}
+  [data-panel-content="{name}"] .panel-error-frame .panel-error-name {{ font-weight: bold; opacity: .8; }}
+  [data-panel-content="{name}"] .panel-error-frame .panel-error-msg {{ margin-top: 4px; }}
+  [data-panel-content="{name}"] .panel-error-trace {{ margin-top: 6px; opacity: .8; }}
+  [data-panel-content="{name}"] .panel-error-trace pre {{ white-space: pre-wrap; max-height: 200px; overflow: auto; }}
+</style>
+<div class="panel-error-frame">
+  <div class="panel-error-name">⚠ panel error: {_html.escape(name)}</div>
+  {body}
+</div>
+""".strip()
 
 
 @app.get("/panels/{name}/static/{file:path}")
