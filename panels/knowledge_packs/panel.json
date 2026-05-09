@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "name": "knowledge_packs",
+  "title": "knowledge packs",
+  "tier": 3,
+  "author": "host",
+  "handler": "server:view",
+  "permissions": {
+    "network": [],
+    "reads": ["packs/", "manual/"],
+    "writes": []
+  },
+  "display": {
+    "shape": "wide",
+    "aspect_ratio": null,
+    "min":       { "width": 240, "height": 60 },
+    "preferred": { "width": 400, "height": 110 },
+    "max":       { "width": null, "height": null },
+    "scroll": "internal",
+    "growable": false
+  },
+  "anchored": false
+}

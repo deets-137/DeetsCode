@@ -156,70 +156,9 @@
 
       </div>
 
-      <!-- Reference panel: lives at the bottom of the middle column so the
-           context column (status only) can collapse cleanly in blog mode and
-           hand its width to blog-ops. -->
-      <div class="file-panel info-panel" id="info-panel">
-        <div class="file-panel-header">
-          <span>reference</span>
-        </div>
-        <div class="file-panel-inner info-inner">
-          <div class="nested-panel info-section">
-            <div class="nested-header">
-              <span>knowledge packs</span>
-              <button onclick="refreshPacks()" title="Rescan packs">↺</button>
-            </div>
-            <div class="packs-chips" id="packs-chips">
-              <span class="packs-empty">no packs found</span>
-            </div>
-          </div>
-          <div class="nested-panel info-section info-section-slash">
-            <div class="nested-header">
-              <span>slash commands</span>
-              <button id="slash-edit-btn" onclick="toggleSlashEdit()" title="Edit">✎</button>
-            </div>
-            <div class="slash-inner" id="slash-inner"></div>
-            <textarea id="slash-editor" class="slash-editor" style="display:none"></textarea>
-          </div>
-        </div>
-      </div>
-    </div>
-
-    <!-- [context column staging] Status panel only (reference moved to middle).
-         The actual region wrapper is built by panel-shell.js with id
-         context-column preserved for app.js compatibility. -->
-    <div>
-
-      <!-- Status panel: in-context files + task list as side-by-side sub-panels -->
-      <section class="file-panel status-panel" id="status-panel">
-        <div class="file-panel-header">
-          <span>status</span>
-        </div>
-        <div class="file-panel-inner status-inner">
-
-          <!-- [status-subpanel:context] Files the model has read this turn. -->
-          <div class="nested-panel status-subpanel" id="context-panel" data-panel="context">
-            <div class="nested-header">
-              <span>in context</span>
-              <button onclick="clearContextFiles()" title="Clear">✕</button>
-            </div>
-            <div class="file-panel-inner status-subinner" id="context-files"></div>
-          </div>
-
-          <!-- [status-subpanel:task] task.md checklist for the active project. -->
-          <div class="nested-panel status-subpanel task-panel" id="task-panel" data-panel="task">
-            <div class="nested-header">
-              <span>task list</span>
-              <button onclick="refreshTaskPanel()" title="Refresh task list">↺</button>
-            </div>
-            <div class="file-panel-inner task-inner status-subinner" id="task-inner">
-              <span class="task-empty">no task.md found</span>
-            </div>
-          </div>
-
-        </div>
-      </section>
-
+      <!-- info-panel and status-panel removed — knowledge_packs, slash_commands,
+           in_context_files, and task_list are now real panels declared in
+           layout/panel_layout.json (phase 4). -->
     </div>
 
     <!-- [right column staging] Files + bot-ops + blog-ops. Region wrapper

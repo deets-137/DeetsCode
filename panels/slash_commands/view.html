@@ -1,0 +1,69 @@
+<!-- slash_commands tier-1 panel — entirely client-side state in localStorage,
+     so it lives as static HTML + inline script rather than a tier-3 handler. -->
+<div class="slash-panel-inner">
+  <div class="slash-edit-row">
+    <button id="slash-edit-btn" onclick="slashCmdsToggleEdit()" title="Edit">✎</button>
+  </div>
+  <div class="slash-inner" id="slash-inner"></div>
+  <textarea id="slash-editor" class="slash-editor" style="display:none"></textarea>
+</div>
+<script>
+(function () {
+  const KEY = "harness-slash-commands";
+  const DEFAULTS = [
+    "/read <path> [N-M]         — read file, optional line range",
+    "/search <pattern> [glob=X] [path=Y] — regex search",
+    "/symbols <path>            — list defs/classes with line numbers",
+    "/ls [path]                 — list a directory",
+    "/tree                      — refresh the file tree panel",
+    "/compact                   — summarize + trim conversation",
+    "/help                      — this list",
+  ].join("\n");
+
+  function esc(s) {
+    return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  }
+
+  function render() {
+    const inner = document.getElementById("slash-inner");
+    if (!inner) return;
+    const raw = localStorage.getItem(KEY) || DEFAULTS;
+    inner.innerHTML = "";
+    for (const line of raw.split("\n")) {
+      if (!line.trim()) continue;
+      const div = document.createElement("div");
+      div.className = "slash-cmd-row";
+      const m = line.match(/^(.+?)\s*—\s*(.+)$/);
+      if (m) {
+        div.innerHTML = `<span class="slash-cmd-name">${esc(m[1].trim())}</span>` +
+                        `<span class="slash-cmd-sep"> — </span>` +
+                        `<span class="slash-cmd-desc">${esc(m[2].trim())}</span>`;
+      } else {
+        div.innerHTML = `<span class="slash-cmd-name">${esc(line)}</span>`;
+      }
+      inner.appendChild(div);
+    }
+  }
+
+  window.slashCmdsToggleEdit = function () {
+    const inner = document.getElementById("slash-inner");
+    const editor = document.getElementById("slash-editor");
+    const btn = document.getElementById("slash-edit-btn");
+    if (editor.style.display !== "none") {
+      localStorage.setItem(KEY, editor.value);
+      editor.style.display = "none";
+      inner.style.display = "";
+      btn.textContent = "✎";
+      render();
+    } else {
+      editor.value = localStorage.getItem(KEY) || DEFAULTS;
+      inner.style.display = "none";
+      editor.style.display = "";
+      btn.textContent = "✓";
+      editor.focus();
+    }
+  };
+
+  render();
+})();
+</script>

@@ -125,6 +125,7 @@ async function refreshPacks() {
 
 function renderPackChips(packs) {
   const container = document.getElementById("packs-chips");
+  if (!container) return; // panel may not have rendered yet
   container.innerHTML = "";
   if (!packs.length) {
     const empty = document.createElement("span");
@@ -889,7 +890,11 @@ const contextFiles = new Set();
 function addContextFile(path) {
   if (contextFiles.has(path)) return;
   contextFiles.add(path);
+  // Trigger the panel to refresh from server-side tools.read_files. Direct DOM
+  // poke retained for backward compat with anyone querying #context-files
+  // before the new panel hydrates.
   const container = document.getElementById("context-files");
+  if (!container) return;
   const row = document.createElement("div");
   row.className = "file-node file";
   row.textContent = "  " + path;
@@ -905,7 +910,8 @@ function updateContextBar(total, max) {
 
 function clearContextFiles() {
   contextFiles.clear();
-  document.getElementById("context-files").innerHTML = "";
+  const el = document.getElementById("context-files");
+  if (el) el.innerHTML = "";
 }
 
 // ── Tool panel ────────────────────────────────────

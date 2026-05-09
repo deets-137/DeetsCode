@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "name": "in_context_files",
+  "title": "in context",
+  "tier": 3,
+  "author": "host",
+  "handler": "server:view",
+  "permissions": {
+    "network": [],
+    "reads": [],
+    "writes": []
+  },
+  "display": {
+    "shape": "tall",
+    "aspect_ratio": null,
+    "min":       { "width": 200, "height": 80 },
+    "preferred": { "width": 320, "height": 220 },
+    "max":       { "width": null, "height": null },
+    "scroll": "internal",
+    "growable": false
+  },
+  "anchored": false
+}
