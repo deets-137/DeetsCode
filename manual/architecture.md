@@ -38,8 +38,9 @@ bot_media.py      Per-tool media extractors. Lets the bot forward tool-
 config.py         MODEL, OLLAMA_BASE_URL, HOST, PORT, TEMPERATURE, etc.
 CLAUDE.md         Project notes for Claude sessions: paths.py rule,
                   bot_media extractor registry, chess identity conventions.
-prompt.md         Base system prompt; has {project_dir} and {file_tree} slots.
-prompts/          Per-mode prompt overrides (DeetsCode.md, chess.md, dnd.md).
+prompts/          Per-mode prompt files (DeetsCode.md, chess.md, dnd.md, blog.md).
+                  All have {project_dir} and {file_tree} slots. server.py's
+                  load_prompt_template() reads prompts/<mode>.md per turn.
 packs/            Global knowledge packs (cross-project).
 manual/           Project-scoped knowledge packs (this project's self-docs).
 static/
@@ -82,7 +83,7 @@ requirements.txt  fastapi, uvicorn[standard], openai, python-chess, …
 - **Adding a tool:** see `manual/tools.md`. Core vs mode pack decision, then append to `TOOL_DEFINITIONS` + add a handler branch. Restart.
 - **Adding a mode:** new `tools/<mode>.py` pack, register in `tools/__init__.py` `_MODE_PACKS`, drop `prompts/<mode>.md`. See `manual/tools.md` and `manual/writing_prompts.md`.
 - **Adding a WS message type:** new branch in `websocket_endpoint`. Client sends via `ws.send(JSON.stringify(…))` and handles replies in `ws.onmessage`.
-- **Changing prompt behavior:** edit `prompts/<mode>.md` or `prompt.md`. Re-read every turn — no restart.
+- **Changing prompt behavior:** edit `prompts/<mode>.md`. Re-read every turn — no restart.
 - **Changing panel design:** `theme.css` (vars) and `style.css` (rules). Live on hard refresh.
 - **Changing server behavior or tools:** `server.py` or anything under `tools/`, then restart uvicorn (no auto-reload).
 - **Adding a filesystem path constant:** call the `register_path` core tool — don't hand-edit `paths.py`. See `manual/tools.md`.

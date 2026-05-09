@@ -8,10 +8,16 @@
 </head>
 <body>
 
-  <div class="canvas">
+  <!-- Region grid is built client-side from /api/layout by panel-shell.js.
+       Until it runs, the staging div below is invisible (display:none on
+       <template>-style host). Sections inside it have ids referenced by
+       panel_layout.json and get hoisted into their assigned region. -->
+  <div class="canvas" id="region-grid"></div>
 
-    <!-- Left 30%: chat panel -->
-    <div class="left-panel">
+  <div id="legacy-staging" hidden>
+
+    <!-- [legacy-chat] Whole left-column cluster: dir picker + chat input + response. -->
+    <div id="legacy-chat" class="left-panel">
 
       <!-- Directory picker -->
       <div class="chat-input-panel" style="display:flex;gap:6px;padding:8px 10px;">
@@ -44,8 +50,10 @@
 
     </div>
 
-    <!-- Middle column: Activity (tools + pending) + Settings stacked -->
-    <div class="middle-column">
+    <!-- [middle column staging] Activity, settings, reference — each becomes
+         its own instance in panel_layout.json. Wrapper here is just so the
+         children sit side-by-side in the staging div (gets stripped). -->
+    <div>
       <!-- Activity panel: tool log + pending writes as side-by-side sub-panels -->
       <section class="file-panel activity-panel" id="activity-panel">
         <div class="file-panel-header">
@@ -80,8 +88,8 @@
         </div>
       </section>
 
-      <!-- Settings bento: model + customization side by side -->
-      <div class="settings-grid">
+      <!-- [legacy-settings] Settings bento: model + customization side by side. -->
+      <div id="legacy-settings" class="settings-grid">
 
         <!-- [settings-panel:model] model select + temperature + history/auto-apply toggles + context usage -->
         <section class="settings-panel" data-panel="model">
@@ -177,9 +185,10 @@
       </div>
     </div>
 
-    <!-- Context column: status (in-context + task). Reference moved into the
-         middle column. In blog mode this whole column is hidden. -->
-    <div class="context-column" id="context-column">
+    <!-- [context column staging] Status panel only (reference moved to middle).
+         The actual region wrapper is built by panel-shell.js with id
+         context-column preserved for app.js compatibility. -->
+    <div>
 
       <!-- Status panel: in-context files + task list as side-by-side sub-panels -->
       <section class="file-panel status-panel" id="status-panel">
@@ -213,9 +222,11 @@
 
     </div>
 
-    <!-- Right column: files + bot-ops -->
-    <div class="right-column">
-      <div class="right-grid">
+    <!-- [right column staging] Files + bot-ops + blog-ops. Region wrapper
+         gets right-column class via panel-shell.js. -->
+    <div>
+      <!-- [legacy-files] File-tree cluster (was .right-grid > .file-panel). -->
+      <div id="legacy-files" class="right-grid">
         <div class="file-panel">
           <div class="file-panel-header">
             <span>files</span>
@@ -457,6 +468,10 @@
 
   <script src="https://cdn.jsdelivr.net/npm/marked@14.1.3/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <!-- panel-shell.js MUST run before app.js — it hoists sections from
+       #legacy-staging into the region grid so app.js's getElementById calls
+       find them in their final positions. -->
+  <script src="panel-shell.js"></script>
   <script src="app.js"></script>
 </body>
 </html>

@@ -1574,3 +1574,38 @@ input:checked + .toggle-slider:before {
   background: var(--textbox-bg);
   margin-top: 6px;
 }
+
+/* ── Panel system (phases 1+) ─────────────────────────────────────────── */
+
+/* Region = invisible layout slot. Width/flex-direction is set inline by
+   panel-shell.js from the layout config; everything else is just gap. */
+.region {
+  min-width: 0;
+  gap: 16px;
+  align-self: stretch;
+}
+
+/* Bounding-rect contract: panel-shell.js gives each instance a region (the
+   rect). The instance must fill that rect — it does NOT get to re-apply its
+   own width %. Real panels do this via inline 100% on the iframe; legacy
+   hoisted wrappers (.left-panel etc.) had their own width rules from when
+   they were direct canvas children, so force them to fill here. Once every
+   panel is migrated (phase 4+) this rule becomes dead and can be deleted. */
+.region > * { width: 100%; }
+
+.panel-instance {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.panel-instance-inner {
+  width: 100%;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 80px;
+}
+.panel-iframe {
+  background: transparent;
+  border-radius: 8px;
+  overflow: hidden;
+}

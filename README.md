@@ -40,6 +40,10 @@ python server.py
 # open http://127.0.0.1:8000
 ```
 
+**Tip:** to keep `__pycache__` directories from cluttering the repo, set
+`PYTHONPYCACHEPREFIX=.pycache` in your shell — bytecode for every module
+goes under one out-of-tree directory instead of polluting each package.
+
 ## Modes
 
 The active mode controls which tool pack is loaded and which system prompt is used.
@@ -57,7 +61,7 @@ Switch modes from the dev panel in the UI, or via slash commands.
 The chess mode is built entirely on Niklas Fiekas's
 [python-chess](https://github.com/niklasf/python-chess) and
 [web-boardimage](https://github.com/niklasf/web-boardimage). See
-[special_thanks.md](special_thanks.md).
+[docs/special_thanks.md](docs/special_thanks.md).
 
 ## License
 

@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "name": "ollama_ps",
+  "title": "ollama gpu/cpu",
+  "tier": 3,
+  "author": "host",
+  "handler": "server:view",
+  "permissions": {
+    "network": [],
+    "reads": [],
+    "writes": []
+  },
+  "display": {
+    "shape": "wide",
+    "aspect_ratio": null,
+    "min":       { "width": 200, "height": 90 },
+    "preferred": { "width": 320, "height": 140 },
+    "max":       { "width": null, "height": null },
+    "scroll": "internal",
+    "growable": false
+  },
+  "anchored": false
+}

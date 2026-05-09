@@ -7,7 +7,7 @@ Keep these in mind when changing the harness.
 - **Single user, single process, localhost.** No auth. No multi-tenant. Module globals are fine.
 - **No build step on the client.** Edit `static/*.js|css|html`, hard-refresh.
 - **No auto-reload on the server.** Edit `server.py` or any file under `tools/`, restart uvicorn.
-- **`prompt.md` is hot.** Re-read every turn — no restart needed for prompt tweaks.
+- **`prompts/<mode>.md` is hot.** Re-read every turn — no restart needed for prompt tweaks.
 - **Packs are hot.** `/packs` scan runs on every request. Pack bodies are not in the standing prompt — the model pulls them via `load_pack` on demand.
 - **Tool schema is hot-per-turn.** `load_tools(mode)` is called at the top of every agent-loop iteration, so `/mode` switches pick up a new schema without a restart.
 
@@ -82,7 +82,7 @@ them in as tool output only when needed.
 ## Prompt authoring
 
 - Short imperatives > paragraphs.
-- List tool-specific rules ("prefer `edit_file` over `write_file` for small changes") in `prompt.md`, not tool descriptions — the prompt has global priority.
+- List tool-specific rules ("prefer `edit_file` over `write_file` for small changes") in `prompts/<mode>.md`, not tool descriptions — the prompt has global priority.
 - Tool descriptions tell Gemma what the tool *does*; the system prompt tells her when to use it.
 
 ## Testing changes

@@ -101,11 +101,7 @@ def load_prompt_template(name: str = "DeetsCode") -> str:
             return candidate.read_text(encoding="utf-8")
         except OSError:
             pass
-    # fallback: legacy prompt.md in cwd
-    try:
-        return paths.LEGACY_PROMPT_FILE.read_text(encoding="utf-8")
-    except (FileNotFoundError, OSError):
-        return DEFAULT_PROMPT
+    return DEFAULT_PROMPT
 
 import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
@@ -710,6 +706,84 @@ async def get_task():
         return JSONResponse({"content": ""})
     except Exception as e:
         return JSONResponse({"content": "", "error": str(e)})
+
+
+from fastapi.responses import HTMLResponse, FileResponse
+from panels import loader as _panel_loader
+
+# Discover panels at import time. Hot reload: POST /api/panels/reload.
+_panel_loader.discover()
+
+
+@app.get("/api/panels")
+async def list_panels():
+    """Registry of installed panels — name/title/tier/display + any load errors."""
+    out = []
+    for m in _panel_loader.registry().values():
+        out.append({
+            "name": m.name, "title": m.title, "tier": m.tier,
+            "author": m.author, "anchored": m.anchored,
+            "display": m.display.model_dump(),
+            "url": m.url,
+            "iframe_attrs": m.iframe_attrs,
+        })
+    return JSONResponse({"panels": out, "errors": _panel_loader.errors()})
+
+
+@app.get("/api/panels/{name}")
+async def get_panel(name: str):
+    m = _panel_loader.get(name)
+    if m is None:
+        return JSONResponse({"error": f"unknown panel: {name}"}, status_code=404)
+    return JSONResponse(m.model_dump(by_alias=True))
+
+
+@app.post("/api/panels/reload")
+async def reload_panels():
+    found = _panel_loader.discover()
+    return JSONResponse({"loaded": list(found.keys()), "errors": _panel_loader.errors()})
+
+
+@app.get("/panels/{name}/view", response_class=HTMLResponse)
+async def panel_view(name: str):
+    m = _panel_loader.get(name)
+    if m is None:
+        return HTMLResponse(f"<!-- panel not found: {name} -->", status_code=404)
+    if m.tier in (0, 2):
+        return HTMLResponse(f"<!-- panel {name} is tier {m.tier}; no host view -->", status_code=400)
+    try:
+        html = await _panel_loader.render_view(name)
+    except _panel_loader.PanelLoadError as e:
+        return HTMLResponse(f"<!-- panel-error {name}: {e} -->", status_code=500)
+    return HTMLResponse(html)
+
+
+@app.get("/panels/{name}/static/{file:path}")
+async def panel_static(name: str, file: str):
+    m = _panel_loader.get(name)
+    if m is None:
+        return JSONResponse({"error": "unknown panel"}, status_code=404)
+    pdir = _panel_loader.panel_dir(name).resolve()
+    static_root = (pdir / "static").resolve()
+    target = (static_root / file).resolve()
+    if not str(target).startswith(str(static_root)):
+        return JSONResponse({"error": "path escape"}, status_code=400)
+    if not target.is_file():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return FileResponse(target)
+
+
+@app.get("/api/layout")
+async def get_panel_layout():
+    """Read layout/panel_layout.json — the declarative region+instance map
+    that drives the UI shell. Edited by hand (and, later, by Claude Code) to
+    rearrange the UI without touching panel code."""
+    try:
+        return JSONResponse(_panel_loader.load_layout().model_dump(by_alias=True))
+    except FileNotFoundError:
+        return JSONResponse({"error": "panel_layout.json not found"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
 
 
 @app.get("/api/themes")

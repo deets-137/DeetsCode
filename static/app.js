@@ -1153,6 +1153,11 @@ function applyModeVisibility() {
     else hide = false;
     el.classList.toggle("mode-hidden", hide);
   }
+  // Let the panel-shell apply layout-config mode_overrides too (region
+  // widths/visibility declared in panel_layout.json).
+  if (typeof window.harnessApplyLayoutMode === "function") {
+    window.harnessApplyLayoutMode(currentMode);
+  }
   // The right column also contains a `.right-grid` wrapping the file tree.
   // Hide its parent .file-panel (the file tree one — it has no id, so we
   // resolve it via the tree's container). Also collapse the .right-grid

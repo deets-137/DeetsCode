@@ -26,9 +26,6 @@ SESSIONS_DIR: Path = HARNESS_ROOT / "sessions"
 SAVES_DIR:    Path = HARNESS_ROOT / "saves"
 DB_PATH:      Path = HARNESS_ROOT / "storage.db"
 
-# Legacy fallback — pre-prompts/ layout. Kept for one-off reads only.
-LEGACY_PROMPT_FILE: Path = HARNESS_ROOT / "prompt.md"
-
 # Sibling repo: the DeetsOTD blog (`~/Documents/blog`). The harness's `blog`
 # mode talks to this repo directly — adds it to sys.path and imports app.repo
 # / app.itunes for authoring posts. See harness/tools/blog_service.py.
@@ -42,3 +39,7 @@ TASK_FILENAME = "task.md"
 CAMPAIGN_STATE_FILENAME = "campaign_state.json"
 DND_SUBDIR = "dnd"
 PROJECT_MANUAL_SUBDIR = "manual"
+# Per-panel folders (panel.json + view/handler).
+PANELS_DIR: Path = HARNESS_ROOT / "panels"
+# Declarative layout: regions + panel instances.
+PANEL_LAYOUT_FILE: Path = HARNESS_ROOT / "layout/panel_layout.json"

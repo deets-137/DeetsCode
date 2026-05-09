@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "name": "clock",
+  "title": "clock",
+  "tier": 0,
+  "author": "host",
+  "url": "/panels/clock/static/clock.html",
+  "permissions": { "network": [], "reads": [], "writes": [] },
+  "display": {
+    "shape": "wide",
+    "aspect_ratio": null,
+    "min":       { "width": 160, "height": 60 },
+    "preferred": { "width": 280, "height": 80 },
+    "max":       { "width": null, "height": null },
+    "scroll": "internal",
+    "growable": false
+  },
+  "iframe_attrs": {
+    "sandbox": "allow-scripts",
+    "allow": ""
+  },
+  "anchored": false
+}
