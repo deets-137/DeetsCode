@@ -1,0 +1,23 @@
+{
+  "schema": 1,
+  "name": "blog_ops",
+  "title": "blog",
+  "tier": 3,
+  "author": "host",
+  "handler": "server:view",
+  "permissions": {
+    "network": [],
+    "reads": [],
+    "writes": []
+  },
+  "display": {
+    "shape": "tall",
+    "aspect_ratio": null,
+    "min":       { "width": 320, "height": 200 },
+    "preferred": { "width": 480, "height": 800 },
+    "max":       { "width": null, "height": null },
+    "scroll": "internal",
+    "growable": true
+  },
+  "anchored": false
+}

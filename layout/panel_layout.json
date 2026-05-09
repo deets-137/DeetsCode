@@ -10,16 +10,16 @@
     { "instance": "chat",             "dom_id": "legacy-chat",     "region": "left",    "anchored": true },
     { "instance": "tool_log",         "panel": "tool_log",         "region": "middle" },
     { "instance": "pending_writes",   "panel": "pending_writes",   "region": "middle" },
-    { "instance": "settings",         "dom_id": "legacy-settings", "region": "middle",  "anchored": true },
+    { "instance": "settings",         "panel": "settings",         "region": "middle",  "anchored": true },
     { "instance": "knowledge_packs",  "panel": "knowledge_packs",  "region": "middle" },
     { "instance": "slash_commands",   "panel": "slash_commands",   "region": "middle" },
     { "instance": "in_context_files", "panel": "in_context_files", "region": "context" },
     { "instance": "task_list",        "panel": "task_list",        "region": "context" },
-    { "instance": "files",            "dom_id": "legacy-files",    "region": "right",   "anchored": true },
+    { "instance": "files",            "panel": "files",            "region": "right",   "anchored": true },
     { "instance": "clock",            "panel": "clock",            "region": "right" },
     { "instance": "ollama_ps",        "panel": "ollama_ps",        "region": "right" },
-    { "instance": "blog_ops",         "dom_id": "blog-ops",        "region": "right" },
-    { "instance": "bot_ops",          "dom_id": "bot-ops",         "region": "right",   "anchored": true }
+    { "instance": "blog_ops",         "panel": "blog_ops",         "region": "right" },
+    { "instance": "bot_ops",          "panel": "bot_ops",          "region": "right",   "anchored": true }
   ],
   "mode_overrides": {
     "blog": {

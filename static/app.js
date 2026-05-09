@@ -1,9 +1,68 @@
+// ── Settings control wiring ───────────────────────
+// Called from DOMContentLoaded AND from the settings panel's inline script
+// after its content lands (panel content arrives via async fetch, well after
+// DOMContentLoaded). Re-callable: each call uses dataset flags to avoid
+// double-binding the same element.
+function bindSettingsControls() {
+  const keepHistoryToggle = document.getElementById("keep-history-toggle");
+  if (keepHistoryToggle && !keepHistoryToggle.dataset.bound) {
+    keepHistoryToggle.dataset.bound = "1";
+    keepHistoryToggle.checked = localStorage.getItem("harness-keep-history") === "1";
+    keepHistoryToggle.addEventListener("change", (e) => {
+      localStorage.setItem("harness-keep-history", e.target.checked ? "1" : "0");
+    });
+  }
+
+  const autoApplyToggle = document.getElementById("auto-apply-toggle");
+  if (autoApplyToggle && !autoApplyToggle.dataset.bound) {
+    autoApplyToggle.dataset.bound = "1";
+    autoApplyToggle.addEventListener("change", (e) => {
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_auto_apply", enabled: e.target.checked }));
+      }
+    });
+  }
+
+  const templateBox = document.getElementById("file-click-template");
+  if (templateBox && !templateBox.dataset.bound) {
+    templateBox.dataset.bound = "1";
+    const savedTemplate = localStorage.getItem("harness-click-template");
+    if (savedTemplate !== null) {
+      templateBox.value = savedTemplate;
+    } else {
+      templateBox.value = "Read `{path}` and reply with only the single word: ready";
+    }
+    templateBox.addEventListener("input", (e) => {
+      localStorage.setItem("harness-click-template", e.target.value);
+    });
+  }
+
+  const tempSlider = document.getElementById("temp-slider");
+  const tempValue = document.getElementById("temp-value");
+  if (tempSlider && !tempSlider.dataset.bound) {
+    tempSlider.dataset.bound = "1";
+    tempSlider.addEventListener("input", (e) => {
+      const val = (parseInt(e.target.value) / 100).toFixed(2);
+      if (tempValue) tempValue.textContent = val;
+    });
+    tempSlider.addEventListener("change", (e) => {
+      const val = (parseInt(e.target.value) / 100).toFixed(2);
+      if (tempValue) tempValue.textContent = val;
+      if (ws && ws.readyState === WebSocket.OPEN) {
+        ws.send(JSON.stringify({ type: "set_temperature", temperature: parseFloat(val) }));
+      }
+    });
+  }
+}
+window.bindSettingsControls = bindSettingsControls;
+
 // ── File tree ─────────────────────────────────────
 async function refreshTree() {
   try {
     const res = await fetch("/tree");
     const data = await res.json();
     const container = document.getElementById("file-tree");
+    if (!container) return;
     container.innerHTML = "";
     renderNodes(data.tree, container);
     if (data.root) setTitleFromPath(data.root);
@@ -41,16 +100,19 @@ async function fetchModels() {
   }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+function bindModelSelect() {
   const modelSelect = document.getElementById("model-select");
-  if (modelSelect) {
+  if (modelSelect && !modelSelect.dataset.bound) {
+    modelSelect.dataset.bound = "1";
     modelSelect.addEventListener("change", (e) => {
       if (ws && ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "set_model", model: e.target.value }));
       }
     });
   }
-});
+}
+window.bindModelSelect = bindModelSelect;
+document.addEventListener("DOMContentLoaded", bindModelSelect);
 
 // ── Task Panel ────────────────────────────────────
 async function refreshTaskPanel() {
@@ -908,9 +970,12 @@ function addContextFile(path) {
 
 function updateContextBar(total, max) {
   const pct = Math.min(100, Math.round((total / max) * 100));
-  document.getElementById("ctx-pct").textContent = pct + "%";
-  document.getElementById("ctx-bar").style.width = pct + "%";
-  document.getElementById("ctx-tokens").textContent = `~${total.toLocaleString()} / ${max.toLocaleString()}`;
+  const pctEl = document.getElementById("ctx-pct");
+  const barEl = document.getElementById("ctx-bar");
+  const tokEl = document.getElementById("ctx-tokens");
+  if (pctEl) pctEl.textContent = pct + "%";
+  if (barEl) barEl.style.width = pct + "%";
+  if (tokEl) tokEl.textContent = `~${total.toLocaleString()} / ${max.toLocaleString()}`;
 }
 
 function clearContextFiles() {
@@ -1069,51 +1134,7 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   });
 
-  const keepHistoryToggle = document.getElementById("keep-history-toggle");
-  if (keepHistoryToggle) {
-    keepHistoryToggle.checked = localStorage.getItem("harness-keep-history") === "1";
-    keepHistoryToggle.addEventListener("change", (e) => {
-      localStorage.setItem("harness-keep-history", e.target.checked ? "1" : "0");
-    });
-  }
-
-  const autoApplyToggle = document.getElementById("auto-apply-toggle");
-  if (autoApplyToggle) {
-    autoApplyToggle.addEventListener("change", (e) => {
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "set_auto_apply", enabled: e.target.checked }));
-      }
-    });
-  }
-
-  const templateBox = document.getElementById("file-click-template");
-  if (templateBox) {
-    const savedTemplate = localStorage.getItem("harness-click-template");
-    if (savedTemplate !== null) {
-      templateBox.value = savedTemplate;
-    } else {
-      templateBox.value = "Read `{path}` and reply with only the single word: ready";
-    }
-    templateBox.addEventListener("input", (e) => {
-      localStorage.setItem("harness-click-template", e.target.value);
-    });
-  }
-
-  const tempSlider = document.getElementById("temp-slider");
-  const tempValue = document.getElementById("temp-value");
-  if (tempSlider) {
-    tempSlider.addEventListener("input", (e) => {
-      const val = (parseInt(e.target.value) / 100).toFixed(2);
-      if (tempValue) tempValue.textContent = val;
-    });
-    tempSlider.addEventListener("change", (e) => {
-      const val = (parseInt(e.target.value) / 100).toFixed(2);
-      if (tempValue) tempValue.textContent = val;
-      if (ws && ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "set_temperature", temperature: parseFloat(val) }));
-      }
-    });
-  }
+  bindSettingsControls();
 
   renderSlashPanel();
   connect();
@@ -1148,19 +1169,20 @@ function isBlogMode() { return currentMode === "blog"; }
 //   - bot-ops (Discord remote control)
 // Keeps the activity panel (tool calls / pending writes from the model when
 // summoned) and settings (model + mode picker).
+// Per-instance mode-visibility. Looks up by [data-instance="..."] (the
+// panel-shell's wrapper) so it works both for legacy dom_id-hoisted blocks
+// and for real panels rendered into instance wrappers.
 const _PANEL_HIDE_RULES = [
-  { id: "blog-ops",       showOnlyIn: ["blog"] },
-  { id: "bot-ops",        hideIn:     ["blog"] },
-  { id: "status-panel",   hideIn:     ["blog"] },
-  // Status is the only resident of the context column now (reference moved
-  // to the middle column), so collapse the column entirely in blog mode to
-  // hand its width to the blog-ops panel on the right.
-  { id: "context-column", hideIn:     ["blog"] },
+  { instance: "blog_ops",         showOnlyIn: ["blog"] },
+  { instance: "bot_ops",          hideIn:     ["blog"] },
+  { instance: "in_context_files", hideIn:     ["blog"] },
+  { instance: "task_list",        hideIn:     ["blog"] },
+  { instance: "files",            hideIn:     ["blog"] },
 ];
 
 function applyModeVisibility() {
   for (const r of _PANEL_HIDE_RULES) {
-    const el = document.getElementById(r.id);
+    const el = document.querySelector(`[data-instance="${r.instance}"]`);
     if (!el) continue;
     let hide;
     if (r.showOnlyIn) hide = !r.showOnlyIn.includes(currentMode);
@@ -1172,18 +1194,6 @@ function applyModeVisibility() {
   // widths/visibility declared in panel_layout.json).
   if (typeof window.harnessApplyLayoutMode === "function") {
     window.harnessApplyLayoutMode(currentMode);
-  }
-  // The right column also contains a `.right-grid` wrapping the file tree.
-  // Hide its parent .file-panel (the file tree one — it has no id, so we
-  // resolve it via the tree's container). Also collapse the .right-grid
-  // wrapper itself, otherwise the parent's flex `gap` leaves a phantom slot
-  // that pushes the blog panel down out of alignment with the other columns.
-  const fileTree = document.getElementById("file-tree");
-  if (fileTree) {
-    const filePanel = fileTree.closest(".file-panel");
-    if (filePanel) filePanel.classList.toggle("mode-hidden", isBlogMode());
-    const rightGrid = fileTree.closest(".right-grid");
-    if (rightGrid) rightGrid.classList.toggle("mode-hidden", isBlogMode());
   }
 }
 
