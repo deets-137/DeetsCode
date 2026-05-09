@@ -8,12 +8,16 @@ contradicts something said in chat, this file wins (or update it).
 
 ## Handoff — start here
 
-**Status as of 2026-05-09:** phases 0 → 7 essentially complete in a single
-overnight session. Every panel except `chat` is migrated. The
-`chat` panel (whole left column — textarea, response, WS lifecycle) was
-deliberately deferred because migrating it without iterative human
-verification risks breaking the harness's main loop. **Next session:
-migrate `chat`, then commit + open PR.**
+**Status as of 2026-05-09:** phases 0 → 7 **structurally** complete in
+a single overnight session. Every panel except `chat` is migrated and
+functionally working — controls wire up, WS events route, mode visibility
+toggles. **The panels are visually rough.** The migration prioritized
+correctness over polish: each handler reproduced legacy header markup
+ad-hoc instead of using a shared chrome, the settings bento is stacked
+where it should be side-by-side, padding is inconsistent, and
+`index.html` has dead hidden divs littered around. **Next session: phase
+8 (UI polish) is the highest-priority work — see Outstanding Work
+below.** After polish, migrate `chat`, then PR.
 
 **What already exists — do not rebuild:**
 
@@ -564,25 +568,97 @@ hardcoded `canvas` markup is gone.
 
 ### Outstanding work
 
+#### Phase 8 — UI polish (next priority; the panels work but look rough)
+
+The migration prioritized structural correctness over visual polish. The
+panels render and behave correctly but the look is inconsistent in
+several specific ways. Fix in this order:
+
+- **Panel chrome is fragmented.** Each migrated handler reproduced the
+  legacy header markup with its own ad-hoc class:
+  `.tool-log-header`, `.files-panel-header`, `.pending-header-row`,
+  `.bot-ops-chrome`, `.blog-ops-chrome`, `.pending-panel-chrome`,
+  `.tool-log-chrome`. The original `.file-panel-header` was the single
+  source of truth. Pick one shape and use it everywhere — probably
+  refactor `panel-shell.js` to render the chrome itself (header with
+  title + actions slot) so panel handlers return *content only*, per
+  the trajectory section's "panel content vs. panel chrome" split.
+- **Panel handlers shouldn't be writing headers at all.** Right now most
+  do (`<div class="*-chrome"><div class="*-header">title</div>...`).
+  The shell already renders a `.file-panel-header` from `manifest.title`
+  in `renderPanelInstance`. So every migrated panel has TWO headers
+  visible. Strip the duplicates from the handlers; let the shell own it.
+  Add an `actions` mechanism (e.g. handler returns `{actions: [{label,
+  onclick}], body: html}`) so refresh/clear buttons land in the
+  shell-rendered header.
+- **Settings bento is broken.** The `<div class="settings-grid">` inside
+  `panels/settings/server.py` was originally a flex container giving
+  side-by-side model + customization sections. After migration it's
+  now inside `.panel-content` inside `.panel-instance-inner` with
+  different parent constraints; the two sections likely stack vertically
+  at the current width, defeating the bento. Either fix the grid CSS to
+  hold up under the new parent chain, or accept the stack and rework
+  the layout (this is the same reason the doc originally wanted it
+  split into two panels).
+- **`.panel-instance` styling is thinner than `.file-panel` was.** The
+  shell sets `className = "panel-instance file-panel"` so the legacy
+  glass background + radius apply, but the inner padding came from
+  `.file-panel-inner` which the new wrapper doesn't have. Content
+  abuts the panel edge in places. Add padding to `.panel-content`
+  (or the shell-injected inner wrapper) once chrome ownership is
+  unified.
+- **Empty hidden divs litter `index.html`.** Stubs left from the
+  migration: `<div id="activity-panel" hidden></div>`,
+  `<div id="legacy-settings" hidden></div>`,
+  `<div id="legacy-files" hidden></div>`,
+  `<div id="blog-ops" hidden></div>`,
+  `<div id="bot-ops" hidden></div>`. None are referenced any more —
+  delete them. Same for the surrounding `<div>` wrappers in
+  `#legacy-staging` that no longer wrap anything.
+- **Mode visibility for context-region panels.** `task_list` and
+  `in_context_files` were originally inside the context column which
+  hid entirely in blog mode. The new panels live in `context` region
+  which `mode_overrides.blog` collapses. Verify they actually disappear
+  in blog mode (the layout override should handle it; double-check).
+- **`.mode-hidden` race on first paint.** `app.js`'s `applyModeVisibility`
+  runs once `selectedPrompt` resolves; before that, blog_ops flashes
+  visible briefly in non-blog mode. Render layout-config-driven
+  visibility in `panel-shell.js` *before* the panel content fetches.
+- **Tool-log scroll position.** Was tied to a fixed-height parent
+  before; now scrolls inside `.panel-content` which may resize
+  differently. Verify auto-scroll-to-bottom on new tool entries still
+  pins.
+- **No visual differentiation between tier-0 / tier-1 / tier-3** in
+  dev mode. Optional but useful: a tiny tier badge in the chrome
+  during development, hideable.
+
+#### Structural work still pending
+
 - **chat panel migration.** The whole left column (textarea + response +
   WS lifecycle) is the only remaining `dom_id`'d legacy block. Risk:
-  app.js's `connect()` and the entire `ws.onmessage` switch statement
-  reference `#chat-textbox`, `#response-text`, `#stop-btn` — moving them
-  into a panel handler means either keeping app.js's references valid via
-  the hybrid pattern (panel renders chrome containing those IDs) OR
+  `app.js`'s `connect()` and the entire `ws.onmessage` switch reference
+  `#chat-textbox`, `#response-text`, `#stop-btn` — moving them into a
+  panel handler means either keeping `app.js`'s references valid via the
+  hybrid pattern (panel renders chrome containing those IDs) OR
   refactoring `connect()` to be re-callable post-hydration. Hybrid is
   the safer first cut.
 - **settings split.** Currently one `settings` panel (model + customization
   bento). Doc originally specified `settings_model` + `settings_custom`.
   Blocked on v1 regions stacking vertically — splitting would stack them
   instead of the bento side-by-side. Add a `subgrid` region primitive
-  (or horizontal sub-region) and revisit.
+  (or horizontal sub-region) and revisit. Related to the bento-broken
+  item under UI polish.
 - **install-time permissions display.** Phase 7 polish item not done; v1
   is still the honor system.
-- **Subscriber API for app.js handlers.** Several existing app.js
-  handlers (`addToolEntry`, `refreshPacks`, etc.) still live globally
-  rather than in their panels. Hybrid is OK for now; consolidate into
-  the panel modules when chat migration forces a broader app.js cleanup.
+- **Consolidate app.js handlers into their panels.** Several existing
+  app.js handlers (`addToolEntry`, `updateToolResult`, `clearToolPanel`,
+  `refreshPacks`, `renderPackChips`, `togglePack`, `refreshTree`,
+  `bindSettingsControls`, etc.) still live globally rather than in
+  their panels. Hybrid pattern works but means panel internals leak
+  into a shared `app.js`. Consolidate when the chat migration forces
+  a broader app.js cleanup. Once done, `panel-shell.js`'s
+  `harness._dispatch` becomes the only WS fan-out; the legacy `switch`
+  in `app.js` shrinks to "connection lifecycle" only.
 
 ---
 
