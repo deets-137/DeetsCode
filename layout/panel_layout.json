@@ -8,7 +8,8 @@
   ],
   "instances": [
     { "instance": "chat",             "dom_id": "legacy-chat",     "region": "left",    "anchored": true },
-    { "instance": "activity",         "dom_id": "activity-panel",  "region": "middle",  "anchored": true },
+    { "instance": "tool_log",         "panel": "tool_log",         "region": "middle" },
+    { "instance": "pending_writes",   "panel": "pending_writes",   "region": "middle" },
     { "instance": "settings",         "dom_id": "legacy-settings", "region": "middle",  "anchored": true },
     { "instance": "knowledge_packs",  "panel": "knowledge_packs",  "region": "middle" },
     { "instance": "slash_commands",   "panel": "slash_commands",   "region": "middle" },

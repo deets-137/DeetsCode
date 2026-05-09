@@ -54,39 +54,9 @@
          its own instance in panel_layout.json. Wrapper here is just so the
          children sit side-by-side in the staging div (gets stripped). -->
     <div>
-      <!-- Activity panel: tool log + pending writes as side-by-side sub-panels -->
-      <section class="file-panel activity-panel" id="activity-panel">
-        <div class="file-panel-header">
-          <span>activity</span>
-        </div>
-        <div class="file-panel-inner activity-inner">
-
-          <!-- [activity-subpanel:tools] Live tool_call / tool_result log. -->
-          <div class="nested-panel activity-subpanel" id="tool-panel" data-panel="tools">
-            <div class="nested-header">
-              <span>tools</span>
-              <button onclick="clearToolPanel()" title="Clear tool log">✕</button>
-            </div>
-            <div class="tool-panel-inner" id="tool-panel-inner"></div>
-          </div>
-
-          <!-- [activity-subpanel:pending] Queued file writes awaiting approve/reject/flush. -->
-          <div class="nested-panel activity-subpanel pending-panel" id="pending-panel" data-panel="pending">
-            <div class="nested-header">
-              <span>pending writes <span class="pending-count" id="pending-count">0</span></span>
-              <div class="pending-pills">
-                <button class="pending-pill apply" onclick="applyWrites()" title="Write queued changes to disk">approve</button>
-                <button class="pending-pill reject" onclick="rejectWrites()" title="Drop queued changes (via websocket)">reject</button>
-                <button class="pending-pill flush" onclick="flushPending()" title="Force-clear the queue (HTTP DELETE /pending)">flush</button>
-              </div>
-            </div>
-            <div class="pending-panel-inner" id="pending-panel-inner">
-              <span class="pending-empty">queue is empty</span>
-            </div>
-          </div>
-
-        </div>
-      </section>
+      <!-- activity-panel removed — tool_log and pending_writes are now real
+           panels in layout/panel_layout.json (phase 5). -->
+      <div id="activity-panel" hidden></div>
 
       <!-- [legacy-settings] Settings bento: model + customization side by side. -->
       <div id="legacy-settings" class="settings-grid">

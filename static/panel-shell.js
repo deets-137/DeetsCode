@@ -75,6 +75,12 @@
 
   async function fetchAndInject(name, contentEl) {
     const r = await fetch(`/panels/${name}/view`);
+    // Clear any subscriptions registered by the prior view's script — the
+    // new view's script will re-register fresh ones. Done before the
+    // innerHTML swap so old subscribers can't see in-flight events.
+    if (window.harness && window.harness._clearPanelSubs) {
+      window.harness._clearPanelSubs(name);
+    }
     if (!r.ok) {
       contentEl.innerHTML = `<div class="panel-error">panel ${name}: HTTP ${r.status}</div>`;
       return;
@@ -162,6 +168,35 @@
       }
       fetchAndInject(name, el);
     }, Math.max(1, seconds) * 1000);
+  };
+
+  // One-shot fetch + inject. Used by event-driven panels to refresh in
+  // response to a WS message via harness.subscribe.
+  harness.refreshNow = function (name) {
+    const el = document.querySelector(`[data-panel-content="${name}"]`);
+    if (el) fetchAndInject(name, el);
+  };
+
+  // ── harness.subscribe — WS event bridge for panels ───────────────────────
+  // Panels register interest in WS message types via:
+  //   harness.subscribe('my_panel', 'pending_writes', (msg) => {...})
+  // app.js's ws.onmessage hooks into harness._dispatch to fan out events.
+  //
+  // Subscriptions are keyed by panel name so that a panel re-render
+  // (fetchAndInject) wipes old subscriptions before the new view's script
+  // re-registers fresh ones — no leaks across refreshes.
+  const _subs = {}; // {panel: {event: [callbacks]}}
+  harness.subscribe = function (panel, event, callback) {
+    const subs = (_subs[panel] = _subs[panel] || {});
+    (subs[event] = subs[event] || []).push(callback);
+  };
+  harness._clearPanelSubs = function (panel) { delete _subs[panel]; };
+  harness._dispatch = function (event, msg) {
+    for (const panel in _subs) {
+      for (const cb of (_subs[panel][event] || [])) {
+        try { cb(msg); } catch (e) { console.error(`[harness] subscriber ${panel}/${event}`, e); }
+      }
+    }
   };
 
   function hoistInstances(layout, regionMap, panelManifests) {

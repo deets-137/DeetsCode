@@ -606,6 +606,11 @@ function connect() {
         refreshTaskPanel();
         break;
     }
+    // Fan out to panel subscribers (harness.subscribe). Done after the
+    // built-in switch so legacy handlers always run first.
+    if (window.harness && window.harness._dispatch) {
+      window.harness._dispatch(msg.type, msg);
+    }
   };
 }
 
@@ -980,6 +985,7 @@ function renderToolArgs(name, args) {
 
 function addToolEntry(name, args) {
   const inner = document.getElementById("tool-panel-inner");
+  if (!inner) return;
 
   const entry = document.createElement("div");
   entry.className = "tool-entry";
@@ -1001,12 +1007,15 @@ function updateToolResult(content) {
   }
   result.textContent = content.slice(0, 400) + (content.length > 400 ? "…" : "");
   currentToolEntry.appendChild(result);
-  document.getElementById("tool-panel-inner").scrollTop = 999999;
+  const inner = document.getElementById("tool-panel-inner");
+  if (inner) inner.scrollTop = 999999;
 }
 
 function clearToolPanel() {
-  document.getElementById("tool-panel-inner").innerHTML = "";
-  document.getElementById("tool-panel").classList.remove("visible");
+  const inner = document.getElementById("tool-panel-inner");
+  if (inner) inner.innerHTML = "";
+  const wrap = document.getElementById("tool-panel");
+  if (wrap) wrap.classList.remove("visible");
   currentToolEntry = null;
 }
 
