@@ -9,13 +9,10 @@ from __future__ import annotations
 
 def view() -> str:
     return """
-<div class="files-panel-chrome">
-  <div class="files-panel-header">
-    <span>files</span>
-    <button onclick="if(window.refreshTree)refreshTree()" title="Refresh">↺</button>
-  </div>
-  <div class="file-panel-inner" id="file-tree"></div>
+<div data-panel-actions>
+  <button onclick="if(window.refreshTree)refreshTree()" title="Refresh">↺</button>
 </div>
+<div class="file-panel-inner" id="file-tree"></div>
 <script>
   if (window.refreshTree) window.refreshTree();
 </script>

@@ -73,6 +73,21 @@
     }
   }
 
+  // Hoist any [data-panel-actions] container in the freshly-injected content
+  // into the chrome's .panel-actions slot. Lets panels declare buttons that
+  // belong in the title bar without each rendering its own header markup.
+  function hoistActions(name, contentEl) {
+    const wrap = contentEl.closest(".panel-instance");
+    if (!wrap) return;
+    const slot = wrap.querySelector(`:scope > .panel-header > .panel-actions`);
+    if (!slot) return;
+    slot.innerHTML = "";
+    const src = contentEl.querySelector(":scope > [data-panel-actions]");
+    if (!src) return;
+    while (src.firstChild) slot.appendChild(src.firstChild);
+    src.remove();
+  }
+
   async function fetchAndInject(name, contentEl) {
     const r = await fetch(`/panels/${name}/view`);
     // Clear any subscriptions registered by the prior view's script — the
@@ -86,6 +101,7 @@
       return;
     }
     contentEl.innerHTML = await r.text();
+    hoistActions(name, contentEl);
     runScripts(contentEl);
   }
 
@@ -102,26 +118,29 @@
   // panels must be forced into iframes regardless of declared tier.
   function renderPanelInstance(inst, manifest) {
     const wrap = document.createElement("section");
-    wrap.className = "panel-instance file-panel";
+    wrap.className = "panel-instance";
     wrap.dataset.instance = inst.instance;
     wrap.dataset.panelName = manifest.name;
     wrap.dataset.tier = String(manifest.tier);
 
+    // Chrome: title + actions slot. Handlers don't render headers — they
+    // optionally include a <div data-panel-actions>...</div> in their
+    // returned HTML, which hoistActions moves into the slot below.
     const header = document.createElement("div");
-    header.className = "file-panel-header";
+    header.className = "panel-header";
     const title = document.createElement("span");
+    title.className = "panel-title";
     title.textContent = manifest.title || manifest.name;
     header.appendChild(title);
+    const actions = document.createElement("div");
+    actions.className = "panel-actions";
+    header.appendChild(actions);
     wrap.appendChild(header);
 
-    const inner = document.createElement("div");
-    inner.className = "panel-instance-inner";
     const display = manifest.display || {};
     const pref = display.preferred || {};
     const minH = (display.min || {}).height;
     const prefH = pref.height;
-    if (prefH) inner.style.height = `${prefH}px`;
-    if (minH) inner.style.minHeight = `${minH}px`;
 
     if (manifest.tier === 0) {
       const iframe = document.createElement("iframe");
@@ -130,20 +149,22 @@
       const attrs = manifest.iframe_attrs || {};
       if (attrs.sandbox !== undefined) iframe.setAttribute("sandbox", attrs.sandbox);
       if (attrs.allow) iframe.setAttribute("allow", attrs.allow);
-      iframe.style.width = "100%";
-      iframe.style.height = "100%";
-      iframe.style.border = "0";
-      inner.appendChild(iframe);
+      if (prefH) iframe.style.height = `${prefH}px`;
+      if (minH) iframe.style.minHeight = `${minH}px`;
+      wrap.appendChild(iframe);
     } else {
       const content = document.createElement("div");
       content.className = "panel-content";
       content.dataset.panelContent = manifest.name;
-      inner.appendChild(content);
+      // Min/preferred from manifest land on the outer instance — they
+      // describe the panel's natural footprint including chrome.
+      if (minH) wrap.style.minHeight = `${minH}px`;
+      if (prefH) content.style.maxHeight = `${prefH}px`;
+      wrap.appendChild(content);
       // Fire and forget — the panel will replace its own `display: loading…`
       // markup once the fetch lands. Errors render inline.
       fetchAndInject(manifest.name, content);
     }
-    wrap.appendChild(inner);
     return wrap;
   }
 
@@ -199,8 +220,34 @@
     }
   };
 
+  // Per-instance mode visibility, mirrored from app.js's _PANEL_HIDE_RULES.
+  // Defined here so panel-shell can hide-by-default at render time, before
+  // app.js's applyModeVisibility runs (which previously caused blog_ops to
+  // flash visible in non-blog modes during boot).
+  const INSTANCE_MODE_RULES = {
+    blog_ops:         { showOnlyIn: ["blog"] },
+    bot_ops:          { hideIn:     ["blog"] },
+    in_context_files: { hideIn:     ["blog"] },
+    task_list:        { hideIn:     ["blog"] },
+    files:            { hideIn:     ["blog"] },
+  };
+
+  function shouldHideForMode(instance, mode) {
+    const r = INSTANCE_MODE_RULES[instance];
+    if (!r) return false;
+    if (r.showOnlyIn) return !r.showOnlyIn.includes(mode);
+    if (r.hideIn) return r.hideIn.includes(mode);
+    return false;
+  }
+
+  function bootMode() {
+    try { return localStorage.getItem("harness-mode") || "DeetsCode"; }
+    catch (_) { return "DeetsCode"; }
+  }
+
   function hoistInstances(layout, regionMap, panelManifests) {
     const staging = document.getElementById("legacy-staging");
+    const mode = bootMode();
     for (const inst of layout.instances) {
       const target = regionMap[inst.region];
       if (!target) {
@@ -226,6 +273,11 @@
         }
       }
       node.dataset.instance = inst.instance;
+      // Apply mode-hidden synchronously, before content fetch lands. Prevents
+      // the blog_ops "flash visible in non-blog modes" race.
+      if (shouldHideForMode(inst.instance, mode)) {
+        node.classList.add("mode-hidden");
+      }
       target.el.appendChild(node);
     }
     if (staging) staging.remove();

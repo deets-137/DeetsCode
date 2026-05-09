@@ -30,17 +30,13 @@ def view() -> str:
             )
         body = "".join(rows)
     return f"""
-<div class="pending-panel-chrome">
-  <div class="pending-header-row">
-    <span>queue: <span class="pending-count">{count}</span></span>
-    <div class="pending-pills">
-      <button class="pending-pill apply"  onclick="if(window.applyWrites)applyWrites()"  title="Write queued changes to disk">approve</button>
-      <button class="pending-pill reject" onclick="if(window.rejectWrites)rejectWrites()" title="Drop queued changes (via websocket)">reject</button>
-      <button class="pending-pill flush"  onclick="if(window.flushPending)flushPending()" title="Force-clear the queue (HTTP DELETE /pending)">flush</button>
-    </div>
-  </div>
-  <div class="pending-panel-inner">{body}</div>
+<div data-panel-actions>
+  <span class="pending-count">{count}</span>
+  <button class="pending-pill apply"  onclick="if(window.applyWrites)applyWrites()"  title="Write queued changes to disk">approve</button>
+  <button class="pending-pill reject" onclick="if(window.rejectWrites)rejectWrites()" title="Drop queued changes (via websocket)">reject</button>
+  <button class="pending-pill flush"  onclick="if(window.flushPending)flushPending()" title="Force-clear the queue (HTTP DELETE /pending)">flush</button>
 </div>
+<div class="pending-panel-inner">{body}</div>
 <script>
 (function () {{
   if (!window.harness || !window.harness.subscribe) return;

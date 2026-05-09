@@ -11,9 +11,7 @@ from __future__ import annotations
 
 def view() -> str:
     return """
-<div class="bot-ops-chrome">
-  <div class="file-panel-header"><span>bot ops</span></div>
-  <div class="file-panel-inner bot-ops-inner">
+<div class="bot-ops-inner">
 
     <div class="nested-panel bot-subpanel" data-panel="spectate">
       <div class="nested-header">
@@ -75,7 +73,6 @@ def view() -> str:
       </table>
     </div>
 
-  </div>
 </div>
 <script>
 (function () {

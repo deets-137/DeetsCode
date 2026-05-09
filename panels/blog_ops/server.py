@@ -12,12 +12,10 @@ from __future__ import annotations
 
 def view() -> str:
     return """
-<div class="blog-ops-chrome">
-  <div class="file-panel-header">
-    <span>blog</span>
-    <button onclick="if(window.refreshBlogDrafts)refreshBlogDrafts()" title="Refresh drafts">↺</button>
-  </div>
-  <div class="file-panel-inner blog-ops-inner">
+<div data-panel-actions>
+  <button onclick="if(window.refreshBlogDrafts)refreshBlogDrafts()" title="Refresh drafts">↺</button>
+</div>
+<div class="blog-ops-inner">
 
     <div class="nested-panel blog-subpanel" data-panel="drafts">
       <div class="nested-header">
@@ -120,7 +118,6 @@ def view() -> str:
       <iframe id="blog-preview-frame" class="blog-preview-frame" src="about:blank"></iframe>
     </div>
 
-  </div>
 </div>
 <script>
 (function () {

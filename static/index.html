@@ -14,12 +14,13 @@
        panel_layout.json and get hoisted into their assigned region. -->
   <div class="canvas" id="region-grid"></div>
 
+  <!-- Staging holds only legacy-chat now — every other panel is migrated.
+       panel-shell.js hoists this into the `chat` instance's region and then
+       removes the staging wrapper. Once chat migrates, this whole block goes. -->
   <div id="legacy-staging" hidden>
 
-    <!-- [legacy-chat] Whole left-column cluster: dir picker + chat input + response. -->
     <div id="legacy-chat" class="left-panel">
 
-      <!-- Directory picker -->
       <div class="chat-input-panel" style="display:flex;gap:6px;padding:8px 10px;">
         <input id="dir-input" type="text" placeholder="Project path..." style="
           flex:1; background:var(--textbox-bg); border:none; border-radius:6px;
@@ -31,7 +32,6 @@
         ">set</button>
       </div>
 
-      <!-- Chat input -->
       <div class="chat-input-panel">
         <textarea id="chat-textbox" class="chat-textbox" placeholder="Message... (Enter to send, Shift+Enter for newline)"></textarea>
         <div class="chat-actions">
@@ -41,40 +41,12 @@
         </div>
       </div>
 
-      <!-- Response -->
       <div class="response-panel">
         <div class="response-box">
           <div class="response-text" id="response-text"></div>
         </div>
       </div>
 
-    </div>
-
-    <!-- [middle column staging] Activity, settings, reference — each becomes
-         its own instance in panel_layout.json. Wrapper here is just so the
-         children sit side-by-side in the staging div (gets stripped). -->
-    <div>
-      <!-- activity-panel removed — tool_log and pending_writes are now real
-           panels in layout/panel_layout.json (phase 5). -->
-      <div id="activity-panel" hidden></div>
-
-      <!-- legacy-settings removed — now the `settings` panel (phase 4.5). -->
-      <div id="legacy-settings" hidden></div>
-
-      <!-- info-panel and status-panel removed — knowledge_packs, slash_commands,
-           in_context_files, and task_list are now real panels declared in
-           layout/panel_layout.json (phase 4). -->
-    </div>
-
-    <!-- [right column staging] Files + bot-ops + blog-ops. Region wrapper
-         gets right-column class via panel-shell.js. -->
-    <div>
-      <!-- legacy-files removed — now the `files` panel (phase 4.5). -->
-      <div id="legacy-files" hidden></div>
-
-      <!-- legacy bot-ops + blog-ops removed — now bot_ops and blog_ops panels (phase 6). -->
-      <div id="blog-ops" hidden></div>
-      <div id="bot-ops" hidden></div>
     </div>
 
   </div>

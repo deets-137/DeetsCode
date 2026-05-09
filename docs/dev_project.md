@@ -8,16 +8,52 @@ contradicts something said in chat, this file wins (or update it).
 
 ## Handoff — start here
 
-**Status as of 2026-05-09:** phases 0 → 7 **structurally** complete in
-a single overnight session. Every panel except `chat` is migrated and
-functionally working — controls wire up, WS events route, mode visibility
-toggles. **The panels are visually rough.** The migration prioritized
-correctness over polish: each handler reproduced legacy header markup
-ad-hoc instead of using a shared chrome, the settings bento is stacked
-where it should be side-by-side, padding is inconsistent, and
-`index.html` has dead hidden divs littered around. **Next session: phase
-8 (UI polish) is the highest-priority work — see Outstanding Work
-below.** After polish, migrate `chat`, then PR.
+**Status as of 2026-05-09:** phases 0 → 8 complete. Every panel except
+`chat` is migrated, working, AND visually polished — the bento now
+renders as a proper grid of glass tiles with shell-owned chrome, a
+side-by-side settings bento, and synchronous mode visibility (no flash).
+
+`chat` remains the **only** legacy `dom_id` instance — deferred because
+migrating it without iterative verification risks breaking the WS
+lifecycle (`connect()` + the entire `ws.onmessage` switch) that drives
+every other panel. Migrate next.
+
+**What "phase 8 polish" actually changed (2026-05-09):**
+
+- `static/panel-shell.js` now owns the full chrome:
+  `.panel-instance > .panel-header (.panel-title + .panel-actions slot)
+  > .panel-content`. Glass surface, padding (10px), border-radius, and
+  uppercase title styling are all loader-rendered. The
+  `.panel-instance-inner` wrapper is gone.
+- Panel handlers no longer reproduce headers. To put buttons in the
+  chrome's title bar, a handler returns a `<div data-panel-actions>...
+  </div>` block; the shell hoists its children into the
+  `.panel-actions` slot on every fetch (after `runScripts`, so inline
+  init scripts still run normally). Stripped from `tool_log`, `files`,
+  `pending_writes`, `bot_ops`, `blog_ops`.
+- `.settings-grid` switched from flex to `display: grid;
+  grid-template-columns: 1fr 1fr` (collapses to one column under
+  700px). Inner `.settings-panel` tiles dropped their double-glass and
+  use a lighter nested-card surface — model + customization sit
+  side-by-side again.
+- Mode visibility (`blog_ops`, `bot_ops`, `in_context_files`,
+  `task_list`, `files`) is applied **synchronously** in
+  `panel-shell.js` at hoist time, before the panel's content fetch
+  fires. Reads `localStorage.harness-mode` and applies a
+  `INSTANCE_MODE_RULES` table that mirrors `app.js`'s
+  `_PANEL_HIDE_RULES`. No more flash. (Both tables exist in parallel
+  for now — consolidating into one source of truth is on the cleanup
+  list once chat migrates.)
+- `panel-shell.js` now applies manifest `display.min.height` to the
+  outer `.panel-instance` (was on the inner content), so short panels
+  no longer collapse to title-only.
+- `static/index.html` cleaned: every dead hidden div
+  (`#activity-panel`, `#legacy-settings`, `#legacy-files`, `#blog-ops`,
+  `#bot-ops`, the empty middle/right wrapper divs) is gone. Only
+  `#legacy-staging > #legacy-chat` remains.
+- `.claude/launch.json` added so future sessions can `preview_start`
+  the harness on port 8000 for visual verification (the doc previously
+  referenced 8765 but actual `config.PORT` is 8000).
 
 **What already exists — do not rebuild:**
 
@@ -568,69 +604,24 @@ hardcoded `canvas` markup is gone.
 
 ### Outstanding work
 
-#### Phase 8 — UI polish (next priority; the panels work but look rough)
+#### Phase 8 — UI polish ✓ (done 2026-05-09)
 
-The migration prioritized structural correctness over visual polish. The
-panels render and behave correctly but the look is inconsistent in
-several specific ways. Fix in this order:
+See the "What phase 8 polish actually changed" block at the top.
+Remaining nice-to-haves below the line — none blocking PR:
 
-- **Panel chrome is fragmented.** Each migrated handler reproduced the
-  legacy header markup with its own ad-hoc class:
-  `.tool-log-header`, `.files-panel-header`, `.pending-header-row`,
-  `.bot-ops-chrome`, `.blog-ops-chrome`, `.pending-panel-chrome`,
-  `.tool-log-chrome`. The original `.file-panel-header` was the single
-  source of truth. Pick one shape and use it everywhere — probably
-  refactor `panel-shell.js` to render the chrome itself (header with
-  title + actions slot) so panel handlers return *content only*, per
-  the trajectory section's "panel content vs. panel chrome" split.
-- **Panel handlers shouldn't be writing headers at all.** Right now most
-  do (`<div class="*-chrome"><div class="*-header">title</div>...`).
-  The shell already renders a `.file-panel-header` from `manifest.title`
-  in `renderPanelInstance`. So every migrated panel has TWO headers
-  visible. Strip the duplicates from the handlers; let the shell own it.
-  Add an `actions` mechanism (e.g. handler returns `{actions: [{label,
-  onclick}], body: html}`) so refresh/clear buttons land in the
-  shell-rendered header.
-- **Settings bento is broken.** The `<div class="settings-grid">` inside
-  `panels/settings/server.py` was originally a flex container giving
-  side-by-side model + customization sections. After migration it's
-  now inside `.panel-content` inside `.panel-instance-inner` with
-  different parent constraints; the two sections likely stack vertically
-  at the current width, defeating the bento. Either fix the grid CSS to
-  hold up under the new parent chain, or accept the stack and rework
-  the layout (this is the same reason the doc originally wanted it
-  split into two panels).
-- **`.panel-instance` styling is thinner than `.file-panel` was.** The
-  shell sets `className = "panel-instance file-panel"` so the legacy
-  glass background + radius apply, but the inner padding came from
-  `.file-panel-inner` which the new wrapper doesn't have. Content
-  abuts the panel edge in places. Add padding to `.panel-content`
-  (or the shell-injected inner wrapper) once chrome ownership is
-  unified.
-- **Empty hidden divs litter `index.html`.** Stubs left from the
-  migration: `<div id="activity-panel" hidden></div>`,
-  `<div id="legacy-settings" hidden></div>`,
-  `<div id="legacy-files" hidden></div>`,
-  `<div id="blog-ops" hidden></div>`,
-  `<div id="bot-ops" hidden></div>`. None are referenced any more —
-  delete them. Same for the surrounding `<div>` wrappers in
-  `#legacy-staging` that no longer wrap anything.
-- **Mode visibility for context-region panels.** `task_list` and
-  `in_context_files` were originally inside the context column which
-  hid entirely in blog mode. The new panels live in `context` region
-  which `mode_overrides.blog` collapses. Verify they actually disappear
-  in blog mode (the layout override should handle it; double-check).
-- **`.mode-hidden` race on first paint.** `app.js`'s `applyModeVisibility`
-  runs once `selectedPrompt` resolves; before that, blog_ops flashes
-  visible briefly in non-blog mode. Render layout-config-driven
-  visibility in `panel-shell.js` *before* the panel content fetches.
-- **Tool-log scroll position.** Was tied to a fixed-height parent
-  before; now scrolls inside `.panel-content` which may resize
-  differently. Verify auto-scroll-to-bottom on new tool entries still
-  pins.
-- **No visual differentiation between tier-0 / tier-1 / tier-3** in
-  dev mode. Optional but useful: a tiny tier badge in the chrome
-  during development, hideable.
+- **Tool-log scroll position** — was tied to a fixed-height parent
+  before; now scrolls inside `.panel-content`. Verify
+  auto-scroll-to-bottom on new tool entries still pins. (Untested
+  during phase 8 because the model wasn't actively running tools
+  during the polish session.)
+- **Tier badge in chrome** — tiny `.panel-instance::before` slot is
+  already in CSS but `display: none`. Wire to a dev-only setting if
+  ever useful.
+- **Stale CSS** — `.panel-instance-inner`, `.tool-log-chrome`,
+  `.files-panel-chrome`, `.pending-panel-chrome`,
+  `.pending-header-row`, `.bot-ops-chrome`, `.blog-ops-chrome` rules
+  are now unreferenced. Sweep them out next time `style.css` is
+  touched.
 
 #### Structural work still pending
 

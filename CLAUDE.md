@@ -30,7 +30,7 @@ Chess uses display names end-to-end — no Discord user ids. The envelope is `{"
 
 ## Panels
 
-The dev UI is a **panel system** — every visible block (chat, settings, file tree, blog ops, etc.) is a self-contained panel under `panels/<name>/`. The viewport is divided into named regions by `layout/panel_layout.json`; instances place panels into regions. **`docs/dev_project.md` is the authoritative design doc** — read it before touching the system. What you need to know to add or modify a panel:
+The dev UI is a **panel system** — every visible block is a self-contained panel under `panels/<name>/` **except `chat`**, which is still a legacy `dom_id` hoist (deferred because it owns the WS lifecycle that drives every other panel). The viewport is divided into named regions by `layout/panel_layout.json`; instances place panels into regions. **`docs/dev_project.md` is the authoritative design doc** — read it before touching the system. What you need to know to add or modify a panel:
 
 ### Trust tiers
 
@@ -42,6 +42,25 @@ The dev UI is a **panel system** — every visible block (chat, settings, file t
 | 3    | direct DOM injection of `server.py:view()` output | needs Python / harness state |
 
 Tier 1 and 3 inject into a `.panel-content` wrapper — **host CSS wins** (no shadow DOM, deliberate). Inline `<script>` tags re-execute on every fetch via clone-and-replace.
+
+### Panel chrome — the shell owns it
+
+`panel-shell.js` renders every panel as `.panel-instance > .panel-header (.panel-title + .panel-actions slot) > .panel-content`. Glass surface, padding, border-radius, and uppercase title styling are loader-rendered. **Handlers return content only — never their own title bar.** The title comes from `manifest.title`.
+
+To put buttons in the chrome's title bar, a handler emits a `<div data-panel-actions>...</div>` block in its returned HTML. The shell hoists its children into the `.panel-actions` slot on every fetch (after the script clone-and-replace pass, so inline init still runs). Example:
+
+```python
+def view() -> str:
+    return """
+<div data-panel-actions>
+  <button onclick="if(window.refreshTree)refreshTree()" title="Refresh">↺</button>
+</div>
+<div class="file-panel-inner" id="file-tree"></div>
+<script>if (window.refreshTree) window.refreshTree();</script>
+""".strip()
+```
+
+Padding lives on the outer `.panel-instance` (10px); `.panel-content` is a flex column with internal scroll. Manifest `display.min.height` lands on the outer instance, so short panels don't collapse to title-only.
 
 ### Adding a panel
 
@@ -72,7 +91,9 @@ Exposed by `static/panel-shell.js`, available to any direct-DOM panel:
 
 ### Layout & mode visibility
 
-`layout/panel_layout.json` is **the** UI layout — Claude can edit it directly to rearrange the dev UI without touching panel code. `mode_overrides` hides regions/instances per harness mode (e.g. `blog` mode hides the file tree). Per-instance show/hide that depends on JS state lives in `app.js`'s `_PANEL_HIDE_RULES` (queries by `[data-instance="..."]`).
+`layout/panel_layout.json` is **the** UI layout — Claude can edit it directly to rearrange the dev UI without touching panel code. `mode_overrides` hides regions/instances per harness mode (e.g. `blog` mode hides the file tree).
+
+Per-instance show/hide that depends on JS state lives in **two parallel tables** for now: `panel-shell.js`'s `INSTANCE_MODE_RULES` applies at hoist time (synchronous, reads `localStorage.harness-mode`, prevents flash on first paint), and `app.js`'s `_PANEL_HIDE_RULES` re-applies on mode change. Keep them in sync. Consolidating into one source of truth is on the cleanup list.
 
 ### Verifying a UI change
 

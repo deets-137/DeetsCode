@@ -13,11 +13,8 @@ from __future__ import annotations
 
 def view() -> str:
     return """
-<div class="tool-log-chrome">
-  <div class="tool-log-header">
-    <span>tools</span>
-    <button onclick="if(window.clearToolPanel)clearToolPanel()" title="Clear tool log">✕</button>
-  </div>
-  <div class="tool-panel-inner" id="tool-panel-inner"></div>
+<div data-panel-actions>
+  <button onclick="if(window.clearToolPanel)clearToolPanel()" title="Clear tool log">✕</button>
 </div>
+<div class="tool-panel-inner" id="tool-panel-inner"></div>
 """.strip()
