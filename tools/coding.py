@@ -35,6 +35,17 @@ def _looks_mojibaked(text: str) -> str | None:
             return m
     return None
 
+
+def _strip_line_numbers(s: str) -> str:
+    """If every non-empty line is prefixed with `N<TAB>` (read_file's format),
+    strip it. No-op otherwise so we don't corrupt content that legitimately
+    starts with digits + tab."""
+    lines = s.split("\n")
+    nonblank = [ln for ln in lines if ln.strip()]
+    if nonblank and all(re.match(r"^\s*\d+\t", ln) for ln in nonblank):
+        return "\n".join(re.sub(r"^\s*\d+\t", "", ln) for ln in lines)
+    return s
+
 _SYMBOL_PATTERNS = {
     "python": [
         (re.compile(r"^\s*async\s+def\s+(\w+)"), "async def"),
@@ -91,6 +102,23 @@ TOOL_DEFINITIONS = [
                     "new_string": {"type": "string", "description": "Replacement text."},
                 },
                 "required": ["path", "old_string", "new_string"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "insert_to_file",
+            "description": "Queue an insertion into an existing file WITHOUT replacing anything. Use this when adding a new section, function, theme block, etc. Cleaner than edit_file for pure additions — you don't have to fake 'replace X with X plus more'. Position 'end' (most common) appends; 'start' prepends; 'after'/'before' insert relative to an exact-match anchor string. Changes are held for user approval. IMPORTANT: when copying anchor text from read_file output, strip the `N<TAB>` line-number prefix.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path":     {"type": "string", "description": "Path relative to project root"},
+                    "content":  {"type": "string", "description": "Text to insert. Include any leading/trailing newlines you want when using 'after'/'before'; 'end'/'start' auto-handle the boundary newline."},
+                    "position": {"type": "string", "enum": ["end", "start", "after", "before"], "description": "Where to insert. 'end' = append to end of file; 'start' = prepend; 'after'/'before' = insert relative to anchor."},
+                    "anchor":   {"type": "string", "description": "Required for 'after'/'before'. Exact text to anchor against; must match exactly once. Ignored for 'end'/'start'."},
+                },
+                "required": ["path", "content", "position"],
             },
         },
     },
@@ -205,16 +233,6 @@ def execute_tool(
             rel_path = args["path"]
             old = args["old_string"]
             new = args["new_string"]
-            # Defensively strip `N<TAB>` line-number prefixes if the model
-            # copied them in from read_file output. Only strips when EVERY
-            # non-empty line matches the pattern — avoids eating legitimate
-            # content that happens to start with digits+tab.
-            def _strip_line_numbers(s: str) -> str:
-                lines = s.split("\n")
-                nonblank = [ln for ln in lines if ln.strip()]
-                if nonblank and all(re.match(r"^\s*\d+\t", ln) for ln in nonblank):
-                    return "\n".join(re.sub(r"^\s*\d+\t", "", ln) for ln in lines)
-                return s
             old = _strip_line_numbers(old)
             new = _strip_line_numbers(new)
             if old == new:
@@ -243,6 +261,55 @@ def execute_tool(
                 return f"Error: old_string matches {count} times in {rel_path} — include more surrounding context to make it unique"
             pending_writes[rel_path] = content.replace(old, new, 1)
             return f"Queued edit: {rel_path}"
+
+        if name == "insert_to_file":
+            if "path" not in args or "content" not in args or "position" not in args:
+                return "Error: Missing required arguments 'path', 'content', or 'position'"
+            rel_path = args["path"]
+            content_in = _strip_line_numbers(args["content"])
+            position = args["position"]
+            if position not in ("end", "start", "after", "before"):
+                return "Error: position must be one of 'end', 'start', 'after', 'before'"
+            if position in ("after", "before") and not args.get("anchor"):
+                return f"Error: anchor is required when position is '{position}'"
+            marker = _looks_mojibaked(content_in)
+            if marker is not None:
+                return (
+                    f"Error: content looks double-encoded (found {marker!r}). "
+                    "Re-read the source and try again."
+                )
+            if rel_path in pending_writes:
+                existing = pending_writes[rel_path]
+                source = "pending write"
+            else:
+                path = (project_dir / rel_path).resolve()
+                if not path.is_relative_to(project_dir.resolve()):
+                    return "Error: path escapes project directory"
+                if not path.exists():
+                    return f"Error: file not found: {rel_path}"
+                existing = path.read_text(encoding="utf-8", errors="replace")
+                source = "disk"
+            if position == "end":
+                sep = "" if (not existing or existing.endswith("\n")) else "\n"
+                new_content = existing + sep + content_in
+                if not new_content.endswith("\n"):
+                    new_content += "\n"
+            elif position == "start":
+                sep = "" if content_in.endswith("\n") else "\n"
+                new_content = content_in + sep + existing
+            else:
+                anchor = _strip_line_numbers(args["anchor"])
+                count = existing.count(anchor)
+                if count == 0:
+                    return f"Error: anchor not found in {rel_path} (searched {source})"
+                if count > 1:
+                    return f"Error: anchor matches {count} times in {rel_path} — include more surrounding context to make it unique"
+                if position == "after":
+                    new_content = existing.replace(anchor, anchor + content_in, 1)
+                else:
+                    new_content = existing.replace(anchor, content_in + anchor, 1)
+            pending_writes[rel_path] = new_content
+            return f"Queued insert ({position}): {rel_path}"
 
         if name == "search":
             if "pattern" not in args:

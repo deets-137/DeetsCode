@@ -43,3 +43,5 @@ PROJECT_MANUAL_SUBDIR = "manual"
 PANELS_DIR: Path = HARNESS_ROOT / "panels"
 # Declarative layout: regions + panel instances.
 PANEL_LAYOUT_FILE: Path = HARNESS_ROOT / "layout/panel_layout.json"
+# Runtime: last model picked in the UI; persists across server restarts.
+ACTIVE_MODEL_FILE: Path = HARNESS_ROOT / "active_model.txt"
