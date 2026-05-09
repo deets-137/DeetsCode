@@ -1,5 +1,13 @@
 # Harness — project notes for Claude
 
+## Active project: panel system rebuild
+
+**Read [dev_project.md](dev_project.md) first.** It is the durable plan for an
+in-progress rewrite of the dev UI into a user-moddable panel system (hybrid
+trust tiers, region-driven layout, OS-hub trajectory). All design decisions
+are resolved; implementation starts at phase 0.5. If your task touches
+`static/`, `index.html`, or anything UI-shaped, the answer is in there.
+
 ## Paths
 
 All filesystem paths the harness uses (directories, files, per-project subdir/filename constants) live in **`paths.py`**. It is the single source of truth; no other module should compute paths with `Path(__file__).parent / "..."`.
