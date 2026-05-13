@@ -20,6 +20,7 @@
     "growable": true
   },
   "anchored": false,
+  "multi_instance": true,
   "tileflow": {
     "icon": "▶",
     "bubble_on_active": true

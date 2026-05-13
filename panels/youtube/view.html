@@ -41,25 +41,57 @@
   const frame = root.querySelector(".yt-frame");
   if (!form || !frame) return;
 
+  // The shell caps .panel-content at manifest preferred.height so idle
+  // panels don't sprawl. For the playing video we want the iframe to fill
+  // whatever cell our setSpan claimed — toggle the cap accordingly.
+  const contentEl = root.querySelector(".panel-content");
+  function setContentUncapped(uncapped) {
+    if (!contentEl) return;
+    contentEl.style.maxHeight = uncapped ? "none" : "";
+  }
+
   // Accepts: bare ID, watch?v=, youtu.be/, /embed/, /shorts/, /live/.
+  // Returns {id, shorts} — shorts flag drives the panel's aspect choice.
   function extractId(s) {
     s = (s || "").trim();
-    if (!s) return "";
-    if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+    if (!s) return { id: "", shorts: false };
+    if (/^[A-Za-z0-9_-]{11}$/.test(s)) return { id: s, shorts: false };
     let m;
-    m = s.match(/[?&]v=([A-Za-z0-9_-]{11})/); if (m) return m[1];
-    m = s.match(/youtu\.be\/([A-Za-z0-9_-]{11})/); if (m) return m[1];
-    m = s.match(/youtube\.com\/(?:embed|shorts|live|v)\/([A-Za-z0-9_-]{11})/);
-    if (m) return m[1];
-    return "";
+    m = s.match(/[?&]v=([A-Za-z0-9_-]{11})/); if (m) return { id: m[1], shorts: false };
+    m = s.match(/youtu\.be\/([A-Za-z0-9_-]{11})/); if (m) return { id: m[1], shorts: false };
+    m = s.match(/youtube\.com\/shorts\/([A-Za-z0-9_-]{11})/);
+    if (m) return { id: m[1], shorts: true };
+    m = s.match(/youtube\.com\/(?:embed|live|v)\/([A-Za-z0-9_-]{11})/);
+    if (m) return { id: m[1], shorts: false };
+    return { id: "", shorts: false };
+  }
+
+  // Convert a target aspect ratio (w/h) into a bento span. Picks a width
+  // bucket — hero (12) for landscape, narrow (3) for vertical — then
+  // chooses rows so the resulting pixel cell approximates the aspect.
+  // Falls back to (12, 2) before the bento mounts.
+  function spanForAspect(aspect) {
+    const cfg = (window.harness && harness.gridConfig) ? harness.gridConfig() : null;
+    if (!cfg || !cfg.colPx) return aspect >= 1 ? { cols: 12, rows: 3 } : { cols: 3, rows: 4 };
+    const targetCols = aspect >= 1 ? 12 : Math.min(4, cfg.cols);
+    const widthPx = targetCols * cfg.colPx + Math.max(0, targetCols - 1) * cfg.gapPx;
+    const wantedHeight = widthPx / aspect;
+    // height = rows*rowPx + (rows-1)*gapPx → rows = (wantedHeight + gap) / (rowPx + gap)
+    const rowUnit = cfg.rowPx + cfg.gapPx;
+    let rows = Math.round((wantedHeight + cfg.gapPx) / rowUnit);
+    rows = Math.max(2, Math.min(6, rows));
+    return { cols: targetCols, rows };
   }
 
   function load(idOrUrl) {
-    const id = extractId(idOrUrl);
+    const { id, shorts } = extractId(idOrUrl);
     if (!id) {
       empty.textContent = "couldn't find a video id in: " + idOrUrl;
       empty.style.display = "";
       frameWrap.style.display = "none";
+      setContentUncapped(false);
+      if (window.harness && harness.setSpan) harness.setSpan(instance, null);
+      if (window.harness && harness.setState) harness.setState(instance, "idle");
       return;
     }
     frame.src = "https://www.youtube-nocookie.com/embed/" + id + "?rel=0";
@@ -67,6 +99,12 @@
     frameWrap.style.display = "";
     input.value = id;
     try { localStorage.setItem(KEY, id); } catch (e) {}
+    // Shorts are vertical (9:16); regular embeds are 16:9. Both bump the
+    // panel to a properly-shaped cell + promote it via focused state.
+    const aspect = shorts ? 9 / 16 : 16 / 9;
+    setContentUncapped(true);
+    if (window.harness && harness.setSpan) harness.setSpan(instance, spanForAspect(aspect));
+    if (window.harness && harness.setState) harness.setState(instance, "focused");
   }
 
   form.addEventListener("submit", (e) => {

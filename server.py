@@ -2,6 +2,7 @@ import asyncio
 import json
 import os
 import re
+import shutil
 import sys
 import uuid
 from pathlib import Path
@@ -108,6 +109,12 @@ from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
+
+_config_path = Path(__file__).parent / "config.py"
+if not _config_path.exists():
+    _example = _config_path.with_name("config.example.py")
+    shutil.copyfile(_example, _config_path)
+    print(f"[setup] created config.py from {_example.name} — edit it to customize")
 
 from config import HOST, MODEL, OLLAMA_BASE_URL, PORT, TEMPERATURE
 from tools import clear_pending_writes, clear_read_files, load_tools, pending_writes

@@ -20,5 +20,6 @@
     "growable": true
   },
   "anchored": false,
+  "multi_instance": true,
   "tileflow": { "icon": "🌐" }
 }

@@ -261,6 +261,7 @@
   // to tileflow-engine.js. This module owns the DOM mutations.
   const _instanceStates = {};       // {instance: state}
   const _lastStateChangeAt = {};    // {instance: ms timestamp — drives recency decay}
+  const _spanOverrides = {};        // {instance: {cols, rows}} — panel-set, beats class table
   const _instances = {};            // {instance: layoutInstanceObj}
   const _manifests = {};            // {panel-name: manifest} — populated at boot
   let _trayRegionEl = null;
@@ -474,7 +475,11 @@
     node.dataset.tileflowClass = decision.cls;
     node.dataset.tileflowOrder = String(-decision.score);
     if (decision.bin === "bento" && decision.span) {
-      const span = decision.span;
+      // Panel-controlled span override (harness.setSpan). Lets a panel grow
+      // to fit its own content (e.g. youtube matching video aspect) past
+      // the class table. Falls back to the engine's class span otherwise.
+      const override = _spanOverrides[decision.instance];
+      const span = override || decision.span;
       const pin = instLayoutDef && instLayoutDef.pin;
       if (pin) {
         // Pin is a floor: state-driven span can grow past pin.cols/rows but
@@ -612,6 +617,29 @@
   harness.getState = function (instanceId) {
     return _instanceStates[instanceId] || null;
   };
+
+  // Panel-controlled grid span. Pass `{cols, rows}` to claim a custom-sized
+  // bento cell that ignores the class table; pass null/undefined to release
+  // the override and fall back to the engine's decision. Used by panels
+  // whose ideal shape depends on runtime content (e.g. youtube matching
+  // video aspect ratio).
+  harness.setSpan = function (instanceId, span) {
+    if (!_instances[instanceId]) return;
+    if (span && typeof span.cols === "number" && typeof span.rows === "number") {
+      _spanOverrides[instanceId] = {
+        cols: Math.max(1, Math.min(12, Math.round(span.cols))),
+        rows: Math.max(1, Math.min(8, Math.round(span.rows))),
+      };
+    } else {
+      delete _spanOverrides[instanceId];
+    }
+    if (!_layoutCache || !_regionMapCache) return;
+    scheduleFlowPass(true);
+  };
+
+  // Read-only view of the current grid config (cols, rowPx, gapPx, colPx,
+  // bentoWidthPx). Panels use this to convert an aspect ratio into a span.
+  harness.gridConfig = function () { return currentGridConfig(); };
 
   // Exposed so tools/console can force a fresh flow pass (e.g. after a
   // weights change via the future settings panel) without nudging state.
