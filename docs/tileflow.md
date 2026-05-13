@@ -457,8 +457,7 @@ verb-first, snake_case, JSON return.
 - `get_layout()` → full layout sheet (regions, instances, pins,
   per-instance tileflow blocks). What you'd get from `GET /api/layout`,
   but condensed for context: only the fields a model needs to reason
-  about placement (no `mode_overrides`, no `dom_id`, no manifest
-  mirrors). Includes each instance's *current* tileflow state
+  about placement (no `mode_overrides`, no manifest mirrors). Includes each instance's *current* tileflow state
   (dormant/idle/active/focused) and resolved size class so the model
   has the runtime picture, not just the persisted floor.
 - `get_panels()` → registry of installed panels with their declared

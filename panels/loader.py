@@ -157,8 +157,10 @@ class InstanceTileflow(InstanceScoreOverrides):
 
 class LayoutInstance(BaseModel):
     instance: str
-    panel: Optional[str] = None     # nullable to allow legacy dom_id-only entries in phase 0.5
-    dom_id: Optional[str] = None    # phase-0.5 escape hatch; goes away once everything is a real panel
+    # Required: every layout instance points to a panel under panels/<name>/.
+    # The legacy `dom_id` escape hatch was retired when chat migrated to a
+    # real panel (panels/chat/). See docs/panels.md.
+    panel: str
     region: str
     anchored: bool = False
     grow: bool = False

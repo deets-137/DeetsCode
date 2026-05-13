@@ -1,11 +1,11 @@
-// panel-shell.js — phase 0.5 of the panel-system migration.
+// panel-shell.js — owns the dev UI's region grid + panel rendering.
 //
-// Builds the canvas region grid from /api/layout and hoists legacy panel
-// sections (still hardcoded in index.html under #legacy-staging) into their
-// assigned region. After this script runs, app.js sees the same DOM ids in
-// the same effective places — only the wrapping markup is now config-driven.
-//
-// Phases 1+ will replace the legacy-staging hoist with real panel rendering.
+// Boot: fetch /api/layout → build region containers → fetch /api/panels →
+// for each layout instance, build a .panel-instance (chrome + content slot),
+// drop it in its declared region, fetch its view, and let the Tileflow
+// engine score it. All panels — including chat — live under panels/<name>/.
+// The previous legacy `dom_id` hoist (chat in #legacy-staging) is gone;
+// every instance now resolves through manifest.name.
 
 (function () {
   // Region = invisible layout slot. It owns width/height/flex-direction and
@@ -520,7 +520,9 @@
     const items = [];
     for (const id in _instances) {
       const inst = _instances[id];
-      if (!inst.panel) continue;  // legacy dom_id hoists skip flowPass
+      // Defensive: every layout instance now declares a panel. Skip silently
+      // if a stray legacy entry slips through without one rather than crash.
+      if (!inst.panel) continue;
       const manifest = _manifests[inst.panel];
       if (!manifest) continue;
       const cfg = tileflowConfig(manifest);
@@ -671,7 +673,6 @@
   }
 
   function hoistInstances(layout, regionMap, panelManifests) {
-    const staging = document.getElementById("legacy-staging");
     const mode = bootMode();
     // Locate tray + bento regions so Tileflow can route into them and
     // currentGridConfig() can measure live column widths.
@@ -702,39 +703,28 @@
 
     // Initial node creation. Panels get built into their *declared* region
     // first (bento or otherwise); flowPass then re-bins to tray if the
-    // initial state demands it. Legacy dom_id hoists stay as today.
+    // initial state demands it.
     for (const inst of layout.instances) {
       const target = regionMap[inst.region];
       if (!target) {
         console.warn(`[panel-shell] instance "${inst.instance}": region "${inst.region}" not declared`);
         continue;
       }
-      if (inst.panel) {
-        const m = panelManifests[inst.panel];
-        if (!m) {
-          console.warn(`[panel-shell] instance "${inst.instance}": panel "${inst.panel}" not in registry`);
-          continue;
-        }
-        const state = _instanceStates[inst.instance];
-        const node = renderPanelInstance(inst, m);
-        node.dataset.tileflowState = state;
-        if (shouldHideForMode(inst.instance, mode)) node.classList.add("mode-hidden");
-        target.el.appendChild(node);
-      } else {
-        // Legacy hoist: locate the section in the staging div by its dom_id
-        // and move it into the assigned region. Phases 4+ delete these.
-        const sourceId = inst.dom_id || inst.instance;
-        const node = document.getElementById(sourceId);
-        if (!node) {
-          console.warn(`[panel-shell] instance "${inst.instance}": #${sourceId} not found`);
-          continue;
-        }
-        node.dataset.instance = inst.instance;
-        if (shouldHideForMode(inst.instance, mode)) node.classList.add("mode-hidden");
-        target.el.appendChild(node);
+      if (!inst.panel) {
+        console.warn(`[panel-shell] instance "${inst.instance}": no panel declared`);
+        continue;
       }
+      const m = panelManifests[inst.panel];
+      if (!m) {
+        console.warn(`[panel-shell] instance "${inst.instance}": panel "${inst.panel}" not in registry`);
+        continue;
+      }
+      const state = _instanceStates[inst.instance];
+      const node = renderPanelInstance(inst, m);
+      node.dataset.tileflowState = state;
+      if (shouldHideForMode(inst.instance, mode)) node.classList.add("mode-hidden");
+      target.el.appendChild(node);
     }
-    if (staging) staging.remove();
   }
 
   // Apply mode_overrides for the active mode. Called once at boot (no mode
@@ -784,9 +774,8 @@
       layout = await r.json();
     } catch (e) {
       console.error("[panel-shell] failed to load /api/layout:", e);
-      // Fail soft: leave staging visible so the UI is at least usable.
-      const staging = document.getElementById("legacy-staging");
-      if (staging) staging.hidden = false;
+      // Hard failure now: with chat migrated, there's no legacy fallback to
+      // show. The console error is the user-visible signal.
       return;
     }
     const panelManifests = await fetchPanelManifests();

@@ -1,0 +1,32 @@
+{
+  "schema": 1,
+  "name": "chat",
+  "title": "chat",
+  "tier": 1,
+  "author": "host",
+  "view": "view.html",
+  "permissions": {
+    "network": [],
+    "reads": [],
+    "writes": []
+  },
+  "display": {
+    "shape": "tall",
+    "aspect_ratio": null,
+    "min":       { "width": 280, "height": 360 },
+    "preferred": { "width": 380, "height": 720 },
+    "max":       { "width": null, "height": null },
+    "scroll": "internal",
+    "growable": true
+  },
+  "anchored": true,
+  "multi_instance": false,
+  "tileflow": {
+    "default_state": "focused",
+    "tray_when_dormant": false,
+    "bubble_on_active": false,
+    "bubble_on_focused": false,
+    "icon": "💬",
+    "score_bonus": 0
+  }
+}

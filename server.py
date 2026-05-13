@@ -110,13 +110,52 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 
+def _list_ollama_models(base_url: str) -> list[str] | None:
+    """Query Ollama for installed model names. Returns None if Ollama is
+    unreachable (so callers can distinguish 'not running' from 'running but
+    empty'). Uses stdlib urllib to avoid pulling in httpx this early."""
+    import json as _json
+    import urllib.request
+    tags_url = base_url.replace("/v1", "") + "/api/tags"
+    try:
+        with urllib.request.urlopen(tags_url, timeout=2) as r:
+            data = _json.loads(r.read())
+        return [m["name"] for m in data.get("models", [])]
+    except Exception:
+        return None
+
+
 _config_path = Path(__file__).parent / "config.py"
 if not _config_path.exists():
     _example = _config_path.with_name("config.example.py")
-    shutil.copyfile(_example, _config_path)
-    print(f"[setup] created config.py from {_example.name} — edit it to customize")
+    # Read example to learn the default OLLAMA_BASE_URL, then try to pick a
+    # real installed model so a fresh device works without manual edits.
+    example_src = _example.read_text(encoding="utf-8")
+    example_url = "http://localhost:11434/v1"
+    for line in example_src.splitlines():
+        if line.startswith("OLLAMA_BASE_URL"):
+            example_url = line.split("=", 1)[1].strip().strip('"').strip("'")
+            break
+    installed = _list_ollama_models(example_url)
+    if installed:
+        picked = installed[0]
+        new_src = re.sub(r'MODEL\s*=\s*"[^"]*"', f'MODEL = "{picked}"', example_src, count=1)
+        _config_path.write_text(new_src, encoding="utf-8")
+        print(f"[setup] created config.py with MODEL=\"{picked}\" (auto-picked from Ollama)")
+    else:
+        shutil.copyfile(_example, _config_path)
+        print(f"[setup] created config.py from {_example.name} — Ollama not reachable, edit MODEL by hand")
 
 from config import HOST, MODEL, OLLAMA_BASE_URL, PORT, TEMPERATURE
+
+# Preflight: warn loudly if the configured model isn't installed. Don't crash —
+# the UI's model picker can override via ACTIVE_MODEL_FILE.
+_installed = _list_ollama_models(OLLAMA_BASE_URL)
+if _installed is None:
+    print(f"[preflight] WARNING: Ollama not reachable at {OLLAMA_BASE_URL} — start it with `ollama serve`")
+elif MODEL not in _installed:
+    print(f"[preflight] WARNING: MODEL=\"{MODEL}\" not installed. Available: {_installed or '[]'}")
+    print(f"[preflight] fix: edit config.py, or run `ollama pull {MODEL}`")
 from tools import clear_pending_writes, clear_read_files, load_tools, pending_writes
 import storage
 import paths
@@ -788,6 +827,7 @@ async def list_panels():
         out.append({
             "name": m.name, "title": m.title, "tier": m.tier,
             "author": m.author, "anchored": m.anchored,
+            "multi_instance": m.multi_instance,
             "display": m.display.model_dump(),
             "url": m.url,
             "iframe_attrs": m.iframe_attrs,

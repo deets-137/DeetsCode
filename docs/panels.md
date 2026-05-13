@@ -145,6 +145,12 @@ engine derives them from `display.preferred`/`min`/`max`. See
   // an anchored panel can still go dormant and route to the tray.
   "anchored": false,
 
+  // True = the runtime launcher (coming in a later phase) may spawn
+  // additional instances of this panel. Singletons (settings, files,
+  // clock) leave this false; per-content panels (youtube, web) opt in.
+  // Inert today — flag is consumed by the launcher when it lands.
+  "multi_instance": false,
+
   // Tileflow knobs (see tileflow.md for the engine).
   "tileflow": {
     "default_state":     "idle",   // dormant|idle|active|focused
@@ -588,9 +594,10 @@ Working examples in the repo:
 - [`panels/slash_commands/`](../panels/slash_commands/) — tier 1, single `view.html`.
 - [`panels/ollama_ps/`](../panels/ollama_ps/) — tier 3, polls a subprocess and renders bars.
 - [`panels/pending_writes/`](../panels/pending_writes/) — tier 3, WS-subscribing + `setState` to `focused` while writes are pending.
-- [`panels/youtube/`](../panels/youtube/) — multi-instance tier 1, iframe-based with `bubble_on_active`.
+- [`panels/youtube/`](../panels/youtube/) — multi-instance-capable tier 1, iframe-based with `bubble_on_active`. Uses `harness.setSpan` to claim an aspect-ratio-matched cell at runtime.
 - [`panels/web/`](../panels/web/) — tier 1, freeform URL browser.
 - [`panels/settings/`](../panels/settings/) — tier 3, anchored, larger preferred footprint.
+- [`panels/chat/`](../panels/chat/) — tier 1, anchored to the `left` region. Demonstrates the "panel mounts after app.js boots" race: app.js buffers chat-bound writes in `_chatBootBuffer` and the view's inline script drains them via `window._flushChatBootBuffer`.
 
 ---
 

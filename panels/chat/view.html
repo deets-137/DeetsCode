@@ -1,0 +1,68 @@
+<style>
+  /* Chat is the only panel whose content area is not itself a scroller — the
+     inner .response-box owns the scroll. Override .panel-content's default
+     `overflow-y:auto` for this instance only so we don't get double scrollbars. */
+  [data-panel-content-instance="chat"] {
+    overflow: hidden;
+    gap: 12px;
+  }
+</style>
+
+<div class="chat-input-panel" style="display:flex;gap:6px;">
+  <input id="dir-input" type="text" placeholder="Project path..." style="
+    flex:1; background:var(--textbox-bg); border:none; border-radius:6px;
+    padding:6px 10px; font-family:monospace; font-size:12px; color:var(--textbox-text); outline:none;
+  "/>
+  <button onclick="setDir()" style="
+    background:var(--textbox-bg); border:none; border-radius:6px;
+    padding:6px 10px; font-family:monospace; font-size:12px; cursor:pointer; color:var(--textbox-text);
+  ">set</button>
+</div>
+
+<div class="chat-input-panel">
+  <textarea id="chat-textbox" class="chat-textbox" placeholder="Message... (Enter to send, Shift+Enter for newline)"></textarea>
+  <div class="chat-actions">
+    <button id="stop-btn" class="chat-action-btn" onclick="cancelRun()" disabled>stop</button>
+    <button class="chat-action-btn" onclick="compactConversation()" title="Summarize and trim the conversation">compact</button>
+    <button class="chat-action-btn" onclick="resetConversation()">reset</button>
+  </div>
+</div>
+
+<div class="response-panel">
+  <div class="response-box">
+    <div class="response-text" id="response-text"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  // Resolve our panel-instance scope. Chat is currently single-instance
+  // (anchored to the left region), but we still scope selectors via the
+  // instance root so the day we go multi-instance the script Just Works.
+  const root = document.currentScript.closest(".panel-instance");
+  if (!root) return;
+  const box = root.querySelector("#chat-textbox");
+  if (!box) return;
+
+  // Enter to send, Shift+Enter for newline. Used to live in app.js's
+  // DOMContentLoaded handler — moved here because #chat-textbox doesn't
+  // exist until this view injects, which happens after DOMContentLoaded.
+  box.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      if (typeof window.sendMessage === "function") window.sendMessage();
+    }
+  });
+
+  // Drain anything app.js logged before the panel mounted (e.g. the
+  // "connected to harness" line that connect() emits on ws.onopen). See
+  // _chatBootBuffer in app.js — it queues writes when #response-text
+  // isn't there yet, and this hook flushes them once it is.
+  if (typeof window._flushChatBootBuffer === "function") {
+    window._flushChatBootBuffer();
+  }
+  if (typeof window._applyPendingChatState === "function") {
+    window._applyPendingChatState();
+  }
+})();
+</script>

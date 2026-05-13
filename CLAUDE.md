@@ -22,7 +22,9 @@ Chess uses display names end-to-end — no Discord user ids. The envelope is `{"
 
 ## Panels
 
-The dev UI is a **panel system** — every visible block is a self-contained panel under `panels/<name>/` **except `chat`**, which is still a legacy `dom_id` hoist (deferred because it owns the WS lifecycle that drives every other panel). The viewport is divided into named regions by `layout/panel_layout.json`; instances place panels into regions.
+The dev UI is a **panel system** — every visible block is a self-contained panel under `panels/<name>/`. Chat lives at [panels/chat/](panels/chat/) like everything else (tier 1, view.html); the legacy `dom_id` hoist was retired in phase 3a. The viewport is divided into named regions by `layout/panel_layout.json`; instances place panels into regions.
+
+Boot-race detail worth knowing: app.js owns the WebSocket singleton and still routes WS messages directly into chat's DOM by id (`#response-text`, `#chat-textbox`, `#stop-btn`, `#dir-input`). Since the chat panel injects asynchronously, app.js's chat-DOM helpers (`appendResponse`, `setInputEnabled`, etc.) are null-tolerant and buffer through `_chatBootBuffer` until the panel mounts. The chat view's inline script calls `window._flushChatBootBuffer` / `window._applyPendingChatState` on mount to drain. If you ever decouple WS from app.js (multi-instance chat / true panel-owned subscriptions), that buffering layer can go.
 
 **[docs/panels.md](docs/panels.md) is the modder reference** — manifest schema, endpoint table, JS API, WS event catalog, hello-world walkthrough. Read it first when adding or modifying a panel. The notes below are orientation only.
 

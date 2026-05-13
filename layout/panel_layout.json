@@ -12,7 +12,7 @@
     { "id": "tray",  "anchor": "right",  "width": "52px", "stack": "vertical", "kind": "tray" }
   ],
   "instances": [
-    { "instance": "chat",             "dom_id": "legacy-chat",     "region": "left",  "anchored": true },
+    { "instance": "chat",             "panel": "chat",             "region": "left",  "anchored": true },
 
     { "instance": "tool_log",         "panel": "tool_log",         "region": "bento" },
     { "instance": "pending_writes",   "panel": "pending_writes",   "region": "bento" },

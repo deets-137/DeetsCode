@@ -1,3 +1,33 @@
+// ── Chat panel boot buffer ────────────────────────
+// Chat is a real panel now (panels/chat/view.html) rather than markup in
+// index.html. That means #response-text / #chat-textbox / #stop-btn don't
+// exist until panel-shell finishes its async injection — which can race
+// against WS messages that arrive immediately after ws.onopen (e.g. the
+// "connected to harness" info log).
+//
+// To handle the gap without losing output we:
+//   1. Queue any appendResponse() call into _chatBootBuffer when its target
+//      node isn't in the DOM yet.
+//   2. Mirror busy / disabled state in _pendingChatInputEnabled.
+//   3. Expose two flush hooks that the chat panel's inline script calls
+//      once #response-text / #chat-textbox mount. See panels/chat/view.html.
+//
+// Once the panel is mounted the buffer is drained and these helpers become
+// effective no-ops for the rest of the session.
+const _chatBootBuffer = [];
+let _pendingChatInputEnabled = null;
+window._flushChatBootBuffer = function () {
+  if (!_chatBootBuffer.length) return;
+  const pending = _chatBootBuffer.splice(0, _chatBootBuffer.length);
+  for (const { text, type } of pending) appendResponse(text, type);
+};
+window._applyPendingChatState = function () {
+  if (_pendingChatInputEnabled !== null) {
+    setInputEnabled(_pendingChatInputEnabled);
+    _pendingChatInputEnabled = null;
+  }
+};
+
 // ── Settings control wiring ───────────────────────
 // Called from DOMContentLoaded AND from the settings panel's inline script
 // after its content lands (panel content arrives via async fetch, well after
@@ -679,6 +709,7 @@ function connect() {
 // ── Send message ──────────────────────────────────
 function sendMessage() {
   const box = document.getElementById("chat-textbox");
+  if (!box) return;  // chat panel not mounted — sender can't be invoked
   const text = box.value.trim();
   if (!text || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
 
@@ -840,6 +871,7 @@ function compactConversation() {
 // ── Directory ─────────────────────────────────────
 function setDir() {
   const input = document.getElementById("dir-input");
+  if (!input) return;
   const path = input.value.trim();
   if (!path || !ws || ws.readyState !== WebSocket.OPEN) return;
   ws.send(JSON.stringify({ type: "set_dir", path }));
@@ -848,6 +880,7 @@ function setDir() {
 // ── Thinking indicator ────────────────────────────
 function showThinking() {
   const box = document.getElementById("response-text");
+  if (!box) return;  // chat panel not mounted yet — skip silently
   const pill = document.createElement("span");
   pill.id = "thinking-indicator";
   pill.className = "thinking-pill";
@@ -880,6 +913,12 @@ function renderMarkdown(text) {
 function appendResponse(text, type = "normal") {
   hideThinking();
   const box = document.getElementById("response-text");
+  if (!box) {
+    // Chat panel not mounted yet (boot race). Buffer; chat's inline script
+    // calls _flushChatBootBuffer once #response-text exists.
+    _chatBootBuffer.push({ text, type });
+    return;
+  }
 
   if (type === "normal") {
     if (!currentAssistantMsg) {
@@ -909,7 +948,7 @@ function appendResponse(text, type = "normal") {
 
 function addDivider() {
   const box = document.getElementById("response-text");
-  if (!box.hasChildNodes()) return;
+  if (!box || !box.hasChildNodes()) return;
   currentAssistantMsg = null;
   const hr = document.createElement("hr");
   hr.className = "response-divider";
@@ -918,7 +957,9 @@ function addDivider() {
 
 function clearResponse() {
   currentAssistantMsg = null;
-  document.getElementById("response-text").innerHTML = "";
+  const box = document.getElementById("response-text");
+  if (!box) return;
+  box.innerHTML = "";
 }
 
 function log(text, type) {
@@ -928,6 +969,12 @@ function log(text, type) {
 // ── Input state ───────────────────────────────────
 function setInputEnabled(enabled) {
   const box = document.getElementById("chat-textbox");
+  if (!box) {
+    // Chat panel not mounted yet — remember intent so the panel can
+    // apply it on mount via _applyPendingChatState.
+    _pendingChatInputEnabled = enabled;
+    return;
+  }
   box.disabled = !enabled;
   box.style.opacity = enabled ? "1" : "0.5";
   const stop = document.getElementById("stop-btn");
@@ -1117,16 +1164,13 @@ async function refreshPendingPanel() {
   } catch (e) { /* server not up yet */ }
 }
 
-// ── Keyboard shortcut (Enter to send) ────────────
+// ── Boot ──────────────────────────────────────────
+// Enter-to-send is bound inside panels/chat/view.html now — that script
+// runs after panel-shell injects #chat-textbox, so the listener attaches
+// to a node that actually exists. Escape-to-cancel is global and stays
+// here.
 document.addEventListener("DOMContentLoaded", () => {
   loadTheme();
-  const box = document.getElementById("chat-textbox");
-  box.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && !e.shiftKey) {
-      e.preventDefault();
-      sendMessage();
-    }
-  });
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && busy) {
       e.preventDefault();
@@ -1169,9 +1213,8 @@ function isBlogMode() { return currentMode === "blog"; }
 //   - bot-ops (Discord remote control)
 // Keeps the activity panel (tool calls / pending writes from the model when
 // summoned) and settings (model + mode picker).
-// Per-instance mode-visibility. Looks up by [data-instance="..."] (the
-// panel-shell's wrapper) so it works both for legacy dom_id-hoisted blocks
-// and for real panels rendered into instance wrappers.
+// Per-instance mode-visibility. Looks up by [data-instance="..."] which
+// every panel-shell instance wrapper sets.
 const _PANEL_HIDE_RULES = [
   { instance: "blog_ops",         showOnlyIn: ["blog"] },
   { instance: "bot_ops",          hideIn:     ["blog"] },
