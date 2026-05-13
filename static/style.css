@@ -1582,7 +1582,16 @@ input:checked + .toggle-slider:before {
    panel-shell.js from the layout config; everything else is just gap. */
 .region {
   min-width: 0;
-  gap: 16px;
+  display: flex;             /* belt-and-suspenders: panel-shell sets this
+                                inline too, but keeping it here means
+                                `gap` applies even if the inline style is
+                                ever cleared by a future migration. */
+  gap: 36px;                 /* canvas-visible breathing room between
+                                stacked panels — large enough to see the
+                                blob backdrop, small enough that long
+                                columns (right region with 8 panels)
+                                still fit a typical viewport. Tray
+                                overrides to 8px. */
   align-self: stretch;
 }
 
@@ -1593,6 +1602,114 @@ input:checked + .toggle-slider:before {
    they were direct canvas children, so force them to fill here. Once every
    panel is migrated (phase 4+) this rule becomes dead and can be deleted. */
 .region > * { width: 100%; }
+
+/* Bento region — fixed-column CSS Grid (Tileflow stage 2). Default cols
+   come from layout.grid.cols (12 if absent); panel-shell.js sets
+   --bento-cols / --bento-row-h / --bento-gap as inline custom properties
+   on the region element so per-layout overrides flow through without
+   class explosion. Pinned instances get grid-column/row from their pin
+   rectangle; unpinned ones auto-flow into gaps via grid-auto-flow:dense.
+   Smooth resize: transition grid-* properties (note: per docs/tileflow.md,
+   true glide-to-fill needs the FLIP runner — Stage 2 step 3 — but the
+   transition shorthand at least animates the size class within a single
+   instance). */
+.region-kind-bento {
+  display: grid !important;
+  grid-template-columns: repeat(var(--bento-cols, 12), 1fr);
+  /* Strict, equal-size row tracks. Earlier we tried `minmax(120, auto)` so
+     row tracks could grow with content, but that lets a panel whose content
+     exceeds its declared row span bleed visually past its cell — overlap
+     with the panel below. Now: cells are exactly row_height_px tall;
+     panels clip to their declared span; content beyond that scrolls
+     internally via `.panel-content` (manifest declares `scroll: internal`).
+     A panel that genuinely needs more height declares a taller size class
+     and the engine reserves the rows up front. */
+  grid-auto-rows: var(--bento-row-h, 120px);
+  grid-auto-flow: dense;
+  gap: var(--bento-gap, 12px);
+  align-content: start;
+  /* Default stretch — panels fill their grid cells. Safe now that tracks
+     are strict (no sibling-stretch surprise from auto rows). */
+}
+.region-kind-bento > .panel-instance {
+  /* Bento cells own their own width via grid-column; opt out of the
+     legacy `width:100%` from `.region > *` so a 6-col span doesn't try to
+     also be 100% of the region. */
+  width: auto !important;
+  /* Override the manifest-driven `min-height` set inline by panel-shell.js.
+     In the bento, a panel's vertical footprint is determined by its grid
+     row span, not its content's natural minimum — otherwise a panel with
+     `display.min.height: 280` in a `medium` (1 row, 120px) cell would
+     muscle the track open. */
+  min-height: 0 !important;
+  /* Clip content to the declared cell. Most panels already have an inner
+     scroller (`.panel-content` with `scroll: internal`); for the rest,
+     anything past the cell edge silently disappears. flowPass picks row
+     spans that fit content so this rarely fires in practice. */
+  overflow: hidden;
+  height: 100%;
+  /* Color/border transitions only — position/size changes are driven by the
+     FLIP runner in panel-shell.js (`runFlipReflow`). Transitioning
+     `grid-column`/`grid-row` is a no-op anyway in current browsers; the
+     runner produces a real glide by inverting transforms. */
+  transition:
+    background 0.4s ease,
+    box-shadow 0.4s ease,
+    border-color 0.4s ease;
+}
+@media (max-width: 1199px) {
+  /* Narrow viewport: drop to half the column count and ignore pin coords
+     (auto-flow only). docs/tileflow.md "The grid (schema v2)". */
+  .region-kind-bento {
+    grid-template-columns: repeat(calc(var(--bento-cols, 12) / 2), 1fr);
+  }
+  .region-kind-bento > .panel-instance {
+    grid-column: auto !important;
+    grid-row: auto !important;
+  }
+}
+
+/* Tray region — narrow column of icon buttons. Children are fixed-size
+   icons, not full-width panels; opt out of the bounding-rect width rule. */
+.region-kind-tray > * { width: auto; }
+.region-kind-tray {
+  background: var(--panel-outer);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid var(--glass-border);
+  border-radius: 12px;
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+  padding: 10px 4px !important;
+}
+.tray-icon { transition: transform 0.15s ease, background 0.15s ease; }
+.tray-icon:hover { transform: scale(1.08); background: rgba(255,255,255,0.10) !important; }
+
+/* Tileflow state transitions — minimize/restore fade.
+   Bento↔tray swaps used to be hard remove + append; the fade keeps the
+   change legible without needing a full FLIP reflow runner (that arrives
+   with Stage 2's grid work). The "others snap into the gap" jolt is
+   intentionally left for Stage 2 to fix once panels live on a CSS grid. */
+.tileflow-entering {
+  opacity: 0;
+  transform: scale(0.9) translateY(6px);
+}
+.tileflow-enter-active {
+  opacity: 1;
+  transform: scale(1) translateY(0);
+  transition: opacity 320ms cubic-bezier(.2,.8,.2,1),
+              transform 320ms cubic-bezier(.2,.8,.2,1);
+}
+.tileflow-leaving {
+  opacity: 0;
+  transform: scale(0.9) translateY(-6px);
+  transition: opacity 220ms cubic-bezier(.4,0,.6,1),
+              transform 220ms cubic-bezier(.4,0,.6,1);
+  pointer-events: none;
+}
+/* Tray icon flourish — a touch more pop than a panel since the target is
+   tiny and benefits from the size cue. */
+.tray-icon.tileflow-entering { transform: scale(0.6); }
+.tray-icon.tileflow-enter-active { transform: scale(1); }
 
 /* Panel instance — bento tile. Glass surface owned entirely by the shell;
    handlers never reproduce this chrome. */
@@ -1655,6 +1772,86 @@ input:checked + .toggle-slider:before {
 
 .panel-actions button:hover,
 .panel-actions a:hover { opacity: 1; }
+
+/* Standardized top-right pill: settings (left) + minimize-to-tray (right).
+   Shell-rendered for every .panel-instance via panel-shell.js. The diagonal
+   seam between the two buttons is a 1px skewed pseudo-element so the
+   buttons themselves stay rectangular and reliably hit-testable.
+   Theme-aware via CSS custom properties; no per-theme JS branching. */
+.panel-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: stretch;
+  height: 22px;
+  background: var(--panel-input, rgba(255, 255, 255, 0.04));
+  border: 1px solid var(--glass-border);
+  border-radius: 11px;
+  overflow: hidden;
+  box-shadow: inset 0 1px 0 var(--glass-highlight);
+  flex: 0 0 auto;
+}
+
+.panel-pill::after {
+  /* The diagonal seam. Sits between the two buttons; pointer-events off so
+     it doesn't steal clicks. */
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: var(--glass-border);
+  transform: translateX(-0.5px) skewX(-18deg);
+  pointer-events: none;
+  opacity: 0.85;
+}
+
+.panel-pill-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--response-text);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.65;
+  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
+  /* Each button takes half the pill; clip-path matches the diagonal seam
+     so hover backgrounds also slant. */
+  min-width: 24px;
+}
+
+.panel-pill-btn.panel-pill-settings {
+  clip-path: polygon(0 0, 100% 0, calc(100% - 4px) 100%, 0 100%);
+  padding-right: 12px;
+}
+
+.panel-pill-btn.panel-pill-minimize {
+  clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%);
+  padding-left: 12px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.panel-pill-btn:hover {
+  opacity: 1;
+  background: var(--panel-outer, rgba(255, 255, 255, 0.08));
+  color: var(--textbox-text, var(--response-text));
+}
+
+.panel-pill-btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--focus-glow, rgba(120, 180, 255, 0.6));
+  opacity: 1;
+}
+
+.panel-pill-btn:active {
+  background: var(--panel-response, rgba(255, 255, 255, 0.12));
+}
 
 /* Body container. Handlers' returned HTML lands here. Padding lives on the
    .panel-instance, so .panel-content stays tight to give nested panels

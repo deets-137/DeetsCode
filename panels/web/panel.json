@@ -1,24 +1,24 @@
 {
   "schema": 1,
-  "name": "blog_ops",
-  "title": "blog",
-  "tier": 3,
+  "name": "web",
+  "title": "web",
+  "tier": 1,
   "author": "host",
-  "handler": "server:view",
+  "view": "view.html",
   "permissions": {
-    "network": [],
+    "network": ["*"],
     "reads": [],
     "writes": []
   },
   "display": {
-    "shape": "tall",
+    "shape": "free",
     "aspect_ratio": null,
-    "min":       { "width": 320, "height": 200 },
-    "preferred": { "width": 480, "height": 800 },
+    "min":       { "width": 280, "height": 200 },
+    "preferred": { "width": 520, "height": 360 },
     "max":       { "width": null, "height": null },
     "scroll": "internal",
     "growable": true
   },
   "anchored": false,
-  "tileflow": { "icon": "📝" }
+  "tileflow": { "icon": "🌐" }
 }

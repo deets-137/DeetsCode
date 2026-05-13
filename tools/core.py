@@ -137,6 +137,45 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "recompute_layout",
+            "description": (
+                "Trigger a fresh tileflow pass on the bento — recomputes "
+                "scores, re-ranks panels, applies new ordering. Use after a "
+                "burst of `set_instance_state` calls if the arrangement "
+                "looks stale, or to refresh recency decay (panels that were "
+                "active a while ago will demote)."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_instance_state",
+            "description": (
+                "Push a runtime state overlay onto a panel instance — the live "
+                "bento rearranges in front of the user. Use sparingly to bubble "
+                "something relevant ('I'm about to talk about your YouTube video, "
+                "let's surface it') or to tuck something away ('done with the "
+                "task list, demote it'). Transient: not persisted to the layout "
+                "file. States: 'dormant' (demote to tray icon), 'idle' (small "
+                "tile), 'active' (medium tile — passive interest), 'focused' "
+                "(hero — full attention). The arrangement responds immediately "
+                "via the FLIP runner; peers glide to accommodate."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "instance": {"type": "string", "description": "Instance id from layout/panel_layout.json (e.g. 'youtube_a', 'tool_log', 'settings'). NOT the panel name."},
+                    "state":    {"type": "string", "enum": ["dormant", "idle", "active", "focused"], "description": "Target state."},
+                },
+                "required": ["instance", "state"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "update_task",
             "description": "Create or update the task checklist (task.md). Use markdown checkboxes: - [ ] todo, - [/] in-progress, - [x] done. If content is empty, returns the current checklist without modifying it.",
             "parameters": {
@@ -377,6 +416,25 @@ def execute_tool(
 
         if name == "register_path":
             return _register_path(args)
+
+        if name == "recompute_layout":
+            # Server.py picks up the tool-name in the dispatch site and
+            # broadcasts a synthetic frame the client reacts to. Returning
+            # a confirmation keeps the tool sync.
+            return "OK: layout recomputation broadcast queued."
+
+        if name == "set_instance_state":
+            inst = (args.get("instance") or "").strip()
+            st = (args.get("state") or "").strip()
+            valid = {"dormant", "idle", "active", "focused"}
+            if not inst:
+                return "Error: 'instance' is required"
+            if st not in valid:
+                return f"Error: 'state' must be one of {sorted(valid)}"
+            # Side effect (WS broadcast) is handled in server.py at the tool
+            # dispatch site so this function stays sync. Returning the
+            # confirmation is enough for the model's tool-call loop.
+            return f"OK: requested state '{st}' for instance '{inst}' (bento updating live)."
 
         if name == "update_task":
             from paths import TASK_FILENAME

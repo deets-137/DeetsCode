@@ -39,7 +39,13 @@ def view() -> str:
 <div class="pending-panel-inner">{body}</div>
 <script>
 (function () {{
-  if (!window.harness || !window.harness.subscribe) return;
+  if (!window.harness) return;
+  // Tileflow: focused while there are queued writes, idle otherwise.
+  // Re-evaluated on every render — view() is re-fetched on each event below.
+  if (window.harness.setState) {{
+    window.harness.setState('pending_writes', {count} > 0 ? 'focused' : 'idle');
+  }}
+  if (!window.harness.subscribe) return;
   const refresh = () => window.harness.refreshNow('pending_writes');
   window.harness.subscribe('pending_writes', 'pending_writes', refresh);
   window.harness.subscribe('pending_writes', 'writes_applied', refresh);

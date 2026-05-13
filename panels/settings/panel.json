@@ -19,5 +19,6 @@
     "scroll": "internal",
     "growable": false
   },
-  "anchored": true
+  "anchored": true,
+  "tileflow": { "icon": "🎛" }
 }

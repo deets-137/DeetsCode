@@ -1,13 +1,5 @@
 # Harness — project notes for Claude
 
-## Active project: panel system rebuild
-
-**Read [dev_project.md](dev_project.md) first.** It is the durable plan for an
-in-progress rewrite of the dev UI into a user-moddable panel system (hybrid
-trust tiers, region-driven layout, OS-hub trajectory). All design decisions
-are resolved; implementation starts at phase 0.5. If your task touches
-`static/`, `index.html`, or anything UI-shaped, the answer is in there.
-
 ## Paths
 
 All filesystem paths the harness uses (directories, files, per-project subdir/filename constants) live in **`paths.py`**. It is the single source of truth; no other module should compute paths with `Path(__file__).parent / "..."`.
@@ -30,64 +22,9 @@ Chess uses display names end-to-end — no Discord user ids. The envelope is `{"
 
 ## Panels
 
-The dev UI is a **panel system** — every visible block is a self-contained panel under `panels/<name>/` **except `chat`**, which is still a legacy `dom_id` hoist (deferred because it owns the WS lifecycle that drives every other panel). The viewport is divided into named regions by `layout/panel_layout.json`; instances place panels into regions. **`docs/dev_project.md` is the authoritative design doc** — read it before touching the system. What you need to know to add or modify a panel:
+The dev UI is a **panel system** — every visible block is a self-contained panel under `panels/<name>/` **except `chat`**, which is still a legacy `dom_id` hoist (deferred because it owns the WS lifecycle that drives every other panel). The viewport is divided into named regions by `layout/panel_layout.json`; instances place panels into regions.
 
-### Trust tiers
-
-| Tier | Render path | Use when |
-|------|-------------|----------|
-| 0    | `<iframe src=manifest.url>` | external URL (YouTube, etc.) |
-| 1    | direct DOM injection of `view.html` | host-served static HTML+JS |
-| 2    | (reserved — subprocess) | not yet implemented |
-| 3    | direct DOM injection of `server.py:view()` output | needs Python / harness state |
-
-Tier 1 and 3 inject into a `.panel-content` wrapper — **host CSS wins** (no shadow DOM, deliberate). Inline `<script>` tags re-execute on every fetch via clone-and-replace.
-
-### Panel chrome — the shell owns it
-
-`panel-shell.js` renders every panel as `.panel-instance > .panel-header (.panel-title + .panel-actions slot) > .panel-content`. Glass surface, padding, border-radius, and uppercase title styling are loader-rendered. **Handlers return content only — never their own title bar.** The title comes from `manifest.title`.
-
-To put buttons in the chrome's title bar, a handler emits a `<div data-panel-actions>...</div>` block in its returned HTML. The shell hoists its children into the `.panel-actions` slot on every fetch (after the script clone-and-replace pass, so inline init still runs). Example:
-
-```python
-def view() -> str:
-    return """
-<div data-panel-actions>
-  <button onclick="if(window.refreshTree)refreshTree()" title="Refresh">↺</button>
-</div>
-<div class="file-panel-inner" id="file-tree"></div>
-<script>if (window.refreshTree) window.refreshTree();</script>
-""".strip()
-```
-
-Padding lives on the outer `.panel-instance` (10px); `.panel-content` is a flex column with internal scroll. Manifest `display.min.height` lands on the outer instance, so short panels don't collapse to title-only.
-
-### Adding a panel
-
-1. `panels/<name>/panel.json` with the schema-v1 manifest (see `panels/ollama_ps/panel.json` for a tier-3 reference, `panels/clock/panel.json` for tier-0, `panels/slash_commands/panel.json` for tier-1).
-2. For tier 1: `panels/<name>/view.html` (static fragment).
-3. For tier 3: `panels/<name>/server.py` exporting `view() -> str` (HTML fragment). Re-imported on every request — module-level state is wiped, so persist via `panels/<name>/state.json` if needed.
-4. Add an instance to `layout/panel_layout.json`: `{ "instance": "<name>", "panel": "<name>", "region": "<region-id>" }`.
-5. Hot reload: `POST /api/panels/reload`. No server restart needed.
-
-### Tier-3 → harness state contract
-
-Tier-3 panels reach harness globals by `import server` (or `from tools import ...`) at call time. The loader re-imports the handler on every request, so reads are always live:
-
-```python
-def view():
-    import server
-    project_dir = server.project_dir   # always the current value
-    ...
-```
-
-### `harness.*` JS API (panel-side)
-
-Exposed by `static/panel-shell.js`, available to any direct-DOM panel:
-
-- `harness.refresh(name, seconds)` — recurring poll. Re-fetches the panel's view at the given interval. Self-deregisters when the content node disappears.
-- `harness.refreshNow(name)` — one-shot fetch. Use after a state-change action.
-- `harness.subscribe(panel, event, callback)` — WS event bridge. `app.js`'s `ws.onmessage` fans out to subscribers via `harness._dispatch`. Subs are keyed by panel name and wiped on the next `fetchAndInject`, so re-renders don't leak listeners.
+**[docs/panels.md](docs/panels.md) is the modder reference** — manifest schema, endpoint table, JS API, WS event catalog, hello-world walkthrough. Read it first when adding or modifying a panel. The notes below are orientation only.
 
 ### Layout & mode visibility
 

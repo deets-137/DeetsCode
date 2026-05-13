@@ -17,4 +17,21 @@ def view() -> str:
   <button onclick="if(window.clearToolPanel)clearToolPanel()" title="Clear tool log">✕</button>
 </div>
 <div class="tool-panel-inner" id="tool-panel-inner"></div>
+<script>
+(function () {
+  if (!window.harness || !window.harness.subscribe) return;
+  // Tileflow: active while a tool call is in flight, idle once the
+  // turn ends. Stage 1 has no visual effect for active — wiring is
+  // ahead of stage 2 size-class spans.
+  window.harness.subscribe('tool_log', 'tool_call', () => {
+    if (window.harness.setState) window.harness.setState('tool_log', 'active');
+  });
+  window.harness.subscribe('tool_log', 'done', () => {
+    if (window.harness.setState) window.harness.setState('tool_log', 'idle');
+  });
+  window.harness.subscribe('tool_log', 'error', () => {
+    if (window.harness.setState) window.harness.setState('tool_log', 'idle');
+  });
+})();
+</script>
 """.strip()

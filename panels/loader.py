@@ -40,6 +40,23 @@ class PanelPermissions(BaseModel):
     writes: list[str] = Field(default_factory=list)
 
 
+class PanelTileflow(BaseModel):
+    """Tileflow knobs for a panel. Sizing is *derived* from `display.preferred`
+    + `min`/`max` by the engine (see static/tileflow-engine.js
+    `naturalClass`); panels do not declare a state→size-class table any more.
+    Per-instance score overrides (force_state, score_floor, score_ceiling)
+    live on the layout-instance, not the manifest. See docs/tileflow.md."""
+    default_state: Literal["dormant", "idle", "active", "focused"] = "idle"
+    tray_when_dormant: bool = True
+    bubble_on_active: bool = False
+    bubble_on_focused: bool = True
+    icon: Optional[str] = None
+    # Optional flat additive on the panel's score, set by the panel author.
+    # Use sparingly — most weight tuning belongs in the engine's WEIGHTS
+    # table or per-instance score_overrides, not in panel manifests.
+    score_bonus: int = 0
+
+
 class PanelManifest(BaseModel):
     schema_: int = Field(alias="schema", default=1)
     name: str
@@ -56,6 +73,7 @@ class PanelManifest(BaseModel):
         "allow": "",
     })
     anchored: bool = False
+    tileflow: PanelTileflow = Field(default_factory=PanelTileflow)
 
     @field_validator("name")
     @classmethod
@@ -74,6 +92,63 @@ class LayoutRegion(BaseModel):
     height: Optional[str] = None
     stack: Literal["vertical", "horizontal"] = "vertical"
     after: Optional[str] = None
+    # Tileflow region kind. "stack" is the default behavior; "tray" routes
+    # dormant panels here as icons. Future: "bento" for grid auto-flow.
+    kind: Literal["stack", "tray", "bento"] = "stack"
+
+
+# ── Schema v2: grid + pin ──────────────────────────────────────────────────
+# A bento region is a fixed-column CSS Grid (default 12 cols, 120px rows).
+# Pinned instances claim a `(col, row, cols, rows)` rectangle on that grid;
+# unpinned siblings auto-flow into the gaps via `grid-auto-flow: dense`.
+# See docs/tileflow.md "The grid (schema v2)" for the spec.
+
+class GridConfig(BaseModel):
+    cols: int = Field(default=12, ge=1)
+    row_height_px: int = Field(default=120, ge=1)
+    gap_px: int = Field(default=12, ge=0)
+    # Below this viewport width, the engine drops to half the column count
+    # and ignores pin coordinates (auto-flow only). See docs/tileflow.md.
+    narrow_breakpoint_px: int = Field(default=1200, ge=1)
+
+
+class InstancePin(BaseModel):
+    """Where on the bento grid this instance lives. 1-indexed (CSS Grid
+    convention); `(col, row) = (1, 1)` is the top-left cell. `cols` and
+    `rows` are span counts, both ≥ 1."""
+    col: int = Field(ge=1)
+    row: int = Field(ge=1)
+    cols: int = Field(default=1, ge=1)
+    rows: int = Field(default=1, ge=1)
+
+
+class InstanceScoreOverrides(BaseModel):
+    """Per-instance escape hatches that feed into the tileflow engine's
+    scoring. All optional. Set by user actions (drag-to-pin, "always show
+    this", "never tray that") or by the model via tool calls. See
+    docs/tileflow.md "Scoring + flow" and static/tileflow-engine.js.
+
+    - `priority` / `score_bonus`: flat additives, signed.
+    - `score_floor`: clamps the score from below — `100` keeps a panel
+      pinned to the top, `-1000` is effectively a user-forced exile.
+    - `score_ceiling`: clamps from above.
+    - `force_state`: if set, the engine treats the instance as if state
+      were always this value (the runtime overlay can't override it).
+    """
+    priority: int = 0
+    score_bonus: int = 0
+    score_floor: Optional[int] = None
+    score_ceiling: Optional[int] = None
+    force_state: Optional[Literal["dormant", "idle", "active", "focused"]] = None
+
+
+# Legacy alias — kept so existing layout files with `tileflow.locked_*` keep
+# loading. The engine ignores the locked_* fields; users who want those
+# semantics should migrate to score_overrides.
+class InstanceTileflow(InstanceScoreOverrides):
+    locked_floor: Optional[Literal["dormant", "idle", "active", "focused"]] = None
+    locked_size: Optional[Literal["icon", "small", "medium", "large", "hero"]] = None
+    never_dormant: bool = False
 
 
 class LayoutInstance(BaseModel):
@@ -86,6 +161,14 @@ class LayoutInstance(BaseModel):
     grow_max_height: Optional[int] = None
     grow_max_width: Optional[int] = None
     config: Optional[dict[str, Any]] = None
+    # Schema v2 fields (None means "not pinned" / "no per-instance tileflow
+    # overrides"). Backwards compatible with v1 layouts: the fields simply
+    # don't appear on legacy entries.
+    pin: Optional[InstancePin] = None
+    tileflow: Optional[InstanceTileflow] = None
+    # Live engine inputs (set by user actions / tool calls). Read by
+    # static/tileflow-engine.js to clamp/bias the score.
+    score_overrides: Optional[InstanceScoreOverrides] = None
 
 
 class PanelLayout(BaseModel):
@@ -93,6 +176,15 @@ class PanelLayout(BaseModel):
     regions: list[LayoutRegion]
     instances: list[LayoutInstance]
     mode_overrides: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    # Schema v2: optional grid block (omitted by v1 layouts). When absent,
+    # `bento` regions fall back to GridConfig defaults at render time.
+    grid: Optional[GridConfig] = None
+
+    @property
+    def is_v2(self) -> bool:
+        return self.schema_ >= 2 or self.grid is not None or any(
+            inst.pin is not None for inst in self.instances
+        )
 
 
 # ── Discovery / registry ───────────────────────────────────────────────────
@@ -173,6 +265,110 @@ def panel_dir(name: str) -> Path:
 def load_layout() -> PanelLayout:
     text = paths.PANEL_LAYOUT_FILE.read_text(encoding="utf-8")
     return PanelLayout.model_validate(json.loads(text))
+
+
+def save_layout(layout: PanelLayout) -> None:
+    """Persist a layout back to disk. Caller is responsible for validating
+    pins (see `validate_layout_pins`) — this function trusts its input."""
+    text = json.dumps(layout.model_dump(by_alias=True, exclude_none=True), indent=2)
+    paths.PANEL_LAYOUT_FILE.write_text(text, encoding="utf-8")
+
+
+# ── Pin validation ─────────────────────────────────────────────────────────
+
+class PinValidationError(ValueError):
+    """Raised when a pin can't be applied. Message is user-facing."""
+    pass
+
+
+def _rects_overlap(a: InstancePin, b: InstancePin) -> bool:
+    """Two pin rectangles overlap iff they intersect on both axes."""
+    a_col_end = a.col + a.cols - 1
+    b_col_end = b.col + b.cols - 1
+    a_row_end = a.row + a.rows - 1
+    b_row_end = b.row + b.rows - 1
+    cols_overlap = not (a_col_end < b.col or b_col_end < a.col)
+    rows_overlap = not (a_row_end < b.row or b_row_end < a.row)
+    return cols_overlap and rows_overlap
+
+
+def validate_layout_pins(layout: PanelLayout) -> list[str]:
+    """Return a list of human-readable validation errors for the layout's
+    current pin assignments. Empty list = layout is valid.
+
+    Checks: out-of-bounds (col + cols - 1 > grid.cols), and collisions
+    between any two pinned instances in the same region. Min-size and
+    size-class span checks belong here too — those land alongside the
+    drag-to-pin UI when manifests are wired through (Stage 2/3)."""
+    errors: list[str] = []
+    grid = layout.grid or GridConfig()
+    region_by_id = {r.id: r for r in layout.regions}
+
+    # Group pinned instances by region for cheap pairwise collision checks.
+    by_region: dict[str, list[LayoutInstance]] = {}
+    for inst in layout.instances:
+        if inst.pin is None:
+            continue
+        if inst.region not in region_by_id:
+            errors.append(f"instance '{inst.instance}': pinned to unknown region '{inst.region}'")
+            continue
+        # Bounds.
+        col_end = inst.pin.col + inst.pin.cols - 1
+        if col_end > grid.cols:
+            errors.append(
+                f"instance '{inst.instance}': pin out of bounds "
+                f"(col {inst.pin.col} + cols {inst.pin.cols} - 1 = {col_end} > grid.cols {grid.cols})"
+            )
+        by_region.setdefault(inst.region, []).append(inst)
+
+    # Collision detection per region. O(n²) — n is small, panels are dozens.
+    for region_id, instances in by_region.items():
+        for i, a in enumerate(instances):
+            for b in instances[i + 1:]:
+                if _rects_overlap(a.pin, b.pin):
+                    errors.append(
+                        f"region '{region_id}': pin collision between "
+                        f"'{a.instance}' and '{b.instance}'"
+                    )
+    return errors
+
+
+def validate_pin_for_instance(
+    layout: PanelLayout,
+    instance_id: str,
+    new_pin: InstancePin,
+) -> None:
+    """Validate a single proposed pin change against the live layout.
+    Raises PinValidationError on any failure; returns None on success.
+
+    Used by `POST /api/layout/instances/:id/pin` so the drag-to-pin UI
+    gets a focused error message rather than the bulk validator's list."""
+    target = next((i for i in layout.instances if i.instance == instance_id), None)
+    if target is None:
+        raise PinValidationError(f"unknown instance: {instance_id}")
+    region = next((r for r in layout.regions if r.id == target.region), None)
+    if region is None:
+        raise PinValidationError(f"instance '{instance_id}' lives in unknown region '{target.region}'")
+
+    grid = layout.grid or GridConfig()
+    col_end = new_pin.col + new_pin.cols - 1
+    if col_end > grid.cols:
+        raise PinValidationError(
+            f"pin out of bounds: col {new_pin.col} + cols {new_pin.cols} - 1 = {col_end} "
+            f"exceeds grid.cols ({grid.cols})"
+        )
+
+    for other in layout.instances:
+        if other.instance == instance_id or other.pin is None:
+            continue
+        if other.region != target.region:
+            continue
+        if _rects_overlap(new_pin, other.pin):
+            raise PinValidationError(
+                f"pin collides with '{other.instance}' "
+                f"(occupies col {other.pin.col}..{other.pin.col + other.pin.cols - 1}, "
+                f"row {other.pin.row}..{other.pin.row + other.pin.rows - 1})"
+            )
 
 
 # ── Tier-3 view rendering ──────────────────────────────────────────────────

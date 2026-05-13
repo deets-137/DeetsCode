@@ -1,0 +1,68 @@
+<div data-panel-actions>
+  <form id="web-url-form" style="display:flex;gap:4px;align-items:center;">
+    <input id="web-url-input" type="text" placeholder="https://example.com"
+           style="width:220px;font-size:11px;padding:3px 6px;background:var(--textbox-bg,#222);
+                  color:var(--textbox-text,#eee);border:1px solid var(--glass-border,#444);
+                  border-radius:3px;">
+    <button type="submit" title="Go" style="font-size:11px;">go</button>
+  </form>
+</div>
+
+<div class="web-panel-wrap" style="display:flex;flex-direction:column;height:100%;min-height:200px;">
+  <div class="web-panel-status" id="web-status"
+       style="font-size:11px;opacity:.55;padding:4px 2px;font-family:monospace;"></div>
+  <iframe id="web-frame"
+          sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
+          referrerpolicy="no-referrer"
+          style="flex:1;width:100%;border:1px solid var(--glass-border,#444);border-radius:3px;background:#fff;"
+          src="about:blank"></iframe>
+</div>
+
+<script>
+(function () {
+  const KEY = "harness.web_panel.url";
+  const input = document.getElementById("web-url-input");
+  const form  = document.getElementById("web-url-form");
+  const frame = document.getElementById("web-frame");
+  const statusEl = document.getElementById("web-status");
+
+  if (!input || !frame) return;
+
+  function normalize(u) {
+    u = (u || "").trim();
+    if (!u) return "";
+    if (!/^[a-z][a-z0-9+\-.]*:\/\//i.test(u)) u = "https://" + u;
+    return u;
+  }
+
+  function load(u) {
+    const url = normalize(u);
+    if (!url) return;
+    statusEl.textContent = "loading " + url + " …";
+    frame.src = url;
+    try { localStorage.setItem(KEY, url); } catch (e) {}
+    input.value = url;
+  }
+
+  frame.addEventListener("load", () => {
+    if (frame.src && frame.src !== "about:blank") {
+      statusEl.textContent = "loaded — sites that send X-Frame-Options/CSP frame-ancestors will appear blank";
+    }
+  });
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    load(input.value);
+  });
+
+  let saved = "";
+  try { saved = localStorage.getItem(KEY) || ""; } catch (e) {}
+  if (saved) {
+    input.value = saved;
+    load(saved);
+  } else {
+    input.value = "https://example.com";
+    statusEl.textContent = "type a URL and hit go";
+  }
+})();
+</script>

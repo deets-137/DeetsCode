@@ -1,0 +1,81 @@
+<div data-panel-actions>
+  <form class="yt-form" style="display:flex;gap:4px;align-items:center;">
+    <input class="yt-input" type="text" placeholder="paste youtube url or id"
+           style="width:200px;font-size:11px;padding:3px 6px;background:var(--textbox-bg,#222);
+                  color:var(--textbox-text,#eee);border:1px solid var(--glass-border,#444);
+                  border-radius:3px;">
+    <button type="submit" title="Load" style="font-size:11px;">load</button>
+  </form>
+</div>
+
+<div class="yt-wrap" style="display:flex;flex-direction:column;height:100%;min-height:180px;">
+  <div class="yt-empty" style="opacity:.55;font-size:11px;font-family:monospace;
+                                padding:8px;text-align:center;">
+    paste a youtube url, video id, or share link → load
+  </div>
+  <div class="yt-frame-wrap" style="display:none;flex:1;position:relative;">
+    <iframe class="yt-frame"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowfullscreen
+            referrerpolicy="strict-origin-when-cross-origin"
+            style="position:absolute;inset:0;width:100%;height:100%;border:0;
+                   border-radius:3px;background:#000;"></iframe>
+  </div>
+</div>
+
+<script>
+(function () {
+  // Resolve which instance this script belongs to. document.currentScript
+  // points at the <script> tag; walking up to .panel-instance gives us the
+  // unique id even if multiple youtube panels exist on the page.
+  const scriptEl = document.currentScript;
+  const root = scriptEl ? scriptEl.closest(".panel-instance") : null;
+  if (!root) return;
+  const instance = root.dataset.instance || "youtube";
+  const KEY = "harness.youtube." + instance + ".video";
+
+  const form  = root.querySelector(".yt-form");
+  const input = root.querySelector(".yt-input");
+  const empty = root.querySelector(".yt-empty");
+  const frameWrap = root.querySelector(".yt-frame-wrap");
+  const frame = root.querySelector(".yt-frame");
+  if (!form || !frame) return;
+
+  // Accepts: bare ID, watch?v=, youtu.be/, /embed/, /shorts/, /live/.
+  function extractId(s) {
+    s = (s || "").trim();
+    if (!s) return "";
+    if (/^[A-Za-z0-9_-]{11}$/.test(s)) return s;
+    let m;
+    m = s.match(/[?&]v=([A-Za-z0-9_-]{11})/); if (m) return m[1];
+    m = s.match(/youtu\.be\/([A-Za-z0-9_-]{11})/); if (m) return m[1];
+    m = s.match(/youtube\.com\/(?:embed|shorts|live|v)\/([A-Za-z0-9_-]{11})/);
+    if (m) return m[1];
+    return "";
+  }
+
+  function load(idOrUrl) {
+    const id = extractId(idOrUrl);
+    if (!id) {
+      empty.textContent = "couldn't find a video id in: " + idOrUrl;
+      empty.style.display = "";
+      frameWrap.style.display = "none";
+      return;
+    }
+    frame.src = "https://www.youtube-nocookie.com/embed/" + id + "?rel=0";
+    empty.style.display = "none";
+    frameWrap.style.display = "";
+    input.value = id;
+    try { localStorage.setItem(KEY, id); } catch (e) {}
+  }
+
+  form.addEventListener("submit", (e) => {
+    e.preventDefault();
+    load(input.value);
+  });
+
+  let saved = "";
+  try { saved = localStorage.getItem(KEY) || ""; } catch (e) {}
+  if (saved) load(saved);
+})();
+</script>

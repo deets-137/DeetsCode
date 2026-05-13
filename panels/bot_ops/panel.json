@@ -19,5 +19,10 @@
     "scroll": "internal",
     "growable": false
   },
-  "anchored": true
+  "anchored": true,
+  "tileflow": {
+    "default_state": "dormant",
+    "tray_when_dormant": true,
+    "icon": "🤖"
+  }
 }

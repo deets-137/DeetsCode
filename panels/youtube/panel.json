@@ -1,0 +1,27 @@
+{
+  "schema": 1,
+  "name": "youtube",
+  "title": "youtube",
+  "tier": 1,
+  "author": "host",
+  "view": "view.html",
+  "permissions": {
+    "network": ["https://www.youtube.com", "https://www.youtube-nocookie.com"],
+    "reads": [],
+    "writes": []
+  },
+  "display": {
+    "shape": "wide",
+    "aspect_ratio": "16:9",
+    "min":       { "width": 240, "height": 200 },
+    "preferred": { "width": 480, "height": 320 },
+    "max":       { "width": null, "height": null },
+    "scroll": "internal",
+    "growable": true
+  },
+  "anchored": false,
+  "tileflow": {
+    "icon": "▶",
+    "bubble_on_active": true
+  }
+}

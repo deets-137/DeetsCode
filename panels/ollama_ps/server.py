@@ -50,24 +50,22 @@ def fetch() -> list[dict]:
     return rows
 
 
-_PCT_RE = re.compile(r"(\d+)%\s*(GPU|CPU)", re.IGNORECASE)
+_SPLIT_RE = re.compile(r"(\d+)%\s*/\s*(\d+)%\s*(CPU/GPU|GPU/CPU)", re.IGNORECASE)
+_SINGLE_RE = re.compile(r"(\d+)%\s*(GPU|CPU)(?!/)", re.IGNORECASE)
 
 
 def _parse_processor(s: str) -> tuple[int, int]:
     """Extract GPU% and CPU% from strings like '100% GPU' or '47%/53% CPU/GPU'."""
+    m = _SPLIT_RE.search(s)
+    if m:
+        a, b, order = int(m.group(1)), int(m.group(2)), m.group(3).upper()
+        return (b, a) if order == "CPU/GPU" else (a, b)
     gpu = cpu = 0
-    for pct, kind in _PCT_RE.findall(s):
+    for pct, kind in _SINGLE_RE.findall(s):
         if kind.upper() == "GPU":
             gpu = int(pct)
         else:
             cpu = int(pct)
-    if gpu == 0 and cpu == 0:
-        # Fallback: bare "47%/53% CPU/GPU" form (order matters in ollama ps).
-        nums = re.findall(r"(\d+)%", s)
-        if "CPU/GPU" in s.upper() and len(nums) >= 2:
-            cpu, gpu = int(nums[0]), int(nums[1])
-        elif "GPU/CPU" in s.upper() and len(nums) >= 2:
-            gpu, cpu = int(nums[0]), int(nums[1])
     return gpu, cpu
 
 

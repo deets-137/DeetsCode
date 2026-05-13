@@ -104,7 +104,7 @@ def load_prompt_template(name: str = "DeetsCode") -> str:
     return DEFAULT_PROMPT
 
 import uvicorn
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
@@ -118,6 +118,35 @@ import paths
 # read-only copy of every frame emitted for that session. Populated by the
 # spectate handshake; drained on disconnect.
 _spectators: dict[str, set[WebSocket]] = {}
+
+# Every connected WS (one per browser tab). Tileflow uses this to push live
+# panel-state overlay frames to all clients regardless of session. This is a
+# dev-toy convenience — multi-user installs would scope by session/user.
+_panel_ws: set[WebSocket] = set()
+
+# Runtime overlay: last server-pushed tileflow state per instance. Cleared on
+# process restart by design — the persisted `panel_layout.json` is the floor;
+# overlay is transient "right now" intent (model just bubbled this, video
+# just started playing, etc.). Sent to newly connected clients on hello so a
+# tab refresh doesn't drop the current arrangement.
+_tileflow_overlay: dict[str, str] = {}
+
+
+async def broadcast_tileflow_state(instance: str, state: str) -> int:
+    """Push a tileflow state change to every connected panel client. Returns
+    the number of sockets the frame was delivered to (best-effort — dead
+    sockets are discarded). Updates `_tileflow_overlay` so future connects
+    can replay current state."""
+    _tileflow_overlay[instance] = state
+    frame = {"type": "tileflow_state", "instance": instance, "state": state}
+    delivered = 0
+    for sock in list(_panel_ws):
+        try:
+            await sock.send_json(frame)
+            delivered += 1
+        except Exception:
+            _panel_ws.discard(sock)
+    return delivered
 
 # Remote-control queues by session_id. Each live session (hello'd) owns one
 # asyncio.Queue; any OTHER websocket may enqueue a synthetic control frame
@@ -620,6 +649,24 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
             if name == "update_task" and args.get("content", "").strip():
                 await ws.send_json({"type": "task_updated"})
 
+            # `set_instance_state` runs side-effect-free in tools/core.py
+            # (just validates + formats a confirmation string). The actual
+            # WS broadcast happens here so the tool can stay sync and so
+            # every connected client — not just the chat WS — sees it.
+            if name == "set_instance_state":
+                inst_id = (args.get("instance") or "").strip()
+                st = (args.get("state") or "").strip()
+                if inst_id and st in _TILEFLOW_STATES:
+                    await broadcast_tileflow_state(inst_id, st)
+
+            # `recompute_layout` nudges the client to re-run its flow pass.
+            if name == "recompute_layout":
+                for sock in list(_panel_ws):
+                    try:
+                        await sock.send_json({"type": "tileflow_recompute"})
+                    except Exception:
+                        _panel_ws.discard(sock)
+
             focus = build_focus_block(project_dir)
             directive = focus if focus else "<system>\nACTION: continue the user's original task. if complete, emit final reply and stop.\n</system>"
             tool_msg_history = {
@@ -737,6 +784,7 @@ async def list_panels():
             "display": m.display.model_dump(),
             "url": m.url,
             "iframe_attrs": m.iframe_attrs,
+            "tileflow": m.tileflow.model_dump(),
         })
     return JSONResponse({"panels": out, "errors": _panel_loader.errors()})
 
@@ -827,6 +875,113 @@ async def get_panel_layout():
         return JSONResponse({"error": "panel_layout.json not found"}, status_code=404)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+@app.put("/api/layout")
+async def put_panel_layout(req: Request):
+    """Replace the whole layout sheet. Validates pins (bounds + collisions)
+    before writing; rejects with 400 if any pin is illegal."""
+    try:
+        body = await req.json()
+        layout = _panel_loader.PanelLayout.model_validate(body)
+    except Exception as e:
+        return JSONResponse({"error": f"invalid layout: {e}"}, status_code=400)
+    pin_errors = _panel_loader.validate_layout_pins(layout)
+    if pin_errors:
+        return JSONResponse({"error": "pin validation failed", "details": pin_errors}, status_code=400)
+    try:
+        _panel_loader.save_layout(layout)
+    except OSError as e:
+        return JSONResponse({"error": f"write failed: {e}"}, status_code=500)
+    return JSONResponse(layout.model_dump(by_alias=True))
+
+
+@app.post("/api/layout/instances/{instance_id}/pin")
+async def pin_instance(instance_id: str, req: Request):
+    """Pin one instance to a `(col, row, cols, rows)` rectangle on the
+    bento grid. Validates against the current layout — out-of-bounds and
+    collisions return 400 with a focused error message (drag-to-pin UI
+    uses this to surface "your span is too narrow / collides with X")."""
+    try:
+        body = await req.json()
+        pin = _panel_loader.InstancePin.model_validate(body)
+    except Exception as e:
+        return JSONResponse({"error": f"invalid pin: {e}"}, status_code=400)
+    try:
+        layout = _panel_loader.load_layout()
+    except FileNotFoundError:
+        return JSONResponse({"error": "panel_layout.json not found"}, status_code=404)
+    try:
+        _panel_loader.validate_pin_for_instance(layout, instance_id, pin)
+    except _panel_loader.PinValidationError as e:
+        return JSONResponse({"error": str(e)}, status_code=400)
+    target = next((i for i in layout.instances if i.instance == instance_id), None)
+    if target is None:
+        return JSONResponse({"error": f"unknown instance: {instance_id}"}, status_code=404)
+    target.pin = pin
+    try:
+        _panel_loader.save_layout(layout)
+    except OSError as e:
+        return JSONResponse({"error": f"write failed: {e}"}, status_code=500)
+    return JSONResponse(layout.model_dump(by_alias=True))
+
+
+@app.delete("/api/layout/instances/{instance_id}/pin")
+async def unpin_instance(instance_id: str):
+    """Unpin one instance — falls back to auto-flow placement."""
+    try:
+        layout = _panel_loader.load_layout()
+    except FileNotFoundError:
+        return JSONResponse({"error": "panel_layout.json not found"}, status_code=404)
+    target = next((i for i in layout.instances if i.instance == instance_id), None)
+    if target is None:
+        return JSONResponse({"error": f"unknown instance: {instance_id}"}, status_code=404)
+    if target.pin is None:
+        return JSONResponse(layout.model_dump(by_alias=True))
+    target.pin = None
+    try:
+        _panel_loader.save_layout(layout)
+    except OSError as e:
+        return JSONResponse({"error": f"write failed: {e}"}, status_code=500)
+    return JSONResponse(layout.model_dump(by_alias=True))
+
+
+_TILEFLOW_STATES = {"dormant", "idle", "active", "focused"}
+
+
+@app.post("/api/tileflow/state/{instance_id}")
+async def set_tileflow_state(instance_id: str, req: Request):
+    """Push a runtime state overlay for one instance to all connected
+    clients. Transient — not persisted to `panel_layout.json`. Used by the
+    `set_instance_state` model tool, panel internals (e.g. youtube on play),
+    and ad-hoc testing via curl."""
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    state = (body.get("state") or "").strip()
+    if state not in _TILEFLOW_STATES:
+        return JSONResponse(
+            {"error": f"state must be one of {sorted(_TILEFLOW_STATES)}"},
+            status_code=400,
+        )
+    delivered = await broadcast_tileflow_state(instance_id, state)
+    return JSONResponse({"ok": True, "instance": instance_id, "state": state, "delivered": delivered})
+
+
+@app.delete("/api/tileflow/state/{instance_id}")
+async def clear_tileflow_state(instance_id: str):
+    """Drop the runtime overlay for one instance. The client falls back to
+    the manifest's `default_state`."""
+    had = _tileflow_overlay.pop(instance_id, None) is not None
+    # We don't broadcast a "clear" — instead we set back to default_state on
+    # the client. Easiest signal: broadcast `idle` (the conventional default
+    # for everything except dormant-by-default panels). Callers that want a
+    # specific state should POST instead of DELETE.
+    delivered = 0
+    if had:
+        delivered = await broadcast_tileflow_state(instance_id, "idle")
+    return JSONResponse({"ok": True, "instance": instance_id, "cleared": had, "delivered": delivered})
 
 
 @app.get("/api/themes")
@@ -950,6 +1105,15 @@ async def websocket_endpoint(ws: WebSocket):
         await ws.send_json({"type": "ctx_length", "max": current_context_length})
     except Exception:
         pass
+
+    # Register for tileflow broadcasts and replay current overlay so a
+    # mid-session tab refresh restores the bento arrangement.
+    _panel_ws.add(ws)
+    for inst_id, st in list(_tileflow_overlay.items()):
+        try:
+            await ws.send_json({"type": "tileflow_state", "instance": inst_id, "state": st})
+        except Exception:
+            break
 
     try:
         while True:
@@ -1388,6 +1552,7 @@ async def websocket_endpoint(ws: WebSocket):
             _spectators[spectating].discard(ws)
         if session_id and _session_control.get(session_id) is control_queue:
             _session_control.pop(session_id, None)
+        _panel_ws.discard(ws)
 
 
 app.mount("/", StaticFiles(directory="static", html=True), name="static")

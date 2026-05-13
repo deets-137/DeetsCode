@@ -34,6 +34,9 @@ storage.db-shm
 packs/
 manual/
 
+# Archived dev notes (kept locally, not tracked)
+docs/archive/
+
 # OS
 .DS_Store
 Thumbs.db
