@@ -298,7 +298,7 @@ def load_session(session_id: str) -> dict | None:
         return None
 
 
-def save_session(session_id: str, messages: list, packs: list[str], prompt: str, temperature: float):
+def save_session(session_id: str, messages: list, prompt: str, temperature: float):
     path = _session_path(session_id)
     if path is None:
         return
@@ -306,7 +306,6 @@ def save_session(session_id: str, messages: list, packs: list[str], prompt: str,
     payload = {
         "schema": SESSION_SCHEMA,
         "messages": messages,
-        "packs": packs,
         "prompt": prompt,
         "temperature": temperature,
     }
@@ -339,67 +338,13 @@ async def fetch_context_length(model: str) -> int:
     return 131072
 
 
-def _pack_sources() -> list[tuple[str, Path]]:
-    """Return (scope, dir) in lookup order: project manual wins on name collision."""
-    return [
-        ("project", project_dir / "manual"),
-        ("global", packs_dir),
-    ]
-
-
-def list_packs() -> list[dict]:
-    out = []
-    seen = set()
-    for scope, src in _pack_sources():
-        if not src.is_dir():
-            continue
-        for entry in sorted(src.iterdir(), key=lambda p: p.name.lower()):
-            if entry.suffix.lower() != ".md" or entry.name.lower() == "readme.md":
-                continue
-            if entry.stem in seen:
-                continue
-            try:
-                size = entry.stat().st_size
-            except OSError:
-                continue
-            out.append({"name": entry.stem, "chars": size, "scope": scope})
-            seen.add(entry.stem)
-    return out
-
-
-def load_packs(names: list[str]) -> str:
-    """Emit a manifest of selected packs (names + section headings only), not
-    their full bodies. The model pulls actual content via the load_pack tool
-    when it needs it — keeps packs out of the standing context cost."""
-    if not names:
-        return ""
-    lines = []
-    for name in names:
-        safe = Path(name).name
-        for _scope, src in _pack_sources():
-            path = src / f"{safe}.md"
-            if not path.is_file():
-                continue
-            try:
-                text = path.read_text(encoding="utf-8", errors="replace")
-            except OSError:
-                break
-            sections = [
-                ln[3:].strip() for ln in text.splitlines()
-                if ln.startswith("## ") and not ln.startswith("### ")
-            ]
-            hint = f" — sections: {', '.join(sections)}" if sections else ""
-            lines.append(f"- {safe}{hint}")
-            break
-    if not lines:
-        return ""
-    return (
-        "## Reference Documentation (on-demand)\n\n"
-        "The following packs are available for this session. They are NOT loaded "
-        "in full — call `load_pack(name, section=...)` to pull a specific section "
-        "into context when you need it. Prefer a single section over the whole pack.\n\n"
-        + "\n".join(lines)
-    )
+# Packs are reference markdown bundles (packs/ globally, manual/ per-project)
+# accessed exclusively via the `list_packs` and `load_pack` tools in
+# tools/core.py. The harness used to also surface a knowledge_packs chip UI
+# and inject a pack manifest into every system prompt; both were retired
+# when usage was purely decorative. The model now discovers packs via the
+# tool list (descriptions self-explain). If you want a system-prompt nudge,
+# add it to prompts/<mode>.md rather than re-introducing the manifest path.
 
 
 _STEP_RE = re.compile(r"\s*[-*]\s+\[([ /xX])\]\s*(.*)")
@@ -505,11 +450,6 @@ def get_tree():
     return JSONResponse({"tree": build_tree_json(project_dir), "root": str(project_dir)})
 
 
-@app.get("/packs")
-def get_packs():
-    return JSONResponse({"packs": list_packs()})
-
-
 @app.get("/api/prompts")
 def get_prompts():
     names = []
@@ -530,7 +470,7 @@ def flush_pending():
     return JSONResponse({"flushed": count})
 
 
-async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, state: dict, selected_packs: list[str], selected_prompt: str = "DeetsCode", session_id: str | None = None, user_name: str | None = None):
+async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, state: dict, selected_prompt: str = "DeetsCode", session_id: str | None = None, user_name: str | None = None):
     # Cache the file tree on `state`. Recompute only if invalidated (e.g. after
     # write_file applies). Static over a session — was being re-rendered each
     # turn for no reason.
@@ -540,9 +480,6 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
         state["file_tree"] = tree_text
     prompt_template = load_prompt_template(selected_prompt)
     system_prompt = prompt_template.replace("{project_dir}", str(project_dir)).replace("{file_tree}", tree_text)
-    pack_block = load_packs(selected_packs)
-    if pack_block:
-        system_prompt = f"{system_prompt}\n\n{pack_block}"
     loop_messages = [{"role": "system", "content": system_prompt}] + messages
     # Mode-gated tool pack. Each turn reloads because the mode can switch
     # between turns via /mode — cheap enough, keeps the schema in sync.
@@ -748,10 +685,10 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
         await ws.send_json({"type": "pending_writes", "writes": dict(pending_writes)})
 
 
-async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_packs: list[str], selected_prompt: str = "DeetsCode", session_id: str | None = None, temperature: float | None = None, user_name: str | None = None):
+async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_prompt: str = "DeetsCode", session_id: str | None = None, temperature: float | None = None, user_name: str | None = None):
     state: dict = {"usage_tokens": None, "stream": None}
     try:
-        await _agent_loop_impl(ws, user_content, messages, state, selected_packs, selected_prompt, session_id, user_name)
+        await _agent_loop_impl(ws, user_content, messages, state, selected_prompt, session_id, user_name)
     except asyncio.CancelledError:
         # asyncio.cancel() alone doesn't reliably kill the underlying HTTP stream
         # to Ollama — httpx cancellation can be delayed on Windows. Force-close
@@ -776,7 +713,7 @@ async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_
                 pass
         if session_id:
             try:
-                save_session(session_id, messages, selected_packs, selected_prompt, temperature if temperature is not None else current_temperature)
+                save_session(session_id, messages, selected_prompt, temperature if temperature is not None else current_temperature)
             except Exception:
                 pass
         try:
@@ -1119,7 +1056,6 @@ async def websocket_endpoint(ws: WebSocket):
     await ws.accept()
     messages: list[dict] = []
     current_task: asyncio.Task | None = None
-    selected_packs: list[str] = []
     selected_prompt: str = "DeetsCode"
     session_id: str | None = None
     spectating: str | None = None  # session_id this ws is subscribed to (read-only mode)
@@ -1195,7 +1131,9 @@ async def websocket_endpoint(ws: WebSocket):
                 loaded = load_session(session_id)
                 if loaded:
                     messages = list(loaded.get("messages") or [])
-                    selected_packs = list(loaded.get("packs") or [])
+                    # `packs` field may exist on old session files — ignored
+                    # post-knowledge_packs-removal. Left in the file for
+                    # forward compat if we ever restore session-scoped packs.
                     selected_prompt = loaded.get("prompt") or "DeetsCode"
                     # Session-file backcompat: old sessions saved mode="default".
                     if selected_prompt == "default":
@@ -1424,12 +1362,6 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_json({"type": "blog_error", "op": op, "req_id": req_id, "error": str(e)})
                 continue
 
-            if data["type"] == "set_packs":
-                incoming = data.get("names", [])
-                if isinstance(incoming, list):
-                    selected_packs = [str(n) for n in incoming if isinstance(n, str)]
-                continue
-
             if data["type"] == "set_prompt":
                 new_prompt = data.get("prompt", "DeetsCode")
                 if new_prompt == "default":
@@ -1575,7 +1507,7 @@ async def websocket_endpoint(ws: WebSocket):
                     user_content = user_text
 
                 messages.append({"role": "user", "content": user_content})
-                current_task = asyncio.create_task(agent_loop(ws, user_text, messages, list(selected_packs), selected_prompt, session_id, current_temperature, user_name))
+                current_task = asyncio.create_task(agent_loop(ws, user_text, messages, selected_prompt, session_id, current_temperature, user_name))
 
     except WebSocketDisconnect:
         if current_task and not current_task.done():

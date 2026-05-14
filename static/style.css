@@ -120,56 +120,6 @@ body::after {
 
 .chat-textbox::placeholder { color: #999; }
 
-/* ── Knowledge pack chips ─────────────────────────── */
-.packs-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  align-content: flex-start;
-}
-
-.packs-inner { padding: 8px 10px; }
-
-.packs-empty {
-  font-size: 10px;
-  font-style: italic;
-  color: var(--response-text);
-  opacity: 0.45;
-}
-
-.pack-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 3px 9px;
-  border-radius: 999px;
-  font-family: 'Aptos', 'Segoe UI', sans-serif;
-  font-size: 10.5px;
-  color: var(--response-text);
-  background: rgba(255, 255, 255, 0.15);
-  border: 1px solid var(--glass-border);
-  cursor: pointer;
-  opacity: 0.55;
-  transition: opacity 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
-  user-select: none;
-}
-
-.pack-chip:hover { opacity: 0.9; }
-
-.pack-chip.active {
-  opacity: 1;
-  background: rgba(255, 255, 255, 0.32);
-  box-shadow: inset 0 1px 0 var(--glass-highlight), 0 0 10px rgba(255, 255, 255, 0.15);
-}
-
-.pack-chip.scoped-project { border-left: 2px solid var(--divider); padding-left: 7px; }
-
-.pack-chip .pack-size {
-  font-family: 'Consolas', 'Menlo', monospace;
-  font-size: 9.5px;
-  opacity: 0.6;
-}
-
 .chat-actions {
   display: flex;
   gap: 6px;
@@ -455,8 +405,7 @@ body::after {
   min-height: 0;
 }
 
-.info-section .slash-inner,
-.info-section .packs-chips {
+.info-section .slash-inner {
   overflow-y: auto;
   min-height: 0;
 }

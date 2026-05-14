@@ -204,67 +204,10 @@ function esc(s) {
   return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
-// ── Knowledge packs ───────────────────────────────
-const activePacks = new Set();
-
-async function refreshPacks() {
-  try {
-    const res = await fetch("/packs");
-    const data = await res.json();
-    renderPackChips(data.packs || []);
-  } catch (e) { /* server not up */ }
-}
-
-function renderPackChips(packs) {
-  const container = document.getElementById("packs-chips");
-  if (!container) return; // panel may not have rendered yet
-  container.innerHTML = "";
-  if (!packs.length) {
-    const empty = document.createElement("span");
-    empty.className = "packs-empty";
-    empty.textContent = "no packs in /packs/";
-    container.appendChild(empty);
-    return;
-  }
-  // Prune removed packs from the active set
-  const available = new Set(packs.map(p => p.name));
-  for (const name of [...activePacks]) if (!available.has(name)) activePacks.delete(name);
-
-  for (const p of packs) {
-    const chip = document.createElement("span");
-    chip.className = "pack-chip" + (activePacks.has(p.name) ? " active" : "") + (p.scope === "project" ? " scoped-project" : "");
-    chip.title = p.scope === "project" ? "project-scoped (from manual/)" : "global pack (from packs/)";
-    chip.innerHTML = `
-      <span>${escapeHtml(p.name.replace(/-/g, " "))}</span>
-      <span class="pack-size">${formatBytes(p.chars)}</span>
-    `;
-    chip.addEventListener("click", () => togglePack(p.name, chip));
-    container.appendChild(chip);
-  }
-  syncPacksToServer();
-}
-
-function togglePack(name, chip) {
-  if (activePacks.has(name)) {
-    activePacks.delete(name);
-    chip.classList.remove("active");
-  } else {
-    activePacks.add(name);
-    chip.classList.add("active");
-  }
-  syncPacksToServer();
-}
-
-function syncPacksToServer() {
-  if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  ws.send(JSON.stringify({ type: "set_packs", names: [...activePacks] }));
-}
-
-function formatBytes(n) {
-  if (n < 1024) return `${n}b`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)}k`;
-  return `${(n / 1024 / 1024).toFixed(1)}m`;
-}
+// (Knowledge-packs UI removed — packs are now reached only via the
+// `list_packs` / `load_pack` model tools in tools/core.py. The packs/
+// and manual/ directories on disk are unchanged; only the chip UI +
+// `set_packs` WS message + system-prompt manifest are gone.)
 
 function setTitleFromPath(path) {
   if (!path) return;
@@ -577,7 +520,7 @@ function connect() {
   ws = new WebSocket(`ws://${location.host}/ws`);
   window.__ws = ws;
 
-  ws.onopen = () => { log("connected to harness", "info"); refreshTree(); refreshPacks(); fetchModels(); refreshTaskPanel(); fetchThemes(); refreshPendingPanel(); refreshSpectateSessions(); refreshSessionInventory(); _refreshControlModes(); _updateControlPanel(); };
+  ws.onopen = () => { log("connected to harness", "info"); refreshTree(); fetchModels(); refreshTaskPanel(); fetchThemes(); refreshPendingPanel(); refreshSpectateSessions(); refreshSessionInventory(); _refreshControlModes(); _updateControlPanel(); };
   ws.onclose = () => {
     log("disconnected — retrying in 3s...", "info");
     setTimeout(connect, 3000);
@@ -660,7 +603,6 @@ function connect() {
         if (msg.project) {
           // Project switch — refresh UI and clear stale state
           refreshTree();
-          refreshPacks();
           clearContextFiles();
           clearToolPanel();
           hidePendingWrites();

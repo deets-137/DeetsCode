@@ -17,7 +17,6 @@
     { "instance": "tool_log",         "panel": "tool_log",         "region": "bento" },
     { "instance": "pending_writes",   "panel": "pending_writes",   "region": "bento" },
     { "instance": "settings",         "panel": "settings",         "region": "bento", "anchored": true },
-    { "instance": "knowledge_packs",  "panel": "knowledge_packs",  "region": "bento" },
     { "instance": "slash_commands",   "panel": "slash_commands",   "region": "bento" },
     { "instance": "in_context_files", "panel": "in_context_files", "region": "bento" },
     { "instance": "task_list",        "panel": "task_list",        "region": "bento" },
