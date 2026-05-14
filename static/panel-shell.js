@@ -267,6 +267,55 @@
   let _trayRegionEl = null;
   let _bentoRegionEl = null;
 
+  // ── system_log: client-side interaction stream ──────────────────────────
+  // Every click / state transition / bin migration / panel-emitted custom
+  // event flows through harness.logInteraction → in-memory ring (debug) +
+  // debounced WS flush (analytics → storage.system_log via server.py). See
+  // docs/panels.md for the contract.
+  //
+  // Ring is bounded (1000 entries) so a runaway emitter can't OOM the tab.
+  // Flush cadence: every 500ms while events accumulate, or immediately when
+  // the page unloads (so we don't lose the tail).
+  const _activityRing = [];               // {ts, instance, panel, kind, meta}
+  const _ACTIVITY_RING_MAX = 1000;
+  const _activityFlushQueue = [];         // events awaiting WS send
+  let _activityFlushTimer = null;
+  const _ACTIVITY_FLUSH_MS = 500;
+
+  function _enqueueActivity(evt) {
+    _activityRing.push(evt);
+    if (_activityRing.length > _ACTIVITY_RING_MAX) _activityRing.shift();
+    _activityFlushQueue.push(evt);
+    if (_activityFlushTimer) return;
+    _activityFlushTimer = setTimeout(_flushActivity, _ACTIVITY_FLUSH_MS);
+  }
+
+  function _flushActivity() {
+    _activityFlushTimer = null;
+    if (!_activityFlushQueue.length) return;
+    const ws = window.__ws;
+    if (!ws || ws.readyState !== 1) {
+      // WS not ready — try again next tick. Events stay in the queue.
+      _activityFlushTimer = setTimeout(_flushActivity, _ACTIVITY_FLUSH_MS);
+      return;
+    }
+    const batch = _activityFlushQueue.splice(0, _activityFlushQueue.length);
+    try {
+      ws.send(JSON.stringify({ type: "system_log", events: batch }));
+    } catch (e) {
+      // Send failed — put the batch back at the head and try again later.
+      // Best-effort; we don't want analytics to throw at the call site.
+      _activityFlushQueue.unshift(...batch);
+      _activityFlushTimer = setTimeout(_flushActivity, _ACTIVITY_FLUSH_MS * 2);
+    }
+  }
+
+  // Best-effort flush on page unload — uses sendBeacon if the WS is gone.
+  // No JSON parse on the server side for beacons; we keep the same shape.
+  window.addEventListener("beforeunload", () => {
+    if (_activityFlushQueue.length) _flushActivity();
+  });
+
   function tileflowConfig(manifest) {
     const t = (manifest && manifest.tileflow) || {};
     const title = (manifest && manifest.title) || (manifest && manifest.name) || "?";
@@ -568,6 +617,12 @@
           const fresh = buildNodeForBin(inst, manifest, d.bin, state, mode);
           applyDecision(fresh, d, _regionMapCache, inst);
           targetRegionEl.appendChild(fresh);
+          // Log only when an existing node actually moved bins. First-mount
+          // (no prior node) shouldn't count as a migration — it'll get a
+          // dedicated "mount" event in the lifecycle expansion later.
+          if (currentBin) {
+            harness.logInteraction(d.instance, "bin", { from: currentBin, to: d.bin });
+          }
           // Only flag entry animation for the user-driven change, not for
           // panels that happened to re-order. Heuristic: the panel whose
           // state changed most recently within this frame.
@@ -610,8 +665,13 @@
       return;
     }
     if (_instanceStates[instanceId] === state) return;
+    const prev = _instanceStates[instanceId] || null;
     _instanceStates[instanceId] = state;
     _lastStateChangeAt[instanceId] = Date.now();
+    // Log every real transition (the no-op early-return above filters
+    // synthetic same-state calls so we don't spam the stream during a
+    // flow pass that revisits unchanged panels).
+    harness.logInteraction(instanceId, "state", { from: prev, to: state });
     if (!_layoutCache || !_regionMapCache) return;
     scheduleFlowPass(true);
   };
@@ -619,6 +679,46 @@
   harness.getState = function (instanceId) {
     return _instanceStates[instanceId] || null;
   };
+
+  // ── harness.logInteraction — emit a system_log event ────────────────────
+  // Called by the shell's auto-instrument (click / state / bin) and by
+  // panel scripts that want to record a finer-grained signal (e.g. video
+  // play, search-submit). `kind` is free-form but consumers will assume the
+  // shell-emitted set ("click", "state", "bin", "custom") exists; pick a
+  // new tag if you're adding a category we'd want to aggregate separately.
+  //
+  // The call is fire-and-forget: queued into the ring + debounced WS flush.
+  // Never throws — analytics failures must not break user interactions.
+  harness.logInteraction = function (instance, kind, meta) {
+    if (typeof instance !== "string" || typeof kind !== "string") return;
+    try {
+      const inst = _instances[instance];
+      const panel = inst && inst.panel ? inst.panel : null;
+      _enqueueActivity({
+        ts: Date.now(),
+        instance,
+        panel,
+        kind,
+        meta: (meta && typeof meta === "object") ? meta : {},
+      });
+    } catch (e) { /* swallow */ }
+  };
+
+  // ── harness.activity.* — debug surface ──────────────────────────────────
+  // Pure in-memory; the SQL-backed query lives at GET /api/system_log.
+  const activity = (harness.activity = harness.activity || {});
+  activity.dump = function (limit) {
+    const n = Math.min(limit || 50, _activityRing.length);
+    const start = _activityRing.length - n;
+    const rows = _activityRing.slice(start);
+    if (console.table) console.table(rows.map(r => ({
+      ts: new Date(r.ts).toISOString().slice(11, 23),
+      instance: r.instance, panel: r.panel, kind: r.kind,
+      meta: JSON.stringify(r.meta),
+    })));
+    return rows;
+  };
+  activity.flush = _flushActivity;   // force-flush, mostly for tests
 
   // Panel-controlled grid span. Pass `{cols, rows}` to claim a custom-sized
   // bento cell that ignores the class table; pass null/undefined to release
@@ -804,6 +904,26 @@
       if (_resizeTimer) clearTimeout(_resizeTimer);
       _resizeTimer = setTimeout(() => { _resizeTimer = null; scheduleFlowPass(false); }, 120);
     });
+
+    // ── Auto-instrument: clicks on any panel-instance or tray-icon ────────
+    // Capture phase so this fires before any inline handler stops propagation.
+    // We log the panel-instance's id from the closest ancestor with
+    // [data-instance]; clicks outside any panel are ignored (no instance to
+    // attribute them to). `tag` carries the click target's element name so
+    // analytics can tell button-clicks from background clicks.
+    document.addEventListener("click", (e) => {
+      const target = e.target;
+      if (!target || !(target instanceof Element)) return;
+      const node = target.closest("[data-instance]");
+      if (!node) return;
+      const instance = node.dataset.instance;
+      if (!instance) return;
+      const isTray = node.classList && node.classList.contains("tray-icon");
+      harness.logInteraction(instance, "click", {
+        tag: target.tagName ? target.tagName.toLowerCase() : null,
+        bin: isTray ? "tray" : "bento",
+      });
+    }, true);
 
     // ── Runtime overlay subscriber ────────────────────────────────────────
     // The server pushes `{type: "tileflow_state", instance, state}` whenever

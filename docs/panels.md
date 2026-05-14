@@ -286,6 +286,41 @@ for the source of truth):
 | `harness.getState(instanceId)` | Read the current state. |
 | `harness.recomputeLayout()` | Force a fresh flow pass without changing state. |
 
+### Interaction logging (`system_log`)
+
+Every click on a `.panel-instance`, every real `setState` transition, and
+every bin migration (bento ↔ tray) is emitted as a `system_log` event by
+panel-shell — debounced ~500ms and batched over WS to the server, which
+appends to the `system_log` SQLite table. Designed primarily as analytics
+("is this panel ever used?") with a secondary debug surface.
+
+| Call | Purpose |
+|------|---------|
+| `harness.logInteraction(instance, kind, meta?)` | Emit a custom event from a panel script. `kind` is free-form but stick to short snake_case tags so aggregations group cleanly. Fire-and-forget — never throws. |
+| `harness.activity.dump(limit?)` | Console-table the in-memory ring (last 1000 events). Returns the rows. |
+| `harness.activity.flush()` | Force the debounced WS flush immediately. Mostly for tests. |
+
+Built-in `kind` values:
+
+| Kind | Emitted by | Meta shape |
+|---|---|---|
+| `click` | shell capture-phase click listener | `{tag, bin}` — clicked element's tag name, panel's current bin |
+| `state` | `harness.setState` (real transitions only) | `{from, to}` |
+| `bin` | `runFlowPass` on bento↔tray migration | `{from, to}` |
+| `custom` | panel scripts via `harness.logInteraction` | per-panel |
+
+Server-side query endpoints:
+
+| Method | URL | Purpose |
+|---|---|---|
+| GET | `/api/system_log?since=&until=&instance=&kind=&limit=` | Recent events newest-first. Timestamps are unix ms; `limit` is capped at 5000. |
+| GET | `/api/system_log/summary?window_ms=` | Per-(instance, kind) counts, sorted by most recent. Omit `window_ms` for all-time. |
+
+The Python side is `storage.record_system_event` / `record_system_events`
+/ `query_system_log` / `panel_usage_summary` / `prune_system_log`. The
+prune helper exists for maintenance but isn't auto-called; storage.db can
+hold millions of rows without trouble.
+
 ### Tileflow engine (debug / tuning)
 
 | Call | Purpose |

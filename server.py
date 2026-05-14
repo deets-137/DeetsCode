@@ -6,6 +6,7 @@ import shutil
 import sys
 import uuid
 from pathlib import Path
+from typing import Optional
 
 THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 TOOL_CODE_RE = re.compile(r"<tool_code>.*?</tool_code>", re.DOTALL)
@@ -966,6 +967,36 @@ async def clear_tileflow_state(instance_id: str):
     return JSONResponse({"ok": True, "instance": instance_id, "cleared": had, "delivered": delivered})
 
 
+# ── system_log endpoints ─────────────────────────────────────────────────────
+# Read-only query surface for the UI interaction stream. Writes happen via
+# the `system_log` WS message handler (batched insert) — see the WS dispatch.
+# Designed so a small analytics panel (or a curl from the CLI) can ask "which
+# panels did I use today" without needing direct DB access.
+
+@app.get("/api/system_log")
+async def get_system_log(
+    since: Optional[int] = None,
+    until: Optional[int] = None,
+    instance: Optional[str] = None,
+    kind: Optional[str] = None,
+    limit: int = 500,
+):
+    """Recent UI interaction events, newest first. All filters optional.
+    `since`/`until` are unix ms timestamps; `limit` is capped at 5000."""
+    return JSONResponse({
+        "events": storage.query_system_log(
+            since=since, until=until, instance=instance, kind=kind, limit=limit,
+        ),
+    })
+
+
+@app.get("/api/system_log/summary")
+async def get_system_log_summary(window_ms: Optional[int] = None):
+    """Per-(instance, kind) interaction counts. Pass `window_ms` to limit to
+    the last N ms; omit for all time. The "is this panel ever used" answer."""
+    return JSONResponse({"summary": storage.panel_usage_summary(window_ms=window_ms)})
+
+
 @app.get("/api/themes")
 async def get_themes():
     """Parse theme.css and return all discovered themes with their swatch colors."""
@@ -1358,6 +1389,21 @@ async def websocket_endpoint(ws: WebSocket):
                         await ws.send_json({"type": "blog_error", "op": op, "error": "unknown op"})
                 except Exception as e:
                     await ws.send_json({"type": "blog_error", "op": op, "req_id": req_id, "error": str(e)})
+                continue
+
+            if data["type"] == "system_log":
+                # Client-batched UI interaction events. Schema enforced in
+                # storage.record_system_events — malformed entries are dropped
+                # silently. We don't ack; the buffer is fire-and-forget by
+                # design (analytics shouldn't add latency to clicks).
+                batch = data.get("events", [])
+                if isinstance(batch, list):
+                    try:
+                        storage.record_system_events(batch)
+                    except Exception as e:
+                        # Don't surface storage errors to the client — the
+                        # interaction stream is best-effort. Log server-side.
+                        print(f"[system_log] insert failed: {e}", flush=True)
                 continue
 
             if data["type"] == "set_prompt":

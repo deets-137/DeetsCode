@@ -116,6 +116,36 @@ def _init_schema(c: sqlite3.Connection) -> None:
             ON events(session_id, id);
         CREATE INDEX IF NOT EXISTS idx_events_type
             ON events(type);
+
+        -- system_log: append-only stream of UI interaction events emitted by
+        -- panel-shell.js (clicks, state transitions, bin migrations, custom
+        -- panel events). Primary purpose is analytics — "is this panel ever
+        -- used" — with a secondary "what just happened" debug surface. Kept
+        -- intentionally generic so future signal types (lifecycle, focus,
+        -- scroll) can be added by emitting a new `kind` value without DDL.
+        --   ts        unix ms (client-side at emission time)
+        --   instance  layout-instance id (e.g. "youtube_a"), or "_shell" for
+        --             non-panel events
+        --   panel     manifest name (denormalized — saves a join for the
+        --             common "usage by panel-type" aggregation). Nullable for
+        --             shell-level events.
+        --   kind      "click" | "state" | "bin" | "custom" | future...
+        --   meta_json arbitrary JSON payload — schema is per-kind, set by
+        --             panel-shell's auto-instrument or by panel scripts.
+        CREATE TABLE IF NOT EXISTS system_log (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts          INTEGER NOT NULL,
+            instance    TEXT NOT NULL,
+            panel       TEXT,
+            kind        TEXT NOT NULL,
+            meta_json   TEXT NOT NULL DEFAULT '{}'
+        );
+        CREATE INDEX IF NOT EXISTS idx_system_log_ts
+            ON system_log(ts);
+        CREATE INDEX IF NOT EXISTS idx_system_log_instance_ts
+            ON system_log(instance, ts);
+        CREATE INDEX IF NOT EXISTS idx_system_log_kind_ts
+            ON system_log(kind, ts);
     """)
     # Additive migrations for pre-existing DBs. Each statement is safe to
     # re-run; we swallow "duplicate column" errors rather than version-track.
@@ -448,3 +478,130 @@ def set_note_status(note_id: int, status: str) -> bool:
         (status, closed_at, note_id),
     )
     return cur.rowcount > 0
+
+
+# ── system_log (UI interaction stream) ───────────────────────────────────────
+# Append-only; read mostly by analytics aggregations. See the table's
+# block comment in _init_schema for the schema rationale and `kind` values.
+
+def record_system_event(
+    instance: str,
+    panel: Optional[str],
+    kind: str,
+    meta: Optional[dict] = None,
+    ts: Optional[int] = None,
+) -> int:
+    """Insert a single interaction event. Returns the rowid."""
+    cur = _db().execute(
+        "INSERT INTO system_log(ts, instance, panel, kind, meta_json) "
+        "VALUES(?, ?, ?, ?, ?)",
+        (
+            ts if ts is not None else int(time.time() * 1000),
+            instance, panel, kind,
+            json.dumps(meta or {}, ensure_ascii=False),
+        ),
+    )
+    return cur.lastrowid
+
+
+def record_system_events(batch: list[dict]) -> int:
+    """Bulk-insert a debounced batch from the client. Each dict needs
+    `instance` + `kind`; `ts`, `panel`, `meta` are optional. Returns the
+    number of rows inserted. Malformed entries are skipped silently — we
+    don't want a junk frame to torpedo a whole batch."""
+    if not batch:
+        return 0
+    rows: list[tuple] = []
+    now = int(time.time() * 1000)
+    for e in batch:
+        if not isinstance(e, dict):
+            continue
+        instance = e.get("instance")
+        kind = e.get("kind")
+        if not isinstance(instance, str) or not isinstance(kind, str):
+            continue
+        panel = e.get("panel")
+        if panel is not None and not isinstance(panel, str):
+            panel = None
+        ts = e.get("ts")
+        if not isinstance(ts, int):
+            ts = now
+        meta = e.get("meta") if isinstance(e.get("meta"), dict) else {}
+        rows.append((ts, instance, panel, kind, json.dumps(meta, ensure_ascii=False)))
+    if not rows:
+        return 0
+    _db().executemany(
+        "INSERT INTO system_log(ts, instance, panel, kind, meta_json) "
+        "VALUES(?, ?, ?, ?, ?)",
+        rows,
+    )
+    return len(rows)
+
+
+def query_system_log(
+    since: Optional[int] = None,
+    until: Optional[int] = None,
+    instance: Optional[str] = None,
+    kind: Optional[str] = None,
+    limit: int = 500,
+) -> list[dict]:
+    """Recent interaction events, newest first. All filters are optional;
+    `since`/`until` are unix ms timestamps. `limit` is capped at 5000 so a
+    runaway query can't OOM the response."""
+    clauses: list[str] = []
+    params: list[Any] = []
+    if since is not None:
+        clauses.append("ts >= ?")
+        params.append(since)
+    if until is not None:
+        clauses.append("ts <= ?")
+        params.append(until)
+    if instance is not None:
+        clauses.append("instance = ?")
+        params.append(instance)
+    if kind is not None:
+        clauses.append("kind = ?")
+        params.append(kind)
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    params.append(min(max(1, limit), 5000))
+    rows = _db().execute(
+        f"SELECT id, ts, instance, panel, kind, meta_json FROM system_log{where} "
+        f"ORDER BY ts DESC LIMIT ?",
+        params,
+    ).fetchall()
+    out: list[dict] = []
+    for r in rows:
+        d = dict(r)
+        try:
+            d["meta"] = json.loads(d.pop("meta_json") or "{}")
+        except json.JSONDecodeError:
+            d["meta"] = {}
+        out.append(d)
+    return out
+
+
+def panel_usage_summary(window_ms: Optional[int] = None) -> list[dict]:
+    """Per-(instance, kind) interaction counts, newest-active first.
+    `window_ms` filters to events within the last N ms (None = all time).
+    Designed for the "which panels do I actually use" question."""
+    clause = ""
+    params: list[Any] = []
+    if window_ms is not None:
+        clause = " WHERE ts >= ?"
+        params.append(int(time.time() * 1000) - int(window_ms))
+    rows = _db().execute(
+        f"SELECT instance, panel, kind, COUNT(*) AS n, MAX(ts) AS last_ts "
+        f"FROM system_log{clause} "
+        f"GROUP BY instance, kind "
+        f"ORDER BY last_ts DESC",
+        params,
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def prune_system_log(older_than_ms: int) -> int:
+    """Delete events older than the given absolute unix-ms timestamp.
+    Returns the number of rows deleted. Not called automatically — wire it
+    into a maintenance task or call ad-hoc if storage.db grows uncomfortably."""
+    cur = _db().execute("DELETE FROM system_log WHERE ts < ?", (older_than_ms,))
+    return cur.rowcount
