@@ -253,7 +253,6 @@ app = FastAPI()
 client = AsyncOpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
 project_dir: Path = Path(".").resolve()
-packs_dir: Path = paths.PACKS_DIR
 auto_apply_enabled: bool = False
 
 
@@ -338,13 +337,12 @@ async def fetch_context_length(model: str) -> int:
     return 131072
 
 
-# Packs are reference markdown bundles (packs/ globally, manual/ per-project)
-# accessed exclusively via the `list_packs` and `load_pack` tools in
-# tools/core.py. The harness used to also surface a knowledge_packs chip UI
-# and inject a pack manifest into every system prompt; both were retired
-# when usage was purely decorative. The model now discovers packs via the
-# tool list (descriptions self-explain). If you want a system-prompt nudge,
-# add it to prompts/<mode>.md rather than re-introducing the manifest path.
+# Project-scoped reference docs (markdown under `manual/`) are accessed
+# exclusively via the `list_manual` and `load_manual` tools in tools/core.py.
+# History: there was also a `knowledge_packs` chip UI + a system-prompt
+# manifest path with a global `packs/` fallback. All retired — usage settled
+# on project-scoped manuals reached through the tool surface. If you want a
+# manual doc always in scope for a mode, mention it in prompts/<mode>.md.
 
 
 _STEP_RE = re.compile(r"\s*[-*]\s+\[([ /xX])\]\s*(.*)")

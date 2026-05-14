@@ -89,21 +89,21 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "list_packs",
-            "description": "List available reference doc packs and their section headings. Packs are domain knowledge (server architecture, UI styling, conventions, etc). Use this to discover what's available, then call load_pack to pull just the section you need into context.",
+            "name": "list_manual",
+            "description": "List the project's manual (project-scoped reference docs in `manual/`) and their section headings — architecture, conventions, server, styling, etc. Use this to discover what's documented, then call load_manual to pull just the section you need into context.",
             "parameters": {"type": "object", "properties": {}, "required": []},
         },
     },
     {
         "type": "function",
         "function": {
-            "name": "load_pack",
-            "description": "Read a reference pack, optionally just one section. Prefer loading a single section over the whole pack — packs can be long and full loads eat context. Call list_packs first to see section names.",
+            "name": "load_manual",
+            "description": "Read a manual doc, optionally just one section. Prefer loading a single section over the whole doc — manual files can be long and full loads eat context. Call list_manual first to see section names.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name":    {"type": "string", "description": "Pack name (without .md), e.g. 'server' or 'styling'."},
-                    "section": {"type": "string", "description": "Optional level-2 heading title to extract (e.g. 'Agent Loop'). Omit to load the whole pack."},
+                    "name":    {"type": "string", "description": "Manual doc name (without .md), e.g. 'server' or 'styling'."},
+                    "section": {"type": "string", "description": "Optional level-2 heading title to extract (e.g. 'Agent Loop'). Omit to load the whole doc."},
                 },
                 "required": ["name"],
             },
@@ -192,23 +192,23 @@ TOOL_DEFINITIONS = [
 
 SKIP_DIRS_HIDDEN = {"__pycache__", "node_modules", ".git", ".venv", "venv", "dist", "build"}
 
-from paths import PACKS_DIR as PACKS_GLOBAL_DIR, PROJECT_MANUAL_SUBDIR
+from paths import PROJECT_MANUAL_SUBDIR
 
 
-def _pack_lookup_dirs(project_dir: Path) -> list[tuple[str, Path]]:
-    return [("project", project_dir / PROJECT_MANUAL_SUBDIR), ("global", PACKS_GLOBAL_DIR)]
+def _manual_dir(project_dir: Path) -> Path:
+    """Where the manual lives for the current project. Single source — the
+    legacy global `packs/` fallback was retired when usage settled on
+    project-scoped manuals only."""
+    return project_dir / PROJECT_MANUAL_SUBDIR
 
 
-def _find_pack(name: str, project_dir: Path) -> Optional[Path]:
+def _find_manual(name: str, project_dir: Path) -> Optional[Path]:
     safe = Path(name).name
-    for _scope, src in _pack_lookup_dirs(project_dir):
-        path = src / f"{safe}.md"
-        if path.is_file():
-            return path
-    return None
+    path = _manual_dir(project_dir) / f"{safe}.md"
+    return path if path.is_file() else None
 
 
-def _pack_sections(text: str) -> list[tuple[str, str]]:
+def _manual_sections(text: str) -> list[tuple[str, str]]:
     """Split markdown by `## ` (level-2) headings. Preamble above the first
     heading is returned under the synthetic section name `_preamble`."""
     sections: list[tuple[str, list[str]]] = [("_preamble", [])]
@@ -376,42 +376,37 @@ def execute_tool(
             head = f"{label}: " if label else ""
             return f"{head}{expr} = {rolls_str}" + (f" + {modifier}" if modifier and count > 1 else "") + f" → **{total}**"
 
-        if name == "list_packs":
+        if name == "list_manual":
             lines = []
-            seen = set()
-            for scope, src in _pack_lookup_dirs(project_dir):
-                if not src.is_dir():
-                    continue
+            src = _manual_dir(project_dir)
+            if src.is_dir():
                 for entry in sorted(src.iterdir(), key=lambda p: p.name.lower()):
                     if entry.suffix.lower() != ".md" or entry.name.lower() == "readme.md":
                         continue
-                    if entry.stem in seen:
-                        continue
-                    seen.add(entry.stem)
                     try:
                         text = entry.read_text(encoding="utf-8", errors="replace")
                     except OSError:
                         continue
-                    sections = [t for t, _ in _pack_sections(text) if t != "_preamble"]
+                    sections = [t for t, _ in _manual_sections(text) if t != "_preamble"]
                     hint = f" — sections: {', '.join(sections)}" if sections else ""
-                    lines.append(f"- {entry.stem} ({scope}, {entry.stat().st_size} chars){hint}")
-            return "Available packs:\n" + "\n".join(lines) if lines else "No packs available."
+                    lines.append(f"- {entry.stem} ({entry.stat().st_size} chars){hint}")
+            return "Available manual docs:\n" + "\n".join(lines) if lines else "No manual docs available."
 
-        if name == "load_pack":
+        if name == "load_manual":
             pname = args.get("name", "").strip()
             if not pname:
                 return "Error: 'name' is required"
-            path = _find_pack(pname, project_dir)
+            path = _find_manual(pname, project_dir)
             if path is None:
-                return f"Error: pack '{pname}' not found"
+                return f"Error: manual doc '{pname}' not found"
             text = path.read_text(encoding="utf-8", errors="replace")
             section = (args.get("section") or "").strip()
             if not section:
-                return f"[pack: {pname}]\n{text}"
-            for title, body in _pack_sections(text):
+                return f"[manual: {pname}]\n{text}"
+            for title, body in _manual_sections(text):
                 if title.lower() == section.lower():
-                    return f"[pack: {pname} § {title}]\n{body}"
-            avail = ", ".join(t for t, _ in _pack_sections(text) if t != "_preamble") or "(none)"
+                    return f"[manual: {pname} § {title}]\n{body}"
+            avail = ", ".join(t for t, _ in _manual_sections(text) if t != "_preamble") or "(none)"
             return f"Error: section '{section}' not found in '{pname}'. Available: {avail}"
 
         if name == "register_path":

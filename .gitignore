@@ -30,9 +30,10 @@ storage.db-journal
 storage.db-wal
 storage.db-shm
 
-# Knowledge packs (user-local content)
-packs/
-manual/
+# `manual/` is project documentation and *is* tracked — only manual/task.md
+# is ignored, and that's already covered by the `task.md` rule above (which
+# matches at any depth). No `manual/` rule here on purpose; the earlier
+# blanket-ignore was a leftover from the retired knowledge_packs UI.
 
 # Archived dev notes (kept locally, not tracked)
 docs/archive/

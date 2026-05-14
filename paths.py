@@ -17,7 +17,6 @@ HARNESS_ROOT: Path = Path(__file__).parent.resolve()
 
 # Source / static assets (shipped with repo)
 PROMPTS_DIR: Path = HARNESS_ROOT / "prompts"
-PACKS_DIR:   Path = HARNESS_ROOT / "packs"
 STATIC_DIR:  Path = HARNESS_ROOT / "static"
 THEME_CSS:   Path = STATIC_DIR / "theme.css"
 

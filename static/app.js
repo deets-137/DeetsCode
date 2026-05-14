@@ -204,10 +204,10 @@ function esc(s) {
   return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
-// (Knowledge-packs UI removed — packs are now reached only via the
-// `list_packs` / `load_pack` model tools in tools/core.py. The packs/
-// and manual/ directories on disk are unchanged; only the chip UI +
-// `set_packs` WS message + system-prompt manifest are gone.)
+// (Knowledge-packs UI removed — project manual docs under manual/ are
+// now reached only via the `list_manual` / `load_manual` model tools in
+// tools/core.py. The chip UI, the `set_packs` WS message, and the
+// system-prompt manifest are gone; the global packs/ slot retired too.)
 
 function setTitleFromPath(path) {
   if (!path) return;

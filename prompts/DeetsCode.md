@@ -27,18 +27,18 @@ Tagged blocks are fixed roles, not prose:
 - Writes are queued for user approval. Tell the user once queued, then stop.
 - Never show file content in a code block as a "preview" — call the tool directly.
 
-## Loading reference packs
-Before starting a task that matches one of these, call `load_pack` first:
+## Loading project manual
+The project's reference docs live under `manual/` and are reached via the
+`list_manual` / `load_manual` tools. Call `list_manual()` to see what's
+documented (architecture, conventions, server, styling, task, ui, …) then
+`load_manual(name, section)` to pull a single `## ` section rather than
+the whole file.
 
-- **Adding or modifying a UI panel / button / new WS message type** →
-  `load_pack("panels")`. Has the end-to-end three-file recipe with worked example.
-- **Adding a new filesystem path constant** → use the `register_path` core tool
-  rather than hand-editing `paths.py`.
-- **Adding a new tool or mode pack** → `load_pack("tools")`.
-
-`list_packs()` shows everything available with section headings; use
-`load_pack(name, section)` to pull a single `## ` section rather than the
-whole file.
+Specific recipes:
+- **Adding a new filesystem path constant** → use the `register_path` core
+  tool rather than hand-editing `paths.py`.
+- **Anything else where a section name in `manual/` matches your task** →
+  load that section first to stay in sync with house conventions.
 
 ## Task Management
 Your plan lives in `task.md`, not in the reply.
