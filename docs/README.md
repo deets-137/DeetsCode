@@ -16,6 +16,12 @@ start here if you don't know which doc to read.
   scoring formula, sizing rules, style guide, and debug surface
   (`data-tileflow-*` attributes, `harness.tileflow.dump()`).
 
+- **[diagnostics.md](diagnostics.md)** — Catalog of every introspection
+  surface the harness exposes: DOM attributes, `window.harness.*`
+  console API, HTTP endpoints, SQLite tables, and how to add new
+  analytics signals. Start here when you need to debug a panel or
+  ask "which panels do I actually use?".
+
 ## For working with the project itself
 
 - **[../CLAUDE.md](../CLAUDE.md)** — Project orientation for any
@@ -39,5 +45,7 @@ start here if you don't know which doc to read.
 | Tune the scoring weights | [tileflow.md § Tunable weights](tileflow.md#tunable-weights) |
 | Pin a panel to a specific bento cell | [panels.md § Layout file](panels.md#layout-file-layoutpanel_layoutjson) |
 | Wire a model tool that drives the bento | [tileflow.md § `recompute_layout` tool](tileflow.md#recompute_layout-tool) and `tools/core.py` for the `set_instance_state` pattern |
-| Debug a panel that's misbehaving | DevTools → Inspect → check `data-tileflow-*` attrs; `harness.tileflow.dump()` in console |
+| Debug a panel that's misbehaving | [diagnostics.md § DOM-level](diagnostics.md#1-dom-level--visible-without-any-console) then [§ Browser console](diagnostics.md#2-browser-console--windowharness-debug-surface) |
+| Find out which panels are actually used | [diagnostics.md § HTTP endpoints — Interaction log](diagnostics.md#interaction-log-system_log) or `GET /api/system_log/summary` |
+| Add a new analytics signal | [diagnostics.md § Adding a new analytics signal](diagnostics.md#6-adding-a-new-analytics-signal) |
 | Know what to build next | [tileflow.md § Up next — build docket](tileflow.md#up-next--build-docket) |

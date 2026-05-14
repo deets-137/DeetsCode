@@ -294,6 +294,11 @@ panel-shell — debounced ~500ms and batched over WS to the server, which
 appends to the `system_log` SQLite table. Designed primarily as analytics
 ("is this panel ever used?") with a secondary debug surface.
 
+> For the full introspection catalog (DOM attrs, console API, HTTP
+> endpoints, SQL tables, plus example queries) see
+> [diagnostics.md](diagnostics.md). This subsection is the panel-author
+> view — emit events from a panel script and you're done.
+
 | Call | Purpose |
 |------|---------|
 | `harness.logInteraction(instance, kind, meta?)` | Emit a custom event from a panel script. `kind` is free-form but stick to short snake_case tags so aggregations group cleanly. Fire-and-forget — never throws. |
