@@ -674,6 +674,17 @@ one read for orientation. Update as items land.
    without the JS console. ~1 hour. Lowest priority but completes the
    chrome.
 
+5. **Sizing-floor bug: `min.height` is not honored.** Repro: on a 2560×1080
+   viewport the settings panel renders at 834×252 even though
+   `panels/settings/panel.json` declares `min: { width: 400, height: 280 }`.
+   The width floor is respected, height is not. Net effect is the panel's
+   internal content (316px tall after the 2026-05-14 flatten) scrolls
+   inside a 202px content area. Likely the bento packer divides a fixed
+   row height across N panels and ignores per-panel min when the row is
+   short. Check `tileflow` sizing path for where `display.min.height` is
+   read vs. ignored. Reproduce with the settings panel at ultrawide-short
+   aspect; fix should generalize to any panel hitting its height floor.
+
 Lower-priority / can wait:
 - Auto-demote ("idle for N minutes → dormant") — Stage 4+ concern.
 - Tray scroll/wrap if it gets too tall — wait until it bites.
