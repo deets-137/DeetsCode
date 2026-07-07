@@ -1,144 +1,196 @@
-[data-theme="1"] {
-  --canvas:           #F2BDCD;
-  --canvas-blob-1:    #dea193;
-  --canvas-blob-2:    #ede8d0;
-  --panel-outer:      rgba(235, 176, 194, 0.55);
-  --panel-input:      rgba(222, 161, 147, 0.72);
-  --panel-response:   rgba(222, 161, 147, 0.72);
-  --textbox-bg:       #ede8d0;
-  --textbox-text:     #3a0a0a;
-  --response-box-bg:  #ede8d0;
-  --response-text:    #780606;
-  --divider:          #780606;
-  --glass-border:     rgba(255, 245, 230, 0.45);
+/* ── Tier 2: themes — color roles only ────────────────────────────────────
+   Each [data-theme="name"] block maps every color role to a palette paint
+   (palette.css) or a derived mix of one. The UI references roles, never
+   paints and never raw hexes. Non-color styling (type, shape, material,
+   motion) is tier 3 — skin.css.
+
+   Roles:
+     --canvas          app background / wallpaper
+     --accent-1/-2     decorative canvas accents (the drifting blobs)
+     --surface         content surface (response box, editors, nested tiles)
+     --surface-input   input-field surface (usually = --surface)
+     --text            primary text
+     --text-input      text on input surfaces
+     --divider         strong rule / accent line
+     --border          hairline panel edge (low alpha, reads on any canvas)
+     --panel-outer     translucent outer-panel wash (glass skin fill)
+     --panel-input     translucent nested-panel wash
+     --glass-highlight inset top sheen on glass surfaces
+     --glass-shadow    panel drop shadow (theme-colored)
+     --focus-glow      focus ring
+
+   Derived (defined once in the [data-theme] block below; a theme may
+   override any of them): --surface-hover, --subtext, --scrollbar(-hover),
+   --accent, --placeholder-text.
+
+   Legacy aliases (old chat-era names → roles) also live in the shared
+   block. Panels written against the old names keep working; new CSS
+   should use the role names.
+
+   /api/themes parses this file for the picker: every [data-theme="x"]
+   block becomes an entry; swatches read --canvas / --accent-1 / --accent-2
+   / --text (values may be var()/color-mix() references — they resolve
+   live in the page). */
+
+[data-theme] {
+  /* derived roles — every theme gets these for free */
+  --surface-hover:    color-mix(in srgb, var(--surface), var(--text) 8%);
+  --subtext:          color-mix(in srgb, var(--text) 62%, var(--canvas));
+  --scrollbar:        color-mix(in srgb, var(--text) 35%, transparent);
+  --scrollbar-hover:  color-mix(in srgb, var(--text) 55%, transparent);
+  --accent:           var(--divider);
+  --placeholder-text: var(--subtext);
+
+  /* legacy aliases — pre-port names still used by panels/apps */
+  --canvas-blob-1:    var(--accent-1);
+  --canvas-blob-2:    var(--accent-2);
+  --textbox-bg:       var(--surface-input);
+  --textbox-text:     var(--text-input);
+  --response-box-bg:  var(--surface);
+  --response-text:    var(--text);
+  --glass-border:     var(--border);
+  --panel-response:   var(--panel-input);
+}
+
+[data-theme="blush"] {
+  color-scheme: light;
+  --canvas:           var(--paint-rose-quartz);
+  --accent-1:         var(--paint-terracotta);
+  --accent-2:         var(--paint-cream);
+  --surface:          var(--paint-cream);
+  --surface-input:    var(--paint-cream);
+  --text:             var(--paint-oxblood);
+  --text-input:       var(--paint-cocoa);
+  --divider:          var(--paint-oxblood);
+  --border:           color-mix(in srgb, var(--paint-linen) 45%, transparent);
+  --panel-outer:      color-mix(in srgb, var(--paint-rose-dust) 55%, transparent);
+  --panel-input:      color-mix(in srgb, var(--paint-terracotta) 72%, transparent);
   --glass-highlight:  rgba(255, 255, 255, 0.35);
   --glass-shadow:     0 10px 30px rgba(120, 6, 6, 0.10), 0 2px 6px rgba(120, 6, 6, 0.06);
   --focus-glow:       0 0 0 1px rgba(255, 245, 230, 0.65), 0 0 24px 2px rgba(222, 161, 147, 0.45);
 }
 
-[data-theme="2"] {
-  --canvas:           #353839;
-  --canvas-blob-1:    #4a5f6b;
-  --canvas-blob-2:    #6b4c5c;
-  --panel-outer:      rgba(44, 47, 48, 0.55);
-  --panel-input:      rgba(137, 137, 137, 0.35);
-  --panel-response:   rgba(137, 137, 137, 0.35);
-  --textbox-bg:       #E0E0E0;
-  --textbox-text:     #1a1a1a;
-  --response-box-bg:  #353e43;
-  --response-text:    #FAEBD7;
-  --divider:          #FAEBD7;
-  --glass-border:     rgba(255, 255, 255, 0.08);
+[data-theme="graphite"] {
+  color-scheme: dark;
+  --canvas:           var(--paint-onyx);
+  --accent-1:         var(--paint-steel);
+  --accent-2:         var(--paint-mauve-shadow);
+  --surface:          var(--paint-gunmetal);
+  --surface-input:    var(--paint-silver);
+  --text:             var(--paint-antique-white);
+  --text-input:       var(--paint-ink);
+  --divider:          var(--paint-antique-white);
+  --border:           rgba(255, 255, 255, 0.08);
+  --panel-outer:      color-mix(in srgb, var(--paint-charcoal) 55%, transparent);
+  --panel-input:      color-mix(in srgb, var(--paint-ash) 35%, transparent);
   --glass-highlight:  rgba(255, 255, 255, 0.12);
   --glass-shadow:     0 10px 40px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.25);
   --focus-glow:       0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 28px 2px rgba(107, 76, 92, 0.6);
 }
 
-[data-theme="3"] {
-  --canvas:           #fdf6e3;
-  --canvas-blob-1:    #2aa198;
-  --canvas-blob-2:    #b58900;
-  --panel-outer:      rgba(238, 232, 213, 0.55);
-  --panel-input:      rgba(238, 232, 213, 0.72);
-  --panel-response:   rgba(238, 232, 213, 0.72);
-  --textbox-bg:       #eee8d5;
-  --textbox-text:     #2a2a2a;
-  --response-box-bg:  #eee8d5;
-  --response-text:    #3d5560;
-  --divider:          #3d5560;
-  --glass-border:     rgba(253, 246, 227, 0.45);
+[data-theme="solar"] {
+  color-scheme: light;
+  --canvas:           var(--paint-sol-base3);
+  --accent-1:         var(--paint-sol-cyan);
+  --accent-2:         var(--paint-sol-yellow);
+  --surface:          var(--paint-sol-base2);
+  --surface-input:    var(--paint-sol-base2);
+  --text:             var(--paint-sol-slate);
+  --text-input:       var(--paint-sol-ink);
+  --divider:          var(--paint-sol-slate);
+  --border:           color-mix(in srgb, var(--paint-sol-base3) 45%, transparent);
+  --panel-outer:      color-mix(in srgb, var(--paint-sol-base2) 55%, transparent);
+  --panel-input:      color-mix(in srgb, var(--paint-sol-base2) 72%, transparent);
   --glass-highlight:  rgba(255, 255, 255, 0.35);
   --glass-shadow:     0 10px 30px rgba(0, 43, 54, 0.10), 0 2px 6px rgba(0, 43, 54, 0.06);
   --focus-glow:       0 0 0 1px rgba(253, 246, 227, 0.65), 0 0 24px 2px rgba(42, 161, 152, 0.45);
 }
 
-[data-theme="4"] {
-  --canvas:           #0a0a0a;
-  --canvas-blob-1:    #1a1a00;
-  --canvas-blob-2:    #2a2a00;
+[data-theme="hornet"] {
+  color-scheme: dark;
+  --canvas:           var(--paint-pitch);
+  --accent-1:         var(--paint-hornet-dusk);
+  --accent-2:         var(--paint-hornet-dusk-2);
+  --surface:          var(--paint-hornet-dusk);
+  --surface-input:    var(--paint-hornet-dusk);
+  --text:             var(--paint-hivis);
+  --text-input:       var(--paint-hivis);
+  --divider:          var(--paint-hivis);
+  --border:           color-mix(in srgb, var(--paint-hivis) 15%, transparent);
   --panel-outer:      rgba(20, 20, 0, 0.55);
   --panel-input:      rgba(30, 30, 0, 0.72);
-  --panel-response:   rgba(30, 30, 0, 0.72);
-  --textbox-bg:       #1a1a00;
-  --textbox-text:     #f5d500;
-  --response-box-bg:  #1a1a00;
-  --response-text:    #f5d500;
-  --divider:          #f5d500;
-  --glass-border:     rgba(245, 213, 0, 0.15);
-  --glass-highlight:  rgba(245, 213, 0, 0.15);
+  --glass-highlight:  color-mix(in srgb, var(--paint-hivis) 15%, transparent);
   --glass-shadow:     0 10px 40px rgba(0, 0, 0, 0.60), 0 2px 6px rgba(0, 0, 0, 0.40);
   --focus-glow:       0 0 0 1px rgba(245, 213, 0, 0.35), 0 0 28px 2px rgba(245, 213, 0, 0.50);
 }
 
-[data-theme="5"] {
-  --canvas:           #0f172a;
-  --canvas-blob-1:    #1e293b;
-  --canvas-blob-2:    #334155;
-  --panel-outer:      rgba(30, 41, 59, 0.55);
-  --panel-input:      rgba(51, 65, 85, 0.72);
-  --panel-response:   rgba(51, 65, 85, 0.72);
-  --textbox-bg:       #1e293b;
-  --textbox-text:     #bae6fd;
-  --response-box-bg:  #1e293b;
-  --response-text:    #38bdf8;
-  --divider:          #38bdf8;
-  --glass-border:     rgba(56, 189, 248, 0.15);
-  --glass-highlight:  rgba(56, 189, 248, 0.15);
+[data-theme="midnight"] {
+  color-scheme: dark;
+  --canvas:           var(--paint-midnight);
+  --accent-1:         var(--paint-slate-8);
+  --accent-2:         var(--paint-slate-7);
+  --surface:          var(--paint-slate-8);
+  --surface-input:    var(--paint-slate-8);
+  --text:             var(--paint-sky);
+  --text-input:       var(--paint-ice);
+  --divider:          var(--paint-sky);
+  --border:           color-mix(in srgb, var(--paint-sky) 15%, transparent);
+  --panel-outer:      color-mix(in srgb, var(--paint-slate-8) 55%, transparent);
+  --panel-input:      color-mix(in srgb, var(--paint-slate-7) 72%, transparent);
+  --glass-highlight:  color-mix(in srgb, var(--paint-sky) 15%, transparent);
   --glass-shadow:     0 10px 40px rgba(0, 0, 0, 0.60), 0 2px 6px rgba(0, 0, 0, 0.40);
   --focus-glow:       0 0 0 1px rgba(56, 189, 248, 0.35), 0 0 28px 2px rgba(56, 189, 248, 0.50);
 }
 
-[data-theme="6"] {
-  --canvas:           #d4c5a9;
-  --canvas-blob-1:    #4a7c59;
-  --canvas-blob-2:    #6b4c3a;
+[data-theme="grove"] {
+  color-scheme: light;
+  --canvas:           var(--paint-sand);
+  --accent-1:         var(--paint-fern);
+  --accent-2:         var(--paint-bark);
+  --surface:          var(--paint-wheat);
+  --surface-input:    var(--paint-wheat);
+  --text:             var(--paint-moss);
+  --text-input:       var(--paint-soil);
+  --divider:          var(--paint-fern);
+  --border:           color-mix(in srgb, var(--paint-linen) 35%, transparent);
   --panel-outer:      rgba(180, 165, 130, 0.55);
   --panel-input:      rgba(180, 165, 130, 0.72);
-  --panel-response:   rgba(180, 165, 130, 0.72);
-  --textbox-bg:       #e8dbbf;
-  --textbox-text:     #2a2218;
-  --response-box-bg:  #e8dbbf;
-  --response-text:    #3a5a40;
-  --divider:          #4a7c59;
-  --glass-border:     rgba(255, 245, 230, 0.35);
   --glass-highlight:  rgba(255, 255, 255, 0.30);
   --glass-shadow:     0 10px 30px rgba(58, 90, 64, 0.10), 0 2px 6px rgba(58, 90, 64, 0.06);
   --focus-glow:       0 0 0 1px rgba(255, 245, 230, 0.60), 0 0 24px 2px rgba(74, 124, 89, 0.45);
 }
 
-[data-theme="7"] {
-  /* Abyss: deep black with soft red glows, warm white text */
-  --canvas:           #050505;
-  --canvas-blob-1:    #3a0000;
-  --canvas-blob-2:    #1a0000;
+[data-theme="abyss"] {
+  color-scheme: dark;
+  --canvas:           var(--paint-void);
+  --accent-1:         var(--paint-ember-deep);
+  --accent-2:         var(--paint-ember-dark);
+  --surface:          #080808;
+  --surface-input:    var(--paint-near-black);
+  --text:             var(--paint-warm-white);
+  --text-input:       var(--paint-warm-white);
+  --divider:          var(--paint-dusty-rose);
+  --border:           rgba(180, 60, 60, 0.10);
   --panel-outer:      rgba(15, 8, 8, 0.55);
   --panel-input:      rgba(18, 9, 9, 0.72);
-  --panel-response:   rgba(18, 9, 9, 0.72);
-  --textbox-bg:       #0a0a0a;
-  --textbox-text:     #f5f0eb;
-  --response-box-bg:  #080808;
-  --response-text:    #f5f0eb;
-  --divider:          #b05050;
-  --glass-border:     rgba(180, 60, 60, 0.10);
   --glass-highlight:  rgba(220, 80, 80, 0.06);
   --glass-shadow:     0 10px 40px rgba(0, 0, 0, 0.80), 0 2px 6px rgba(0, 0, 0, 0.60);
   --focus-glow:       0 0 0 1px rgba(180, 60, 60, 0.20), 0 0 24px 2px rgba(180, 60, 60, 0.15);
 }
 
-[data-theme="8"] {
-  /* Sepia Dreams v2: rich parchment with warm amber accents and visible depth */
-  --canvas:           #f5efe6;
-  --canvas-blob-1:    #c9a96e;
-  --canvas-blob-2:    #a07830;
+[data-theme="sepia"] {
+  color-scheme: light;
+  --canvas:           var(--paint-parchment);
+  --accent-1:         var(--paint-camel);
+  --accent-2:         var(--paint-bronze);
+  --surface:          var(--paint-vellum);
+  --surface-input:    var(--paint-vellum);
+  --text:             var(--paint-brass);
+  --text-input:       var(--paint-umber);
+  --divider:          var(--paint-bronze);
+  --border:           rgba(210, 190, 155, 0.45);
   --panel-outer:      rgba(210, 190, 155, 0.60);
   --panel-input:      rgba(218, 200, 165, 0.75);
-  --panel-response:   rgba(218, 200, 165, 0.75);
-  --textbox-bg:       #ede4d3;
-  --textbox-text:     #3e2c1c;
-  --response-box-bg:  #ede4d3;
-  --response-text:    #8b6914;
-  --divider:          #a07830;
-  --glass-border:     rgba(210, 190, 155, 0.45);
   --glass-highlight:  rgba(255, 240, 200, 0.35);
   --glass-shadow:     0 10px 30px rgba(160, 120, 48, 0.12), 0 2px 6px rgba(160, 120, 48, 0.08);
   --focus-glow:       0 0 0 1px rgba(255, 240, 200, 0.60), 0 0 24px 2px rgba(160, 120, 48, 0.45);

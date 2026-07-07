@@ -1,0 +1,74 @@
+/* ── Tier 1: palette — the box of crayons ─────────────────────────────────
+   Raw named paints only. Nothing in the UI references these directly;
+   themes.css (theme.css here) maps color *roles* onto them. A color used by
+   two roles is defined once. One-off translucent fills (rgba panel washes,
+   composite shadows) stay in the theme blocks — only colors worth naming
+   live here. Ported from the DeetsMusic three-tier token system
+   (palette → theme → skin); see docs/panels.md § Styling. */
+
+:root {
+  /* blush (was theme 1) — rose canvas, cream surfaces, oxblood ink */
+  --paint-rose-quartz:   #F2BDCD;
+  --paint-rose-dust:     #EBB0C2;
+  --paint-terracotta:    #dea193;
+  --paint-cream:         #ede8d0;
+  --paint-cocoa:         #3a0a0a;
+  --paint-oxblood:       #780606;
+  --paint-linen:         #FFF5E6;
+
+  /* graphite (was theme 2) — charcoal canvas, antique-white type */
+  --paint-onyx:          #353839;
+  --paint-charcoal:      #2C2F30;
+  --paint-steel:         #4a5f6b;
+  --paint-mauve-shadow:  #6b4c5c;
+  --paint-ash:           #898989;
+  --paint-silver:        #E0E0E0;
+  --paint-ink:           #1a1a1a;
+  --paint-gunmetal:      #353e43;
+  --paint-antique-white: #FAEBD7;
+
+  /* solar (was theme 3) — solarized-light parchment, teal + gold accents */
+  --paint-sol-base3:     #fdf6e3;
+  --paint-sol-base2:     #eee8d5;
+  --paint-sol-cyan:      #2aa198;
+  --paint-sol-yellow:    #b58900;
+  --paint-sol-ink:       #2a2a2a;
+  --paint-sol-slate:     #3d5560;
+
+  /* hornet (was theme 4) — near-black + hi-vis yellow */
+  --paint-pitch:         #0a0a0a;
+  --paint-hornet-dusk:   #1a1a00;
+  --paint-hornet-dusk-2: #2a2a00;
+  --paint-hivis:         #f5d500;
+
+  /* midnight (was theme 5) — deep slate blues, sky accents */
+  --paint-midnight:      #0f172a;
+  --paint-slate-8:       #1e293b;
+  --paint-slate-7:       #334155;
+  --paint-ice:           #bae6fd;
+  --paint-sky:           #38bdf8;
+
+  /* grove (was theme 6) — sand canvas, fern + bark accents */
+  --paint-sand:          #d4c5a9;
+  --paint-fern:          #4a7c59;
+  --paint-bark:          #6b4c3a;
+  --paint-wheat:         #e8dbbf;
+  --paint-soil:          #2a2218;
+  --paint-moss:          #3a5a40;
+
+  /* abyss (was theme 7) — void black, ember reds, warm-white type */
+  --paint-void:          #050505;
+  --paint-ember-deep:    #3a0000;
+  --paint-ember-dark:    #1a0000;
+  --paint-near-black:    #0a0a0a;
+  --paint-warm-white:    #f5f0eb;
+  --paint-dusty-rose:    #b05050;
+
+  /* sepia (was theme 8) — parchment, camel + brass ambers */
+  --paint-parchment:     #f5efe6;
+  --paint-camel:         #c9a96e;
+  --paint-bronze:        #a07830;
+  --paint-vellum:        #ede4d3;
+  --paint-umber:         #3e2c1c;
+  --paint-brass:         #8b6914;
+}

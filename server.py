@@ -1322,7 +1322,11 @@ async def get_system_log_summary(window_ms: Optional[int] = None):
 
 @app.get("/api/themes")
 async def get_themes():
-    """Parse theme.css and return all discovered themes with their swatch colors."""
+    """Parse theme.css and return all discovered themes with their swatch colors.
+
+    Swatch values may be var()/color-mix() references into palette.css —
+    they're used as live CSS values in the picker, so they resolve in-page.
+    """
     import re as _re
     theme_css = paths.THEME_CSS
     themes = []
@@ -1330,8 +1334,9 @@ async def get_themes():
         if not theme_css.is_file():
             return JSONResponse({"themes": themes})
         text = theme_css.read_text(encoding="utf-8", errors="replace")
-        # Find each [data-theme="X"] block
-        blocks = _re.findall(r'\[data-theme=["\'](\d+)["\']\]\s*\{([^}]+)\}', text)
+        # Find each named [data-theme="x"] block (the bare [data-theme]
+        # shared/derived block deliberately doesn't match).
+        blocks = _re.findall(r'\[data-theme=["\']([\w-]+)["\']\]\s*\{([^}]+)\}', text)
         for theme_id, body in blocks:
             colors = {}
             for line in body.splitlines():
@@ -1340,15 +1345,37 @@ async def get_themes():
                     colors[m.group(1)] = m.group(2).strip()
             swatches = [
                 colors.get("canvas", "#888"),
-                colors.get("canvas-blob-1", "#888"),
-                colors.get("canvas-blob-2", "#888"),
-                colors.get("response-text", "#888"),
+                colors.get("accent-1", colors.get("canvas-blob-1", "#888")),
+                colors.get("accent-2", colors.get("canvas-blob-2", "#888")),
+                colors.get("text", colors.get("response-text", "#888")),
             ]
-            # Derive a name from the dominant color feel
             themes.append({"id": theme_id, "swatches": swatches})
         return JSONResponse({"themes": themes})
     except Exception as e:
         return JSONResponse({"themes": [], "error": str(e)})
+
+
+@app.get("/api/skins")
+async def get_skins():
+    """Parse skin.css and return the available skins (named [data-skin="x"]
+    blocks; the bare [data-skin] base block doesn't count)."""
+    import re as _re
+    skins = []
+    try:
+        if not paths.SKIN_CSS.is_file():
+            return JSONResponse({"skins": skins})
+        text = paths.SKIN_CSS.read_text(encoding="utf-8", errors="replace")
+        # Strip /* … */ comments first — prose like `[data-skin="x"]` in the
+        # file header must not become a picker entry.
+        text = _re.sub(r'/\*.*?\*/', '', text, flags=_re.S)
+        seen = set()
+        for skin_id in _re.findall(r'\[data-skin=["\']([\w-]+)["\']\]\s*\{', text):
+            if skin_id not in seen:
+                seen.add(skin_id)
+                skins.append({"id": skin_id})
+        return JSONResponse({"skins": skins})
+    except Exception as e:
+        return JSONResponse({"skins": [], "error": str(e)})
 
 
 @app.get("/api/events/sessions")
@@ -1904,7 +1931,13 @@ async def websocket_endpoint(ws: WebSocket):
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        project_dir = Path(sys.argv[1]).expanduser().resolve()
+    args = sys.argv[1:]
+    port = PORT
+    if "--port" in args:
+        i = args.index("--port")
+        port = int(args[i + 1])
+        del args[i:i + 2]
+    if args:
+        project_dir = Path(args[0]).expanduser().resolve()
         print(f"Project dir: {project_dir}")
-    uvicorn.run(app, host=HOST, port=PORT, reload=False)
+    uvicorn.run(app, host=HOST, port=port, reload=False)

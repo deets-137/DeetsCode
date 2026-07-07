@@ -1,4 +1,4 @@
-# Harness — project notes for Claude
+# Harness — project notes for Codex
 
 ## Paths
 
@@ -45,7 +45,7 @@ Boot-race detail worth knowing: app.js owns the WebSocket singleton and still ro
 
 ### Layout & mode visibility
 
-`layout/panel_layout.json` is **the** UI layout — Claude can edit it directly to rearrange the dev UI without touching panel code. `mode_overrides` hides regions/instances per harness mode (e.g. `blog` mode hides the file tree).
+`layout/panel_layout.json` is **the** UI layout — Codex can edit it directly to rearrange the dev UI without touching panel code. `mode_overrides` hides regions/instances per harness mode (e.g. `blog` mode hides the file tree).
 
 Per-instance show/hide that depends on JS state lives in **two parallel tables** for now: `panel-shell.js`'s `INSTANCE_MODE_RULES` applies at hoist time (synchronous, reads `localStorage.harness-mode`, prevents flash on first paint), and `app.js`'s `_PANEL_HIDE_RULES` re-applies on mode change. Keep them in sync. Consolidating into one source of truth is on the cleanup list.
 

@@ -583,15 +583,33 @@ Anything under `panels/<name>/static/` is served at
 
 Host CSS wins. The easiest way to look native is to use the harness's
 CSS custom properties on your inner elements rather than hard-coded
-colors. Common ones (in `static/style.css`):
+colors, fonts, or sizes.
 
-- `--canvas`, `--canvas-blob-1`, `--canvas-blob-2` — page backdrop
-- `--panel-outer`, `--panel-input`, `--panel-response` — surfaces
-- `--glass-border`, `--glass-shadow`, `--glass-highlight` — glass FX
-- `--textbox-bg`, `--textbox-text`, `--response-text` — text fills
-- `--divider`, `--focus-glow` — accents
+Styling is three token tiers (ported from the DeetsMusic UI system),
+all set as attributes on `<html>` (`data-theme` + `data-skin`, any
+theme × any skin):
 
-Direct CSS works fine — but theme toggles only follow custom
+- **Palette** (`static/palette.css`) — raw named paints. Panels never
+  reference these.
+- **Theme** (`static/theme.css`) — color roles per `[data-theme="name"]`.
+  Use these for anything colored: `--canvas`, `--surface`,
+  `--surface-input`, `--surface-hover`, `--text`, `--text-input`,
+  `--subtext`, `--border`, `--divider`, `--accent`, `--focus-glow`,
+  `--scrollbar`. (Legacy names — `--response-text`, `--textbox-bg`,
+  `--glass-border`, … — are aliased to these and still work.)
+- **Skin** (`static/skin.css`) — everything non-color per
+  `[data-skin="name"]`: `--font-body`, `--font-mono`, the `--fs-*` type
+  scale, the `--radius-*` ladder, `--panel-fill` / `--panel-inset-fill`
+  / `--panel-backdrop` / `--shadow-panel` materials. The `[data-skin]`
+  base block is the authoritative token list (the "glass" skin); a skin
+  never names a color — it points a slot at a theme role or
+  `color-mix()`es one.
+
+`/api/themes` and `/api/skins` parse those files for the settings-panel
+pickers, so adding a `[data-theme="x"]` or `[data-skin="x"]` block is
+all it takes to ship a new one.
+
+Direct CSS works fine — but theme/skin toggles only follow custom
 properties.
 
 ---

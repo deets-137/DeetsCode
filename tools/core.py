@@ -346,9 +346,26 @@ def _manual_sections(text: str) -> list[tuple[str, str]]:
 
 
 import re as _re
+import keyword as _keyword
 
 _PATHS_FILE = Path(__file__).parent.parent / "paths.py"
 _CONST_LINE_RE = _re.compile(r"^([A-Z][A-Z0-9_]*)\s*[:=]")
+
+# Names register_path must never replace — everything else in paths.py hangs
+# off HARNESS_ROOT, and clobbering it would make the module unimportable.
+_RESERVED_PATH_NAMES = {"HARNESS_ROOT"}
+
+
+def _write_paths_file(new_text: str) -> Optional[str]:
+    """Compile-check the candidate paths.py before writing. Every module in
+    the harness imports paths at boot, so a syntax error here bricks the
+    server. Returns an error string, or None on successful write."""
+    try:
+        compile(new_text, str(_PATHS_FILE), "exec")
+    except SyntaxError as e:
+        return f"Error: change would make paths.py unparseable (line {e.lineno}: {e.msg}) — not written"
+    _PATHS_FILE.write_text(new_text, encoding="utf-8")
+    return None
 
 
 def _register_path(args: dict) -> str:
@@ -359,6 +376,10 @@ def _register_path(args: dict) -> str:
 
     if not name or not name.isidentifier() or not name.isupper():
         return "Error: 'name' must be a SCREAMING_SNAKE identifier"
+    if _keyword.iskeyword(name) or _keyword.issoftkeyword(name):
+        return f"Error: '{name}' is a Python keyword and can't be a constant name"
+    if name in _RESERVED_PATH_NAMES:
+        return f"Error: '{name}' is a reserved name in paths.py — pick a different constant"
     if not value:
         return "Error: 'value' is required"
     if kind not in ("dir", "file", "str"):
@@ -389,13 +410,17 @@ def _register_path(args: dict) -> str:
             if start > 0 and lines[start - 1].startswith("#"):
                 start -= 1
             new_lines = lines[:start] + block.split("\n") + lines[i + 1:]
-            _PATHS_FILE.write_text("\n".join(new_lines) + ("\n" if original.endswith("\n") else ""), encoding="utf-8")
+            err = _write_paths_file("\n".join(new_lines) + ("\n" if original.endswith("\n") else ""))
+            if err:
+                return err
             return f"Updated `{name}` in paths.py → {new_line}"
 
     # Append to end.
     suffix = "" if original.endswith("\n") else "\n"
     new_text = original + suffix + block + "\n"
-    _PATHS_FILE.write_text(new_text, encoding="utf-8")
+    err = _write_paths_file(new_text)
+    if err:
+        return err
     return f"Added `{name}` to paths.py → {new_line}"
 
 

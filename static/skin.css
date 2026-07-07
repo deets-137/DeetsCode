@@ -1,0 +1,74 @@
+/* ── Tier 3: skins — everything non-color ─────────────────────────────────
+   Type, size, shape, material, canvas decoration. The [data-skin] base
+   block defines EVERY skin token once — these values ARE the "glass" skin
+   (the harness's original frosted look), so [data-skin="glass"] is empty.
+   Named skins override only what they change; equal specificity + source
+   order means their overrides win.
+
+   Doctrine (ported from DeetsMusic): a skin never names a color. A fill
+   slot points at a theme role (var(--surface)) or derives one
+   (color-mix of a role) — the theme always owns the actual color.
+
+   /api/skins parses this file for the picker: every [data-skin="x"] block
+   becomes an entry. Add a skin = add a block here. */
+
+[data-skin] {
+  /* type */
+  --font-body: 'Aptos', 'Segoe UI', sans-serif;
+  --font-mono: 'Consolas', 'Menlo', monospace;
+  --fs-chat:  14px;   /* chat response body */
+  --fs-text:  13px;   /* inputs, textareas, larger controls */
+  --fs-body:  12px;   /* panel content default */
+  --fs-ui:    11px;   /* chrome, headers, buttons */
+  --fs-small: 10px;   /* labels, fine print */
+  --fs-tiny:  9px;    /* nested headers, token counts */
+
+  /* shape */
+  --radius-panel:   16px;  /* outer bento tiles */
+  --radius-card:    12px;  /* nested cards (chat input, response panel, tray) */
+  --radius-nested:  10px;  /* nested-panel sub-tiles */
+  --radius-inner:   8px;   /* response box, editors, iframes */
+  --radius-control: 6px;   /* buttons, inputs */
+
+  /* material — fills point at theme roles, never hexes */
+  --panel-fill:           var(--panel-outer);
+  --panel-inset-fill:     var(--panel-input);
+  --panel-backdrop:       blur(24px) saturate(140%);  /* outer glass frost */
+  --panel-backdrop-inner: blur(14px) saturate(130%);  /* nested glass frost */
+  --shadow-panel:         var(--glass-shadow);
+  --highlight-inset:      inset 0 1px 0 var(--glass-highlight);
+
+  /* canvas decoration — the drifting color blobs behind the glass */
+  --blob-opacity: 0.8;
+  --blob-blur:    50px;
+
+  /* motion */
+  --dur-theme: 0.4s;
+  --dur-fast:  0.15s;
+  --ease-ui:   cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* scrollbar (color is the theme's --scrollbar role) */
+  --scrollbar-w:      8px;
+  --scrollbar-radius: 4px;
+}
+
+/* glass — the reference skin. The base block IS glass; nothing to override. */
+[data-skin="glass"] {}
+
+/* paper — flat and opaque: no frost, no blobs, tighter corners, panels as
+   matte cards slightly lifted off the canvas. All fills derived from theme
+   roles, so it recolors per theme like everything else. */
+[data-skin="paper"] {
+  --panel-fill:           color-mix(in srgb, var(--surface) 65%, var(--canvas));
+  --panel-inset-fill:     color-mix(in srgb, var(--surface) 40%, var(--canvas));
+  --panel-backdrop:       none;
+  --panel-backdrop-inner: none;
+  --shadow-panel:         0 1px 3px rgba(0, 0, 0, 0.14), 0 5px 16px rgba(0, 0, 0, 0.08);
+  --highlight-inset:      0 0 rgba(0, 0, 0, 0);
+  --radius-panel:   6px;
+  --radius-card:    5px;
+  --radius-nested:  5px;
+  --radius-inner:   4px;
+  --radius-control: 3px;
+  --blob-opacity: 0;
+}

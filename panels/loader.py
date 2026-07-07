@@ -117,6 +117,10 @@ class LayoutRegion(BaseModel):
 
 class GridConfig(BaseModel):
     cols: int = Field(default=12, ge=1)
+    # Rows are dynamic (the bento grows downward), so this is a sanity bound
+    # for pin validation, not a track count — it catches typo'd pins
+    # (row=999) before they persist. 24 rows ≈ 2880px of track.
+    max_rows: int = Field(default=24, ge=1)
     row_height_px: int = Field(default=120, ge=1)
     gap_px: int = Field(default=12, ge=0)
     # Below this viewport width, the engine drops to half the column count
@@ -366,7 +370,8 @@ def validate_layout_pins(layout: PanelLayout) -> list[str]:
     """Return a list of human-readable validation errors for the layout's
     current pin assignments. Empty list = layout is valid.
 
-    Checks: out-of-bounds (col + cols - 1 > grid.cols), and collisions
+    Checks: out-of-bounds (col span past grid.cols, row span past
+    grid.max_rows), and collisions
     between any two pinned instances in the same region. Min-size and
     size-class span checks belong here too — those land alongside the
     drag-to-pin UI when manifests are wired through (Stage 2/3)."""
@@ -388,6 +393,12 @@ def validate_layout_pins(layout: PanelLayout) -> list[str]:
             errors.append(
                 f"instance '{inst.instance}': pin out of bounds "
                 f"(col {inst.pin.col} + cols {inst.pin.cols} - 1 = {col_end} > grid.cols {grid.cols})"
+            )
+        row_end = inst.pin.row + inst.pin.rows - 1
+        if row_end > grid.max_rows:
+            errors.append(
+                f"instance '{inst.instance}': pin out of bounds "
+                f"(row {inst.pin.row} + rows {inst.pin.rows} - 1 = {row_end} > grid.max_rows {grid.max_rows})"
             )
         by_region.setdefault(inst.region, []).append(inst)
 
@@ -426,6 +437,12 @@ def validate_pin_for_instance(
         raise PinValidationError(
             f"pin out of bounds: col {new_pin.col} + cols {new_pin.cols} - 1 = {col_end} "
             f"exceeds grid.cols ({grid.cols})"
+        )
+    row_end = new_pin.row + new_pin.rows - 1
+    if row_end > grid.max_rows:
+        raise PinValidationError(
+            f"pin out of bounds: row {new_pin.row} + rows {new_pin.rows} - 1 = {row_end} "
+            f"exceeds grid.max_rows ({grid.max_rows})"
         )
 
     for other in layout.instances:

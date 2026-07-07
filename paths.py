@@ -48,3 +48,7 @@ ACTIVE_MODEL_FILE: Path = HARNESS_ROOT / "active_model.txt"
 LAYOUT_PRESETS_DIR: Path = HARNESS_ROOT / "layout/presets"
 # App bundles (apps-over-panels primitive) — one folder per app, see docs/apps.md
 APPS_DIR: Path = HARNESS_ROOT / "apps"
+# Tier-3 skin tokens (type/shape/material); parsed by /api/skins for the picker.
+SKIN_CSS: Path = HARNESS_ROOT / "static/skin.css"
+# Tier-1 raw named paints; loaded before theme.css.
+PALETTE_CSS: Path = HARNESS_ROOT / "static/palette.css"

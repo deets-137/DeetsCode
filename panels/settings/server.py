@@ -65,6 +65,11 @@ def view() -> str:
     <div class="theme-picker" id="theme-picker"></div>
   </div>
 
+  <div class="nested-panel">
+    <div class="nested-header">skin</div>
+    <div class="theme-picker" id="skin-picker"></div>
+  </div>
+
 </div>
 <script>
 (function () {
@@ -74,6 +79,7 @@ def view() -> str:
   if (window.fetchModels) window.fetchModels();
   if (window.loadPromptModes) window.loadPromptModes();
   if (window.fetchThemes) window.fetchThemes();
+  if (window.fetchSkins) window.fetchSkins();
   if (window.bindSettingsControls) window.bindSettingsControls();
   if (window.bindModelSelect) window.bindModelSelect();
 })();

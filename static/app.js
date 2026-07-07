@@ -270,15 +270,39 @@ function requestRead(path) {
   showThinking();
 }
 
-// ── Theme ─────────────────────────────────────────
+// ── Theme & skin ──────────────────────────────────
+// Two independent tiers, both attributes on <html> (ported from the
+// DeetsMusic token system): data-theme picks color roles (theme.css),
+// data-skin picks type/shape/material (skin.css). Any theme × any skin.
+
+// Pre-port themes were numbered; map saved numeric ids to their new names.
+const LEGACY_THEME_NAMES = {
+  1: "blush", 2: "graphite", 3: "solar", 4: "hornet",
+  5: "midnight", 6: "grove", 7: "abyss", 8: "sepia",
+};
+
 function setTheme(id) {
   document.documentElement.dataset.theme = id;
   localStorage.setItem("harness-theme", id);
 }
 
 function loadTheme() {
-  const saved = localStorage.getItem("harness-theme");
+  let saved = localStorage.getItem("harness-theme");
+  if (saved && LEGACY_THEME_NAMES[saved]) {
+    saved = LEGACY_THEME_NAMES[saved];
+    localStorage.setItem("harness-theme", saved);
+  }
   if (saved) document.documentElement.dataset.theme = saved;
+}
+
+function setSkin(id) {
+  document.documentElement.dataset.skin = id;
+  localStorage.setItem("harness-skin", id);
+}
+
+function loadSkin() {
+  const saved = localStorage.getItem("harness-skin");
+  if (saved) document.documentElement.dataset.skin = saved;
 }
 
 async function fetchThemes() {
@@ -303,12 +327,34 @@ async function fetchThemes() {
       opt.appendChild(row);
       const name = document.createElement("span");
       name.className = "theme-name";
-      name.textContent = `theme ${theme.id}`;
+      name.textContent = theme.id;
       opt.appendChild(name);
       picker.appendChild(opt);
     }
   } catch (e) {
     console.error("Failed to fetch themes:", e);
+  }
+}
+
+async function fetchSkins() {
+  try {
+    const res = await fetch("/api/skins");
+    const data = await res.json();
+    const picker = document.getElementById("skin-picker");
+    if (!picker || !data.skins || data.skins.length === 0) return;
+    picker.innerHTML = "";
+    for (const skin of data.skins) {
+      const opt = document.createElement("div");
+      opt.className = "theme-option";
+      opt.onclick = () => setSkin(skin.id);
+      const name = document.createElement("span");
+      name.className = "theme-name";
+      name.textContent = skin.id;
+      opt.appendChild(name);
+      picker.appendChild(opt);
+    }
+  } catch (e) {
+    console.error("Failed to fetch skins:", e);
   }
 }
 
@@ -1113,6 +1159,7 @@ async function refreshPendingPanel() {
 // here.
 document.addEventListener("DOMContentLoaded", () => {
   loadTheme();
+  loadSkin();
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape" && busy) {
       e.preventDefault();
