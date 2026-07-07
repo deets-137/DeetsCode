@@ -2,7 +2,7 @@
 Shared SQLite store for game state across tool packs (chess, dnd, mafia, ...).
 
 Design:
-  - One DB file at project root: storage.db (gitignored).
+  - One DB file under .harness/: storage.db (gitignored).
   - Stable table schema, mutable payloads in `state_json`. Adding a game
     attribute = change the JSON shape, no migration.
   - Additive-only DDL. Safe to re-run on every startup.
@@ -33,6 +33,7 @@ _ID_MAX_RETRIES = 20
 def _db() -> sqlite3.Connection:
     global _conn
     if _conn is None:
+        _DB_PATH.parent.mkdir(parents=True, exist_ok=True)
         _conn = sqlite3.connect(_DB_PATH, isolation_level=None)  # autocommit
         _conn.row_factory = sqlite3.Row
         _conn.execute("PRAGMA foreign_keys = ON")

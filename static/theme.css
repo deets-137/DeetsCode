@@ -1,197 +1,129 @@
-/* ── Tier 2: themes — color roles only ────────────────────────────────────
-   Each [data-theme="name"] block maps every color role to a palette paint
-   (palette.css) or a derived mix of one. The UI references roles, never
-   paints and never raw hexes. Non-color styling (type, shape, material,
-   motion) is tier 3 — skin.css.
-
-   Roles:
-     --canvas          app background / wallpaper
-     --accent-1/-2     decorative canvas accents (the drifting blobs)
-     --surface         content surface (response box, editors, nested tiles)
-     --surface-input   input-field surface (usually = --surface)
-     --text            primary text
-     --text-input      text on input surfaces
-     --divider         strong rule / accent line
-     --border          hairline panel edge (low alpha, reads on any canvas)
-     --panel-outer     translucent outer-panel wash (glass skin fill)
-     --panel-input     translucent nested-panel wash
-     --glass-highlight inset top sheen on glass surfaces
-     --glass-shadow    panel drop shadow (theme-colored)
-     --focus-glow      focus ring
-
-   Derived (defined once in the [data-theme] block below; a theme may
-   override any of them): --surface-hover, --subtext, --scrollbar(-hover),
-   --accent, --placeholder-text.
-
-   Legacy aliases (old chat-era names → roles) also live in the shared
-   block. Panels written against the old names keep working; new CSS
-   should use the role names.
-
-   /api/themes parses this file for the picker: every [data-theme="x"]
-   block becomes an entry; swatches read --canvas / --accent-1 / --accent-2
-   / --text (values may be var()/color-mix() references — they resolve
-   live in the page). */
+/* Tier 2: themes - harness color roles only.
+   These are hand translations of DeetsMusic themes into the harness token set. */
 
 [data-theme] {
-  /* derived roles — every theme gets these for free */
-  --surface-hover:    color-mix(in srgb, var(--surface), var(--text) 8%);
-  --subtext:          color-mix(in srgb, var(--text) 62%, var(--canvas));
-  --scrollbar:        color-mix(in srgb, var(--text) 35%, transparent);
-  --scrollbar-hover:  color-mix(in srgb, var(--text) 55%, transparent);
-  --accent:           var(--divider);
+  --surface-hover: color-mix(in srgb, var(--surface), var(--text) 8%);
+  --subtext: color-mix(in srgb, var(--text) 62%, var(--canvas));
+  --scrollbar: color-mix(in srgb, var(--text) 35%, transparent);
+  --scrollbar-hover: color-mix(in srgb, var(--text) 55%, transparent);
+  --accent: var(--divider);
   --placeholder-text: var(--subtext);
 
-  /* legacy aliases — pre-port names still used by panels/apps */
-  --canvas-blob-1:    var(--accent-1);
-  --canvas-blob-2:    var(--accent-2);
-  --textbox-bg:       var(--surface-input);
-  --textbox-text:     var(--text-input);
-  --response-box-bg:  var(--surface);
-  --response-text:    var(--text);
-  --glass-border:     var(--border);
-  --panel-response:   var(--panel-input);
+  /* Legacy chat-era names still used by a few panels. */
+  --canvas-blob-1: var(--accent-1);
+  --canvas-blob-2: var(--accent-2);
+  --textbox-bg: var(--surface-input);
+  --textbox-text: var(--text-input);
+  --response-box-bg: var(--surface);
+  --response-text: var(--text);
+  --glass-border: var(--border);
+  --panel-response: var(--panel-input);
 }
 
-[data-theme="blush"] {
+[data-theme="fairy"] {
   color-scheme: light;
-  --canvas:           var(--paint-rose-quartz);
-  --accent-1:         var(--paint-terracotta);
-  --accent-2:         var(--paint-cream);
-  --surface:          var(--paint-cream);
-  --surface-input:    var(--paint-cream);
-  --text:             var(--paint-oxblood);
-  --text-input:       var(--paint-cocoa);
-  --divider:          var(--paint-oxblood);
-  --border:           color-mix(in srgb, var(--paint-linen) 45%, transparent);
-  --panel-outer:      color-mix(in srgb, var(--paint-rose-dust) 55%, transparent);
-  --panel-input:      color-mix(in srgb, var(--paint-terracotta) 72%, transparent);
-  --glass-highlight:  rgba(255, 255, 255, 0.35);
-  --glass-shadow:     0 10px 30px rgba(120, 6, 6, 0.10), 0 2px 6px rgba(120, 6, 6, 0.06);
-  --focus-glow:       0 0 0 1px rgba(255, 245, 230, 0.65), 0 0 24px 2px rgba(222, 161, 147, 0.45);
+  --canvas: var(--paint-dewy-lilac);
+  --accent-1: var(--paint-fae-mint);
+  --accent-2: var(--paint-purple-cactus-flower);
+  --surface: var(--paint-lilac-white);
+  --surface-input: var(--paint-lilac-white);
+  --text: var(--paint-violet-slate);
+  --text-input: var(--paint-twilight-plum);
+  --divider: var(--paint-twilight-plum);
+  --border: rgba(67, 48, 107, 0.16);
+  --panel-outer: color-mix(in srgb, var(--paint-lilac-white) 55%, transparent);
+  --panel-input: color-mix(in srgb, var(--paint-lilac-tint) 72%, transparent);
+  --glass-highlight: rgba(255, 255, 255, 0.35);
+  --glass-shadow: 0 8px 32px rgba(67, 48, 107, 0.14), 0 2px 8px rgba(67, 48, 107, 0.08);
+  --focus-glow: 0 0 0 1px rgba(67, 48, 107, 0.20), 0 0 24px 2px rgba(166, 58, 121, 0.35);
 }
 
-[data-theme="graphite"] {
-  color-scheme: dark;
-  --canvas:           var(--paint-onyx);
-  --accent-1:         var(--paint-steel);
-  --accent-2:         var(--paint-mauve-shadow);
-  --surface:          var(--paint-gunmetal);
-  --surface-input:    var(--paint-silver);
-  --text:             var(--paint-antique-white);
-  --text-input:       var(--paint-ink);
-  --divider:          var(--paint-antique-white);
-  --border:           rgba(255, 255, 255, 0.08);
-  --panel-outer:      color-mix(in srgb, var(--paint-charcoal) 55%, transparent);
-  --panel-input:      color-mix(in srgb, var(--paint-ash) 35%, transparent);
-  --glass-highlight:  rgba(255, 255, 255, 0.12);
-  --glass-shadow:     0 10px 40px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.25);
-  --focus-glow:       0 0 0 1px rgba(255, 255, 255, 0.18), 0 0 28px 2px rgba(107, 76, 92, 0.6);
-}
-
-[data-theme="solar"] {
+[data-theme="glade"] {
   color-scheme: light;
-  --canvas:           var(--paint-sol-base3);
-  --accent-1:         var(--paint-sol-cyan);
-  --accent-2:         var(--paint-sol-yellow);
-  --surface:          var(--paint-sol-base2);
-  --surface-input:    var(--paint-sol-base2);
-  --text:             var(--paint-sol-slate);
-  --text-input:       var(--paint-sol-ink);
-  --divider:          var(--paint-sol-slate);
-  --border:           color-mix(in srgb, var(--paint-sol-base3) 45%, transparent);
-  --panel-outer:      color-mix(in srgb, var(--paint-sol-base2) 55%, transparent);
-  --panel-input:      color-mix(in srgb, var(--paint-sol-base2) 72%, transparent);
-  --glass-highlight:  rgba(255, 255, 255, 0.35);
-  --glass-shadow:     0 10px 30px rgba(0, 43, 54, 0.10), 0 2px 6px rgba(0, 43, 54, 0.06);
-  --focus-glow:       0 0 0 1px rgba(253, 246, 227, 0.65), 0 0 24px 2px rgba(42, 161, 152, 0.45);
-}
-
-[data-theme="hornet"] {
-  color-scheme: dark;
-  --canvas:           var(--paint-pitch);
-  --accent-1:         var(--paint-hornet-dusk);
-  --accent-2:         var(--paint-hornet-dusk-2);
-  --surface:          var(--paint-hornet-dusk);
-  --surface-input:    var(--paint-hornet-dusk);
-  --text:             var(--paint-hivis);
-  --text-input:       var(--paint-hivis);
-  --divider:          var(--paint-hivis);
-  --border:           color-mix(in srgb, var(--paint-hivis) 15%, transparent);
-  --panel-outer:      rgba(20, 20, 0, 0.55);
-  --panel-input:      rgba(30, 30, 0, 0.72);
-  --glass-highlight:  color-mix(in srgb, var(--paint-hivis) 15%, transparent);
-  --glass-shadow:     0 10px 40px rgba(0, 0, 0, 0.60), 0 2px 6px rgba(0, 0, 0, 0.40);
-  --focus-glow:       0 0 0 1px rgba(245, 213, 0, 0.35), 0 0 28px 2px rgba(245, 213, 0, 0.50);
-}
-
-[data-theme="midnight"] {
-  color-scheme: dark;
-  --canvas:           var(--paint-midnight);
-  --accent-1:         var(--paint-slate-8);
-  --accent-2:         var(--paint-slate-7);
-  --surface:          var(--paint-slate-8);
-  --surface-input:    var(--paint-slate-8);
-  --text:             var(--paint-sky);
-  --text-input:       var(--paint-ice);
-  --divider:          var(--paint-sky);
-  --border:           color-mix(in srgb, var(--paint-sky) 15%, transparent);
-  --panel-outer:      color-mix(in srgb, var(--paint-slate-8) 55%, transparent);
-  --panel-input:      color-mix(in srgb, var(--paint-slate-7) 72%, transparent);
-  --glass-highlight:  color-mix(in srgb, var(--paint-sky) 15%, transparent);
-  --glass-shadow:     0 10px 40px rgba(0, 0, 0, 0.60), 0 2px 6px rgba(0, 0, 0, 0.40);
-  --focus-glow:       0 0 0 1px rgba(56, 189, 248, 0.35), 0 0 28px 2px rgba(56, 189, 248, 0.50);
-}
-
-[data-theme="grove"] {
-  color-scheme: light;
-  --canvas:           var(--paint-sand);
-  --accent-1:         var(--paint-fern);
-  --accent-2:         var(--paint-bark);
-  --surface:          var(--paint-wheat);
-  --surface-input:    var(--paint-wheat);
-  --text:             var(--paint-moss);
-  --text-input:       var(--paint-soil);
-  --divider:          var(--paint-fern);
-  --border:           color-mix(in srgb, var(--paint-linen) 35%, transparent);
-  --panel-outer:      rgba(180, 165, 130, 0.55);
-  --panel-input:      rgba(180, 165, 130, 0.72);
-  --glass-highlight:  rgba(255, 255, 255, 0.30);
-  --glass-shadow:     0 10px 30px rgba(58, 90, 64, 0.10), 0 2px 6px rgba(58, 90, 64, 0.06);
-  --focus-glow:       0 0 0 1px rgba(255, 245, 230, 0.60), 0 0 24px 2px rgba(74, 124, 89, 0.45);
-}
-
-[data-theme="abyss"] {
-  color-scheme: dark;
-  --canvas:           var(--paint-void);
-  --accent-1:         var(--paint-ember-deep);
-  --accent-2:         var(--paint-ember-dark);
-  --surface:          #080808;
-  --surface-input:    var(--paint-near-black);
-  --text:             var(--paint-warm-white);
-  --text-input:       var(--paint-warm-white);
-  --divider:          var(--paint-dusty-rose);
-  --border:           rgba(180, 60, 60, 0.10);
-  --panel-outer:      rgba(15, 8, 8, 0.55);
-  --panel-input:      rgba(18, 9, 9, 0.72);
-  --glass-highlight:  rgba(220, 80, 80, 0.06);
-  --glass-shadow:     0 10px 40px rgba(0, 0, 0, 0.80), 0 2px 6px rgba(0, 0, 0, 0.60);
-  --focus-glow:       0 0 0 1px rgba(180, 60, 60, 0.20), 0 0 24px 2px rgba(180, 60, 60, 0.15);
+  --canvas: var(--paint-dewy-chartreuse);
+  --accent-1: var(--paint-fern);
+  --accent-2: var(--paint-foxglove);
+  --surface: var(--paint-chartreuse-white);
+  --surface-input: var(--paint-chartreuse-white);
+  --text: var(--paint-moss);
+  --text-input: var(--paint-forest);
+  --divider: var(--paint-forest);
+  --border: rgba(30, 77, 43, 0.16);
+  --panel-outer: color-mix(in srgb, var(--paint-chartreuse-white) 55%, transparent);
+  --panel-input: color-mix(in srgb, var(--paint-chartreuse-tint) 72%, transparent);
+  --glass-highlight: rgba(255, 255, 255, 0.35);
+  --glass-shadow: 0 8px 30px rgba(30, 77, 43, 0.12), 0 2px 8px rgba(30, 77, 43, 0.08);
+  --focus-glow: 0 0 0 1px rgba(30, 77, 43, 0.18), 0 0 24px 2px rgba(76, 154, 70, 0.35);
 }
 
 [data-theme="sepia"] {
   color-scheme: light;
-  --canvas:           var(--paint-parchment);
-  --accent-1:         var(--paint-camel);
-  --accent-2:         var(--paint-bronze);
-  --surface:          var(--paint-vellum);
-  --surface-input:    var(--paint-vellum);
-  --text:             var(--paint-brass);
-  --text-input:       var(--paint-umber);
-  --divider:          var(--paint-bronze);
-  --border:           rgba(210, 190, 155, 0.45);
-  --panel-outer:      rgba(210, 190, 155, 0.60);
-  --panel-input:      rgba(218, 200, 165, 0.75);
-  --glass-highlight:  rgba(255, 240, 200, 0.35);
-  --glass-shadow:     0 10px 30px rgba(160, 120, 48, 0.12), 0 2px 6px rgba(160, 120, 48, 0.08);
-  --focus-glow:       0 0 0 1px rgba(255, 240, 200, 0.60), 0 0 24px 2px rgba(160, 120, 48, 0.45);
+  --canvas: var(--paint-parchment);
+  --accent-1: var(--paint-olive-leaf);
+  --accent-2: var(--paint-terracotta);
+  --surface: var(--paint-parchment-light);
+  --surface-input: var(--paint-parchment-light);
+  --text: var(--paint-cocoa);
+  --text-input: var(--paint-espresso);
+  --divider: var(--paint-espresso);
+  --border: rgba(62, 44, 28, 0.16);
+  --panel-outer: color-mix(in srgb, var(--paint-parchment-light) 60%, transparent);
+  --panel-input: color-mix(in srgb, var(--paint-parchment-tint) 75%, transparent);
+  --glass-highlight: rgba(255, 240, 220, 0.42);
+  --glass-shadow: 0 8px 28px rgba(62, 44, 28, 0.12), 0 2px 7px rgba(62, 44, 28, 0.08);
+  --focus-glow: 0 0 0 1px rgba(62, 44, 28, 0.20), 0 0 22px 2px rgba(212, 160, 23, 0.35);
+}
+
+[data-theme="moonlight"] {
+  color-scheme: dark;
+  --canvas: var(--paint-deep-slate);
+  --accent-1: var(--paint-moonlight-white);
+  --accent-2: var(--paint-moonlight-gray);
+  --surface: var(--paint-slate-surface);
+  --surface-input: var(--paint-slate-surface);
+  --text: var(--paint-slate-mid);
+  --text-input: var(--paint-slate-bright);
+  --divider: var(--paint-slate-bright);
+  --border: rgba(199, 211, 227, 0.14);
+  --panel-outer: color-mix(in srgb, var(--paint-slate-surface) 55%, transparent);
+  --panel-input: color-mix(in srgb, var(--paint-slate-surface-tint) 72%, transparent);
+  --glass-highlight: rgba(238, 242, 247, 0.12);
+  --glass-shadow: 0 10px 40px rgba(0, 0, 0, 0.42), 0 2px 8px rgba(0, 0, 0, 0.30);
+  --focus-glow: 0 0 0 1px rgba(199, 211, 227, 0.22), 0 0 26px 2px rgba(154, 163, 175, 0.35);
+}
+
+[data-theme="hornet"] {
+  color-scheme: dark;
+  --canvas: var(--paint-pitch);
+  --accent-1: var(--paint-hazard);
+  --accent-2: var(--paint-straw);
+  --surface: var(--paint-onyx);
+  --surface-input: var(--paint-onyx);
+  --text: var(--paint-paper-warm);
+  --text-input: var(--paint-hazard);
+  --divider: var(--paint-hazard);
+  --border: rgba(255, 212, 0, 0.14);
+  --panel-outer: color-mix(in srgb, var(--paint-onyx) 55%, transparent);
+  --panel-input: color-mix(in srgb, var(--paint-onyx-tint) 72%, transparent);
+  --glass-highlight: rgba(255, 212, 0, 0.15);
+  --glass-shadow: 0 10px 42px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.45);
+  --focus-glow: 0 0 0 1px rgba(255, 212, 0, 0.35), 0 0 28px 2px rgba(255, 212, 0, 0.45);
+}
+
+[data-theme="viper"] {
+  color-scheme: dark;
+  --canvas: var(--paint-pitch);
+  --accent-1: var(--paint-siren);
+  --accent-2: var(--paint-ember);
+  --surface: var(--paint-onyx);
+  --surface-input: var(--paint-onyx);
+  --text: var(--paint-ash-white);
+  --text-input: var(--paint-siren);
+  --divider: var(--paint-siren);
+  --border: rgba(255, 43, 43, 0.14);
+  --panel-outer: color-mix(in srgb, var(--paint-onyx) 55%, transparent);
+  --panel-input: color-mix(in srgb, var(--paint-onyx-tint) 72%, transparent);
+  --glass-highlight: rgba(255, 43, 43, 0.12);
+  --glass-shadow: 0 10px 42px rgba(0, 0, 0, 0.68), 0 2px 8px rgba(0, 0, 0, 0.48);
+  --focus-glow: 0 0 0 1px rgba(255, 43, 43, 0.30), 0 0 28px 2px rgba(255, 43, 43, 0.42);
 }

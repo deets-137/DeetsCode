@@ -171,10 +171,19 @@ _installed = _list_ollama_models(OLLAMA_BASE_URL)
 if _installed is None:
     print(f"[preflight] WARNING: Ollama not reachable at {OLLAMA_BASE_URL} — start it with `ollama serve`")
 elif MODEL not in _installed:
-    print(f"[preflight] WARNING: MODEL=\"{MODEL}\" not installed. Available: {_installed or '[]'}")
-    print(f"[preflight] fix: edit config.py, or run `ollama pull {MODEL}`")
+    if _installed:
+        # config.MODEL is stale (e.g. the model was deleted). Rather than boot
+        # against a model Ollama doesn't have, fall back to whatever's installed
+        # (same 'first installed' convention as the config-creation auto-pick).
+        # The UI model picker still overrides this via ACTIVE_MODEL_FILE.
+        _fallback = _installed[0]
+        print(f"[preflight] MODEL=\"{MODEL}\" not installed — falling back to \"{_fallback}\". Installed: {_installed}")
+        print(f"[preflight] pin a specific one by editing config.py or using the UI model picker.")
+        MODEL = _fallback
+    else:
+        print(f"[preflight] WARNING: MODEL=\"{MODEL}\" not installed and Ollama has no models — run `ollama pull {MODEL}`")
 from tools import clear_pending_writes, clear_read_files, load_tools, pending_writes
-import storage
+from core import storage
 import paths
 
 # Spectators by session_id. Each spectator is a WebSocket that receives a
@@ -306,9 +315,15 @@ def _load_active_model() -> str:
     # Last UI pick wins over config.MODEL (the boot fallback).
     try:
         saved = paths.ACTIVE_MODEL_FILE.read_text(encoding="utf-8").strip()
-        return saved or MODEL
     except (FileNotFoundError, OSError):
-        return MODEL
+        saved = ""
+    candidate = saved or MODEL
+    # Guard against a stale saved pick (e.g. that model was deleted). If we know
+    # what's installed and the pick isn't among them, fall back to MODEL — which
+    # the preflight has already validated/repaired to an installed model.
+    if _installed and candidate not in _installed:
+        return MODEL if MODEL in _installed else _installed[0]
+    return candidate
 
 
 current_model: str = _load_active_model()
@@ -347,7 +362,7 @@ def save_session(session_id: str, messages: list, prompt: str, temperature: floa
     path = _session_path(session_id)
     if path is None:
         return
-    SESSIONS_DIR.mkdir(exist_ok=True)
+    SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
     payload = {
         "schema": SESSION_SCHEMA,
         "messages": messages,
@@ -1826,6 +1841,7 @@ async def websocket_endpoint(ws: WebSocket):
                     current_model = new_model
                     current_context_length = await fetch_context_length(current_model)
                     try:
+                        paths.ACTIVE_MODEL_FILE.parent.mkdir(parents=True, exist_ok=True)
                         paths.ACTIVE_MODEL_FILE.write_text(current_model + "\n", encoding="utf-8")
                     except OSError as e:
                         await ws.send_json({"type": "info", "content": f"(warning: could not persist model choice: {e})"})

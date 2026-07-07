@@ -1,74 +1,62 @@
-/* ── Tier 1: palette — the box of crayons ─────────────────────────────────
-   Raw named paints only. Nothing in the UI references these directly;
-   themes.css (theme.css here) maps color *roles* onto them. A color used by
-   two roles is defined once. One-off translucent fills (rgba panel washes,
-   composite shadows) stay in the theme blocks — only colors worth naming
-   live here. Ported from the DeetsMusic three-tier token system
-   (palette → theme → skin); see docs/panels.md § Styling. */
+/* Tier 1: palette - raw named paints.
+   Themes map harness roles onto these; UI rules never use paints directly. */
 
 :root {
-  /* blush (was theme 1) — rose canvas, cream surfaces, oxblood ink */
-  --paint-rose-quartz:   #F2BDCD;
-  --paint-rose-dust:     #EBB0C2;
-  --paint-terracotta:    #dea193;
-  --paint-cream:         #ede8d0;
-  --paint-cocoa:         #3a0a0a;
-  --paint-oxblood:       #780606;
-  --paint-linen:         #FFF5E6;
+  /* fairy */
+  --paint-dewy-lilac: #E0DCF0;
+  --paint-twilight-plum: #43306B;
+  --paint-violet-slate: #6A6385;
+  --paint-lavender-grey: #8B84A8;
+  --paint-fae-mint: #2FB089;
+  --paint-lilac-white: #F2EFFA;
+  --paint-lilac-tint: #E7E1F5;
+  --paint-purple-cactus-flower: #A63A79;
+  --paint-lemon-chrome: #F6C700;
 
-  /* graphite (was theme 2) — charcoal canvas, antique-white type */
-  --paint-onyx:          #353839;
-  --paint-charcoal:      #2C2F30;
-  --paint-steel:         #4a5f6b;
-  --paint-mauve-shadow:  #6b4c5c;
-  --paint-ash:           #898989;
-  --paint-silver:        #E0E0E0;
-  --paint-ink:           #1a1a1a;
-  --paint-gunmetal:      #353e43;
-  --paint-antique-white: #FAEBD7;
+  /* glade */
+  --paint-dewy-chartreuse: #E9F0C0;
+  --paint-forest: #1E4D2B;
+  --paint-moss: #54664B;
+  --paint-sage-grey: #87977A;
+  --paint-fern: #4C9A46;
+  --paint-foxglove: #B04A6E;
+  --paint-chartreuse-white: #F4F8E3;
+  --paint-chartreuse-tint: #EAF1D0;
 
-  /* solar (was theme 3) — solarized-light parchment, teal + gold accents */
-  --paint-sol-base3:     #fdf6e3;
-  --paint-sol-base2:     #eee8d5;
-  --paint-sol-cyan:      #2aa198;
-  --paint-sol-yellow:    #b58900;
-  --paint-sol-ink:       #2a2a2a;
-  --paint-sol-slate:     #3d5560;
+  /* sepia */
+  --paint-parchment: #F5EFE6;
+  --paint-espresso: #3E2C1C;
+  --paint-cocoa: #5C4733;
+  --paint-faded-tan: #B8A583;
+  --paint-olive-leaf: #6B8E4E;
+  --paint-terracotta: #A8432F;
+  --paint-amber-glow: #D4A017;
+  --paint-parchment-light: #FBF6EE;
+  --paint-parchment-tint: #EFE6D6;
 
-  /* hornet (was theme 4) — near-black + hi-vis yellow */
-  --paint-pitch:         #0a0a0a;
-  --paint-hornet-dusk:   #1a1a00;
-  --paint-hornet-dusk-2: #2a2a00;
-  --paint-hivis:         #f5d500;
+  /* moonlight */
+  --paint-deep-slate: #1A2436;
+  --paint-slate-bright: #C7D3E3;
+  --paint-slate-mid: #93A2B8;
+  --paint-slate-dim: #5E6E84;
+  --paint-moonlight-white: #EEF2F7;
+  --paint-moonlight-silver: #C4CCD6;
+  --paint-moonlight-gray: #9AA3AF;
+  --paint-slate-surface: #232F40;
+  --paint-slate-surface-tint: #2E3C50;
 
-  /* midnight (was theme 5) — deep slate blues, sky accents */
-  --paint-midnight:      #0f172a;
-  --paint-slate-8:       #1e293b;
-  --paint-slate-7:       #334155;
-  --paint-ice:           #bae6fd;
-  --paint-sky:           #38bdf8;
+  /* hornet */
+  --paint-pitch: #0F0F0F;
+  --paint-onyx: #1A1A1A;
+  --paint-onyx-tint: #242424;
+  --paint-hazard: #FFD400;
+  --paint-amber-wax: #E0B100;
+  --paint-straw: #D8C97A;
+  --paint-paper-warm: #ECE6CF;
 
-  /* grove (was theme 6) — sand canvas, fern + bark accents */
-  --paint-sand:          #d4c5a9;
-  --paint-fern:          #4a7c59;
-  --paint-bark:          #6b4c3a;
-  --paint-wheat:         #e8dbbf;
-  --paint-soil:          #2a2218;
-  --paint-moss:          #3a5a40;
-
-  /* abyss (was theme 7) — void black, ember reds, warm-white type */
-  --paint-void:          #050505;
-  --paint-ember-deep:    #3a0000;
-  --paint-ember-dark:    #1a0000;
-  --paint-near-black:    #0a0a0a;
-  --paint-warm-white:    #f5f0eb;
-  --paint-dusty-rose:    #b05050;
-
-  /* sepia (was theme 8) — parchment, camel + brass ambers */
-  --paint-parchment:     #f5efe6;
-  --paint-camel:         #c9a96e;
-  --paint-bronze:        #a07830;
-  --paint-vellum:        #ede4d3;
-  --paint-umber:         #3e2c1c;
-  --paint-brass:         #8b6914;
+  /* viper */
+  --paint-siren: #FF2B2B;
+  --paint-blood: #C01020;
+  --paint-ember: #D8837A;
+  --paint-ash-white: #EFE2DE;
 }

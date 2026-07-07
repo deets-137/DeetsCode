@@ -277,8 +277,14 @@ function requestRead(path) {
 
 // Pre-port themes were numbered; map saved numeric ids to their new names.
 const LEGACY_THEME_NAMES = {
-  1: "blush", 2: "graphite", 3: "solar", 4: "hornet",
-  5: "midnight", 6: "grove", 7: "abyss", 8: "sepia",
+  1: "fairy", 2: "moonlight", 3: "glade", 4: "hornet",
+  5: "moonlight", 6: "glade", 7: "viper", 8: "sepia",
+  blush: "fairy",
+  graphite: "moonlight",
+  solar: "glade",
+  midnight: "moonlight",
+  grove: "glade",
+  abyss: "viper",
 };
 
 function setTheme(id) {
@@ -301,7 +307,11 @@ function setSkin(id) {
 }
 
 function loadSkin() {
-  const saved = localStorage.getItem("harness-skin");
+  let saved = localStorage.getItem("harness-skin");
+  if (saved === "paper") {
+    saved = "desk";
+    localStorage.setItem("harness-skin", saved);
+  }
   if (saved) document.documentElement.dataset.skin = saved;
 }
 

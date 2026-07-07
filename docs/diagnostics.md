@@ -152,7 +152,7 @@ for the meta shape per kind.
 
 ## 4. SQLite tables — direct DB access
 
-`storage.db` lives at the repo root (gitignored). Open it with the
+`storage.db` lives under `.harness/` (gitignored). Open it with the
 `sqlite3` CLI or via the Python helpers in [storage.py](../storage.py).
 
 | Table | What's in it | Helper functions |
@@ -174,7 +174,7 @@ Never drop or rename; the additive-migration block at the bottom of
 
 ```bash
 # Top 10 most-clicked panels this week
-sqlite3 storage.db "
+sqlite3 .harness/storage.db "
   SELECT instance, panel, COUNT(*) AS n
   FROM system_log
   WHERE kind = 'click' AND ts > strftime('%s', 'now', '-7 days') * 1000
@@ -183,14 +183,14 @@ sqlite3 storage.db "
 "
 
 # Panels that have never been clicked
-sqlite3 storage.db "
+sqlite3 .harness/storage.db "
   SELECT name FROM (
     SELECT DISTINCT panel AS name FROM system_log WHERE kind = 'click'
   );
 "
 
 # Recency timeline for one panel
-sqlite3 storage.db "
+sqlite3 .harness/storage.db "
   SELECT datetime(ts/1000, 'unixepoch') AS when, kind, meta_json
   FROM system_log
   WHERE instance = 'youtube_a'

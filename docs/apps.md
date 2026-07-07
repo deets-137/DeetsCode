@@ -1,6 +1,6 @@
 # Apps — the apps-over-panels primitive
 
-**Spec:** [../app_harness.md](../app_harness.md) (decisions D1–D12, all built
+**Spec:** [app_harness.md](app_harness.md) (decisions D1-D12, all built
 2026-07-06). This doc is the modder-facing contract. Read
 [panels.md](panels.md) first — apps are a layer above panels, not a
 replacement.

@@ -27,7 +27,7 @@ tools/            Tool package (see manual/tools.md).
                     list_symbols, list_context_files, run_command.
   chess.py          Chess pack.
   dnd.py            DnD GM pack — campaign ledger over
-                    {project_dir}/dnd/campaign_state.json.
+                    {project_dir}/.harness/dnd/campaign_state.json.
   blog.py           Blog pack — model-callable tools for the DeetsOTD blog.
   blog_service.py   Shared service layer for blog mode. Imports the sibling
                     blog repo (paths.BLOG_DIR) on demand. Used by BOTH

@@ -1,12 +1,12 @@
 # app_harness.md — Apps-over-Panels primitive
 
-**Status:** BUILT 2026-07-06 (Phases A–D all landed; see docs/apps.md for the
-as-built contract and deviations — WS envelope key is `type` not `kind`;
+**Status:** BUILT 2026-07-06 (Phases A-D all landed; see apps.md for the
+as-built contract and deviations - WS envelope key is `type` not `kind`;
 app-instance ids use dots not colons for Windows filenames; a generic panel
 action route `POST /panels/{name}/action/{fn}` was added for app_hoops §8.2).
 Originally specced 2026-05-19.
 **Forcing function:** Hoops (see `../New folder/Hoops/app_hoops.md`).
-**Reads alongside:** `docs/archive/dev_project.md` (north star), `docs/panels.md` (panel contract), `docs/tileflow.md` (sizing/state model).
+**Reads alongside:** `archive/dev_project.md` (north star), `panels.md` (panel contract), `tileflow.md` (sizing/state model).
 
 ---
 
@@ -140,7 +140,7 @@ multi-instance-related lands together — no half-built state in main.
   - `POST /api/apps/reload` → discovery refresh.
 - `paths.py` registers `APPS_DIR = "apps/"`.
 
-**Deliverables (multi-instance half — currently inert per `docs/panels.md:152`):**
+**Deliverables (multi-instance half - currently inert per `panels.md:152`):**
 
 - Layout instances gain an `instance_id` distinct from `panel`.
 - `panel-shell.js` renders one DOM tile per instance, not per panel.
@@ -225,8 +225,8 @@ lifecycle-shaped and small. Split into two PRs if it helps review.
      payload: {version: ...}}` so subscribed panels can re-render.
 - `POST /api/apps/{name}/update?reset_state=1` — same flow, but wipes
   `state/<*>.db` files before the swap. Used to acknowledge a schema bump.
-- Document the bundle-update contract in `docs/panels.md` (or a new
-  `docs/apps.md`): which paths are read-only-on-update, which are preserved.
+- Document the bundle-update contract in `panels.md` (or a new
+  `apps.md`): which paths are read-only-on-update, which are preserved.
 
 **Deliverables (D.2 — identity surface, per D6):**
 

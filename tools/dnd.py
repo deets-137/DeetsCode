@@ -2,7 +2,7 @@
 DnD game-master tool pack — loaded for the `dnd` mode.
 
 Philosophy: the model narrates, the tools are the ledger. Campaign state
-lives in one JSON file at <project_dir>/dnd/campaign_state.json (paths:
+lives in one JSON file at <project_dir>/.harness/dnd/campaign_state.json (paths:
 DND_SUBDIR / CAMPAIGN_STATE_FILENAME) so a campaign survives restarts and
 the model never has to hold HP totals in its head. Dice come from the core
 `roll_dice` tool — this pack deliberately has no randomness of its own.
@@ -23,8 +23,8 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "dnd_new_campaign",
             "description": (
-                "Start a new campaign: creates dnd/campaign_state.json in the "
-                "project dir. Refuses if a campaign already exists unless "
+                "Start a new campaign: creates .harness/dnd/campaign_state.json in "
+                "the project dir. Refuses if a campaign already exists unless "
                 "overwrite=true. Party members can start minimal (just names) "
                 "and be fleshed out later with dnd_update_character."
             ),

@@ -32,7 +32,7 @@ from urllib.parse import quote
 import chess
 import chess.pgn
 
-import storage
+from core import storage
 
 STATE_VERSION = 1
 COMPUTER = "computer"

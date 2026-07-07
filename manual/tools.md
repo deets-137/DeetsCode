@@ -19,7 +19,7 @@ tools/
   chess.py      Chess-mode pack: new_game, move, board, resign, etc.
   blog.py       Blog-mode pack (edits the sibling blog repo).
   dnd.py        DnD-mode pack: campaign/scene/character/combat ledger over
-                {project_dir}/dnd/campaign_state.json.
+                {project_dir}/.harness/dnd/campaign_state.json.
 ```
 
 Core tools ship in every mode. Mode packs add domain tools on top and are
@@ -269,7 +269,7 @@ destructive or write-queuing tool to the allowlist.
   via `load_tools`. Don't cache it at the top of a pack.
 - **Module-level state that game packs need.** Put per-session state in
   `storage.db` (chess pattern) or a project-dir file (dnd pattern —
-  `dnd/campaign_state.json`). Process-globals reset on restart and don't
+  `.harness/dnd/campaign_state.json`). Process-globals reset on restart and don't
   distinguish between sessions.
 - **Tool descriptions that describe *when* to use the tool.** That belongs in
   `prompt.md` — the system prompt has global priority. Tool descriptions say

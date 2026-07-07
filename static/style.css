@@ -4,9 +4,47 @@ body {
   width: 100vw;
   height: 100vh;
   overflow: hidden;
-  background: var(--canvas);
+  background-color: var(--canvas);
+  background-image: var(--canvas-bg);
+  background-size: var(--canvas-bg-size);
+  background-repeat: var(--canvas-bg-repeat);
+  animation: var(--canvas-anim);
   transition: background 0.4s ease;
   position: relative;
+}
+
+.storm {
+  display: var(--storm-display);
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.storm__bolt {
+  fill: none;
+  stroke: var(--storm-ink);
+  stroke-width: var(--storm-w);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: var(--storm-glow);
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  opacity: 0;
+}
+
+.storm__bolt--1 {
+  d: var(--storm-path-1);
+  transform: translate(24px, 0);
+  animation: storm-strike var(--storm-cycle-1) linear infinite;
+}
+
+.storm__bolt--2 {
+  d: var(--storm-path-2);
+  transform: translate(72px, 0) scaleX(-1);
+  animation: storm-strike var(--storm-cycle-2) linear infinite 1.4s;
 }
 
 /* Soft color blobs that give the glass something to frost.
@@ -54,11 +92,14 @@ body::after {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  body::before, body::after { animation: none; }
+  body, body::before, body::after, .storm__bolt { animation: none; }
+  .storm { display: none; }
 }
 
 /* ── Canvas ──────────────────────────────────────── */
 .canvas {
+  position: relative;
+  z-index: 1;
   width: 100%;
   height: 100%;
   padding: 20px;
@@ -1623,7 +1664,7 @@ input:checked + .toggle-slider:before {
   padding: 10px 4px !important;
 }
 .tray-icon { transition: transform 0.15s ease, background 0.15s ease; }
-.tray-icon:hover { transform: scale(1.08); background: rgba(255,255,255,0.10) !important; }
+.tray-icon:hover { transform: scale(1.08) var(--hover-lift); background: rgba(255,255,255,0.10) !important; }
 
 /* Tileflow state transitions — minimize/restore fade.
    Bento↔tray swaps used to be hard remove + append; the fade keeps the
@@ -1686,6 +1727,8 @@ input:checked + .toggle-slider:before {
 }
 
 .panel-title {
+  font-family: var(--font-title);
+  font-weight: var(--fw-title);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-size: var(--fs-small);

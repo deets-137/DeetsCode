@@ -21,14 +21,17 @@ config.py
 .idea/
 
 # Runtime state
+.harness/
 task.md
 friction.md
 /campaign_state.json
 /sessions/
+/saves/
 storage.db
 storage.db-journal
 storage.db-wal
 storage.db-shm
+active_model.txt
 
 # `manual/` is project documentation and *is* tracked — only manual/task.md
 # is ignored, and that's already covered by the `task.md` rule above (which
@@ -41,7 +44,6 @@ docs/archive/
 # OS
 .DS_Store
 Thumbs.db
-active_model.txt
 
 # App runtime state (preserved across bundle updates, never committed)
 apps/*/state/

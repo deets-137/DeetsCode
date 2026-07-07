@@ -147,7 +147,7 @@ per-channel state and per-player action enforcement.
 
 **DnD pack (mode = "dnd"):** dnd_new_campaign, dnd_get_state,
 dnd_update_character, dnd_set_scene, dnd_log_event, dnd_combat — a campaign
-ledger over `{project_dir}/dnd/campaign_state.json`. Dice come from core
+ledger over `{project_dir}/.harness/dnd/campaign_state.json`. Dice come from core
 `roll_dice`. See `tools/dnd.py`.
 
 **Blog pack (mode = "blog"):** see `tools/blog.py` / `tools/blog_service.py`.

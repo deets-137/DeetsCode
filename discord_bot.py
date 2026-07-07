@@ -43,8 +43,8 @@ from dotenv import load_dotenv
 
 log = logging.getLogger("harness.bot")
 
-import storage
-import bot_media
+from core import storage
+from bot_cogs import bot_media
 
 load_dotenv()  # reads .env file in the same directory
 
@@ -688,7 +688,7 @@ async def slash_save(interaction: discord.Interaction, name: str):
         await interaction.followup.send("❌ No `campaign_state.json` to save yet.")
         return
     try:
-        _SAVES_DIR.mkdir(exist_ok=True)
+        _SAVES_DIR.mkdir(parents=True, exist_ok=True)
         dst = _SAVES_DIR / f"{safe}.json"
         dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
         await interaction.followup.send(f"💾 Saved to `saves/{safe}.json`.")
