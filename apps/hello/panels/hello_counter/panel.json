@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "name": "hello_counter",
+  "title": "counter",
+  "tier": 3,
+  "author": "host",
+  "handler": "server:view",
+  "actions": ["increment"],
+  "display": {
+    "shape": "square",
+    "min":       { "width": 160, "height": 100 },
+    "preferred": { "width": 240, "height": 140 },
+    "scroll": "internal",
+    "growable": false
+  },
+  "tileflow": { "icon": "🔢" }
+}

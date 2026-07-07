@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "name": "hello_mirror",
+  "title": "mirror",
+  "tier": 3,
+  "author": "host",
+  "handler": "server:view",
+  "display": {
+    "shape": "square",
+    "min":       { "width": 160, "height": 80 },
+    "preferred": { "width": 240, "height": 100 },
+    "scroll": "internal",
+    "growable": false
+  },
+  "tileflow": { "icon": "🪞" }
+}

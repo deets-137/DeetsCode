@@ -10,6 +10,7 @@ from typing import Optional
 
 THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
 TOOL_CODE_RE = re.compile(r"<tool_code>.*?</tool_code>", re.DOTALL)
+SYSTEM_BLOCK_RE = re.compile(r"<system>.*?</system>", re.DOTALL)
 
 
 class ThinkStreamFilter:
@@ -17,19 +18,23 @@ class ThinkStreamFilter:
 
     Models like Qwen3 emit reasoning as inline `<think>...</think>` blocks in
     regular content. Ollama's OpenAI-compat endpoint doesn't expose these via
-    the `reasoning` field, so we parse them here. Contents of think blocks are
+    the `reasoning` field, so we parse them here. Contents of hidden blocks are
     returned via the second tuple element so the caller can forward them as
     `thinking` events instead of dropping them.
+
+    `<system>...</system>` blocks are hidden the same way: the agent loop
+    injects system directives after tool results, and models sometimes echo
+    them back verbatim — those echoes must never reach the visible channel
+    (see friction.md).
 
     Handles tags split across chunks. Safe to feed partial content; call
     flush() at the end to release any held suffix.
     """
 
-    OPEN = "<think>"
-    CLOSE = "</think>"
+    HIDDEN_TAGS = [("<think>", "</think>"), ("<system>", "</system>")]
 
     def __init__(self):
-        self.in_think = False
+        self.close = None  # closing tag of the hidden block we're inside, or None
         self.buf = ""
 
     def feed(self, chunk: str) -> tuple[str, str]:
@@ -37,27 +42,36 @@ class ThinkStreamFilter:
         visible: list[str] = []
         thinking: list[str] = []
         while self.buf:
-            if self.in_think:
-                i = self.buf.find(self.CLOSE)
+            if self.close:
+                i = self.buf.find(self.close)
                 if i < 0:
                     # Stream what's safe, hold a short suffix that might be
                     # the start of a straddling close tag.
-                    keep = len(self.CLOSE) - 1
+                    keep = len(self.close) - 1
                     if len(self.buf) > keep:
                         thinking.append(self.buf[:-keep])
                         self.buf = self.buf[-keep:]
                     return "".join(visible), "".join(thinking)
                 thinking.append(self.buf[:i])
-                self.buf = self.buf[i + len(self.CLOSE):]
-                self.in_think = False
+                self.buf = self.buf[i + len(self.close):]
+                self.close = None
             else:
-                i = self.buf.find(self.OPEN)
-                if i < 0:
+                # Earliest open tag of any hidden pair wins.
+                first_i = -1
+                first_open, first_close = "", ""
+                for open_tag, close_tag in self.HIDDEN_TAGS:
+                    i = self.buf.find(open_tag)
+                    if i >= 0 and (first_i < 0 or i < first_i):
+                        first_i, first_open, first_close = i, open_tag, close_tag
+                if first_i < 0:
+                    # Hold the longest suffix that could be the start of a
+                    # straddling open tag.
                     hold = 0
-                    for n in range(min(len(self.buf), len(self.OPEN) - 1), 0, -1):
-                        if self.OPEN.startswith(self.buf[-n:]):
-                            hold = n
-                            break
+                    for open_tag, _ in self.HIDDEN_TAGS:
+                        for n in range(min(len(self.buf), len(open_tag) - 1), 0, -1):
+                            if open_tag.startswith(self.buf[-n:]):
+                                hold = max(hold, n)
+                                break
                     if hold:
                         visible.append(self.buf[:-hold])
                         self.buf = self.buf[-hold:]
@@ -65,15 +79,16 @@ class ThinkStreamFilter:
                         visible.append(self.buf)
                         self.buf = ""
                     return "".join(visible), "".join(thinking)
-                visible.append(self.buf[:i])
-                self.buf = self.buf[i + len(self.OPEN):]
-                self.in_think = True
+                visible.append(self.buf[:first_i])
+                self.buf = self.buf[first_i + len(first_open):]
+                self.close = first_close
         return "".join(visible), "".join(thinking)
 
     def flush(self) -> tuple[str, str]:
-        # Unterminated think block — release whatever's buffered as thinking.
-        if self.in_think:
+        # Unterminated hidden block — release whatever's buffered as thinking.
+        if self.close:
             out, self.buf = self.buf, ""
+            self.close = None
             return "", out
         out, self.buf = self.buf, ""
         return out, ""
@@ -89,6 +104,7 @@ Do exactly what the user asks. Use the provided tools. Keep responses short."""
 def strip_think(text: str) -> str:
     text = THINK_BLOCK_RE.sub("", text)
     text = TOOL_CODE_RE.sub("", text)
+    text = SYSTEM_BLOCK_RE.sub("", text)
     return text.strip()
 
 
@@ -175,17 +191,14 @@ _panel_ws: set[WebSocket] = set()
 # process restart by design — the persisted `panel_layout.json` is the floor;
 # overlay is transient "right now" intent (model just bubbled this, video
 # just started playing, etc.). Sent to newly connected clients on hello so a
-# tab refresh doesn't drop the current arrangement.
-_tileflow_overlay: dict[str, str] = {}
+# tab refresh doesn't drop the current arrangement. The dict itself lives in
+# panels/loader.py (`tileflow_overlay`) so tools/core.py's get_layout and the
+# prompt layout descriptor can read it without importing server.
 
 
-async def broadcast_tileflow_state(instance: str, state: str) -> int:
-    """Push a tileflow state change to every connected panel client. Returns
-    the number of sockets the frame was delivered to (best-effort — dead
-    sockets are discarded). Updates `_tileflow_overlay` so future connects
-    can replay current state."""
-    _tileflow_overlay[instance] = state
-    frame = {"type": "tileflow_state", "instance": instance, "state": state}
+async def _broadcast_panel_frame(frame: dict) -> int:
+    """Fan a JSON frame out to every connected panel client. Returns the
+    number of sockets reached (best-effort — dead sockets are discarded)."""
     delivered = 0
     for sock in list(_panel_ws):
         try:
@@ -194,6 +207,38 @@ async def broadcast_tileflow_state(instance: str, state: str) -> int:
         except Exception:
             _panel_ws.discard(sock)
     return delivered
+
+
+async def broadcast_tileflow_state(instance: str, state: str) -> int:
+    """Push a tileflow state change to every connected panel client. Updates
+    the loader's `tileflow_overlay` so future connects can replay current
+    state."""
+    _panel_loader.tileflow_overlay[instance] = state
+    return await _broadcast_panel_frame(
+        {"type": "tileflow_state", "instance": instance, "state": state}
+    )
+
+
+async def broadcast_layout_updated() -> int:
+    """Tell every client the persisted layout sheet changed (pin/floor edits,
+    preset applied, app instances launched). Clients re-fetch /api/layout and
+    reconcile — see panel-shell.js `layout_updated` subscriber."""
+    return await _broadcast_panel_frame({"type": "layout_updated"})
+
+
+async def broadcast_app_event(evt: dict) -> int:
+    """Fan an app-scoped event (queued via harness_ctx.app_event) out to all
+    clients. The front-end dispatcher matches on (app_id, app_instance,
+    event_name) — see harness.app.subscribe in panel-shell.js. Envelope key
+    is `type` like every other frame (app_harness.md §7 said `kind`; the
+    codebase convention won)."""
+    return await _broadcast_panel_frame({
+        "type": "app_event",
+        "app_id": evt.get("app_id"),
+        "app_instance": evt.get("app_instance"),
+        "event_name": evt.get("event_name"),
+        "payload": evt.get("payload") or {},
+    })
 
 # Remote-control queues by session_id. Each live session (hello'd) owns one
 # asyncio.Queue; any OTHER websocket may enqueue a synthetic control frame
@@ -479,6 +524,13 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
         state["file_tree"] = tree_text
     prompt_template = load_prompt_template(selected_prompt)
     system_prompt = prompt_template.replace("{project_dir}", str(project_dir)).replace("{file_tree}", tree_text)
+    # Live layout descriptor (Stage 3): rebuilt every turn so the model sees
+    # the bento as it is *now* (pins, floors, runtime states), not a boot
+    # snapshot. Rides in every mode because the layout tools are core tools.
+    try:
+        system_prompt += "\n\n" + _panel_loader.layout_descriptor()
+    except Exception:
+        pass  # a broken layout file must not take the chat loop down
     loop_messages = [{"role": "system", "content": system_prompt}] + messages
     # Mode-gated tool pack. Each turn reloads because the mode can switch
     # between turns via /mode — cheap enough, keeps the schema in sync.
@@ -643,11 +695,13 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
 
             # `recompute_layout` nudges the client to re-run its flow pass.
             if name == "recompute_layout":
-                for sock in list(_panel_ws):
-                    try:
-                        await sock.send_json({"type": "tileflow_recompute"})
-                    except Exception:
-                        _panel_ws.discard(sock)
+                await _broadcast_panel_frame({"type": "tileflow_recompute"})
+
+            # Layout-mutating Stage 3 tools write the layout file inside
+            # tools/core.py; on success, every client re-syncs from
+            # /api/layout. Errors (validator rejections) broadcast nothing.
+            if name in _LAYOUT_MUTATING_TOOLS and isinstance(result, str) and result.startswith("OK"):
+                await broadcast_layout_updated()
 
             focus = build_focus_block(project_dir)
             directive = focus if focus else "<system>\nACTION: continue the user's original task. if complete, emit final reply and stop.\n</system>"
@@ -750,8 +804,11 @@ async def get_task():
 
 from fastapi.responses import HTMLResponse, FileResponse
 from panels import loader as _panel_loader
+from apps import loader as _apps_loader
 
-# Discover panels at import time. Hot reload: POST /api/panels/reload.
+# Discover apps first (they contribute panels), then panels.
+# Hot reload: POST /api/apps/reload (chains both) or /api/panels/reload.
+_apps_loader.discover()
 _panel_loader.discover()
 
 
@@ -768,6 +825,7 @@ async def list_panels():
             "url": m.url,
             "iframe_attrs": m.iframe_attrs,
             "tileflow": m.tileflow.model_dump(),
+            "app": m.app,
         })
     return JSONResponse({"panels": out, "errors": _panel_loader.errors()})
 
@@ -782,12 +840,224 @@ async def get_panel(name: str):
 
 @app.post("/api/panels/reload")
 async def reload_panels():
+    _apps_loader.discover()  # apps contribute panels — keep the two in sync
     found = _panel_loader.discover()
     return JSONResponse({"loaded": list(found.keys()), "errors": _panel_loader.errors()})
 
 
+# ── Apps (apps-over-panels primitive — see docs/apps.md) ────────────────────
+
+@app.get("/api/apps")
+async def list_apps():
+    out = [m.model_dump(by_alias=True) for m in _apps_loader.registry().values()]
+    return JSONResponse({"apps": out, "errors": _apps_loader.errors()})
+
+
+@app.get("/api/apps/{name}")
+async def get_app(name: str):
+    m = _apps_loader.get(name)
+    if m is None:
+        return JSONResponse({"error": f"unknown app: {name}"}, status_code=404)
+    return JSONResponse(m.model_dump(by_alias=True))
+
+
+@app.post("/api/apps/reload")
+async def reload_apps():
+    found = _apps_loader.discover()
+    _panel_loader.discover()
+    return JSONResponse({
+        "loaded": list(found.keys()),
+        "errors": _apps_loader.errors(),
+        "panel_errors": _panel_loader.errors(),
+    })
+
+
+@app.post("/api/apps/{name}/instances")
+async def launch_app_instance(name: str):
+    """Launcher: create a new app instance — one fresh layout instance per
+    member panel, all sharing an app_instance id. Broadcasts layout_updated
+    so every connected client mounts the new panels live."""
+    m = _apps_loader.get(name)
+    if m is None:
+        return JSONResponse({"error": f"unknown app: {name}"}, status_code=404)
+    try:
+        layout = _panel_loader.load_layout()
+    except FileNotFoundError:
+        return JSONResponse({"error": "panel_layout.json not found"}, status_code=404)
+    existing = [i for i in layout.instances if i.app == name]
+    if existing and not m.multi_instance:
+        return JSONResponse(
+            {"error": f"app '{name}' is single-instance and already mounted"},
+            status_code=409,
+        )
+    app_instance = f"{name}.{uuid.uuid4().hex[:6]}"
+    bento = next((r.id for r in layout.regions if r.kind == "bento"), None)
+    if bento is None:
+        return JSONResponse({"error": "layout has no bento region"}, status_code=500)
+    created = []
+    for panel_name in m.panels:
+        if _panel_loader.get(panel_name) is None:
+            return JSONResponse(
+                {"error": f"app panel '{panel_name}' failed to load — see /api/panels errors"},
+                status_code=500,
+            )
+        inst_id = f"{app_instance}.{panel_name}"
+        layout.instances.append(_panel_loader.LayoutInstance(
+            instance=inst_id, panel=panel_name, region=bento,
+            app=name, app_instance=app_instance,
+        ))
+        created.append(inst_id)
+    _panel_loader.save_layout(layout)
+    await broadcast_layout_updated()
+    return JSONResponse({"app": name, "app_instance": app_instance, "instances": created})
+
+
+@app.post("/api/apps/{name}/update")
+async def update_app_bundle(name: str, req: Request, reset_state: int = 0):
+    """Replace an app's bundle from an uploaded zip, preserving state/
+    (app_harness.md Phase D / TBD-3).
+
+    - multipart/form-data with a `bundle` zip file, or a raw zip body.
+    - Empty body + ?reset_state=1 = reset-only mode (wipes state/*.db without
+      touching the bundle) — this is what the schema-mismatch banner calls.
+    - A state_schema_version change in the incoming app.json requires
+      ?reset_state=1, else 409 SCHEMA_MISMATCH.
+    - Swap is staged: unzip to temp, validate, rename old → .bak, rename new
+      in place, delete .bak (rollback on failure). state/ carries over.
+    """
+    import io
+    import tempfile
+    import zipfile
+
+    installed = _apps_loader.get(name)
+    target_dir = _apps_loader.app_dir(name)
+
+    # Read the zip payload (multipart field `bundle`, or raw body).
+    raw = b""
+    ctype = req.headers.get("content-type", "")
+    if "multipart/form-data" in ctype:
+        form = await req.form()
+        up = form.get("bundle")
+        if up is not None:
+            raw = await up.read()
+    else:
+        raw = await req.body()
+
+    if not raw:
+        # Reset-only mode.
+        if not reset_state:
+            return JSONResponse({"error": "no bundle uploaded (pass ?reset_state=1 for a state-only reset)"}, status_code=400)
+        if installed is None:
+            return JSONResponse({"error": f"unknown app: {name}"}, status_code=404)
+        state_dir = _apps_loader.state_dir(name)
+        removed = 0
+        if state_dir.is_dir():
+            for db in state_dir.glob("*.db"):
+                db.unlink()
+                removed += 1
+        await broadcast_app_event({
+            "app_id": name, "app_instance": None,
+            "event_name": "state-reset", "payload": {"removed": removed},
+        })
+        return JSONResponse({"ok": True, "reset": True, "state_files_removed": removed})
+
+    try:
+        zf = zipfile.ZipFile(io.BytesIO(raw))
+    except zipfile.BadZipFile:
+        return JSONResponse({"error": "payload is not a zip"}, status_code=400)
+
+    with tempfile.TemporaryDirectory(prefix=f"app_{name}_") as tmp:
+        tmp_path = Path(tmp)
+        zf.extractall(tmp_path)
+        # Bundle may be rooted at the zip top level or in a single subdir.
+        staged = tmp_path
+        if not (staged / "app.json").is_file():
+            subdirs = [d for d in staged.iterdir() if d.is_dir()]
+            if len(subdirs) == 1 and (subdirs[0] / "app.json").is_file():
+                staged = subdirs[0]
+            else:
+                return JSONResponse({"error": "zip has no app.json at its root"}, status_code=400)
+        try:
+            incoming = _apps_loader.AppManifest.model_validate(
+                json.loads((staged / "app.json").read_text(encoding="utf-8"))
+            )
+        except Exception as e:
+            return JSONResponse({"error": f"invalid app.json in bundle: {e}"}, status_code=400)
+        if incoming.name != name:
+            return JSONResponse(
+                {"error": f"bundle is for app '{incoming.name}', URL says '{name}'"},
+                status_code=400,
+            )
+        if (
+            installed is not None
+            and incoming.state_schema_version != installed.state_schema_version
+            and not reset_state
+        ):
+            return JSONResponse({
+                "error": "SCHEMA_MISMATCH",
+                "installed_version": installed.state_schema_version,
+                "bundle_version": incoming.state_schema_version,
+                "hint": "retry with ?reset_state=1 to acknowledge the state wipe",
+            }, status_code=409)
+
+        # Carry state/ over into the staged bundle (or wipe it on reset).
+        staged_state = staged / "state"
+        if staged_state.exists():
+            shutil.rmtree(staged_state)  # bundles must not ship state
+        live_state = _apps_loader.state_dir(name)
+        if not reset_state and live_state.is_dir():
+            shutil.copytree(live_state, staged_state)
+        else:
+            staged_state.mkdir(exist_ok=True)
+
+        # Atomic-ish swap with rollback.
+        bak = target_dir.with_name(f"{name}.bak")
+        if bak.exists():
+            shutil.rmtree(bak)
+        had_old = target_dir.exists()
+        try:
+            if had_old:
+                target_dir.rename(bak)
+            shutil.copytree(staged, target_dir)
+        except Exception as e:  # rollback
+            if had_old and not target_dir.exists() and bak.exists():
+                bak.rename(target_dir)
+            return JSONResponse({"error": f"swap failed (rolled back): {e}"}, status_code=500)
+        if bak.exists():
+            shutil.rmtree(bak, ignore_errors=True)
+
+    _apps_loader.discover()
+    _panel_loader.discover()
+    await broadcast_app_event({
+        "app_id": name, "app_instance": None,
+        "event_name": "updated", "payload": {"version": incoming.version},
+    })
+    await broadcast_layout_updated()
+    return JSONResponse({"ok": True, "app": name, "version": incoming.version, "reset": bool(reset_state)})
+
+
+@app.delete("/api/apps/{name}/instances/{app_instance}")
+async def remove_app_instance(name: str, app_instance: str):
+    """Unmount one app instance: drop its layout instances (state DB is left
+    on disk — remove apps/<name>/state/<id>.db by hand to forget a game)."""
+    try:
+        layout = _panel_loader.load_layout()
+    except FileNotFoundError:
+        return JSONResponse({"error": "panel_layout.json not found"}, status_code=404)
+    before = len(layout.instances)
+    layout.instances = [
+        i for i in layout.instances
+        if not (i.app == name and i.app_instance == app_instance)
+    ]
+    if len(layout.instances) == before:
+        return JSONResponse({"error": "no matching app instance"}, status_code=404)
+    _panel_loader.save_layout(layout)
+    await broadcast_layout_updated()
+    return JSONResponse({"removed": before - len(layout.instances)})
+
+
 @app.get("/panels/{name}/view", response_class=HTMLResponse)
-async def panel_view(name: str):
+async def panel_view(name: str, instance: Optional[str] = None):
     import html as _html
     m = _panel_loader.get(name)
     if m is None:
@@ -797,8 +1067,9 @@ async def panel_view(name: str):
             _panel_error_html(name, f"tier {m.tier} has no host-rendered view"),
             status_code=400,
         )
+    events: list = []
     try:
-        html_body = await _panel_loader.render_view(name)
+        html_body = await _panel_loader.render_view(name, instance_id=instance, event_sink=events)
     except _panel_loader.PanelLoadError as e:
         return HTMLResponse(_panel_error_html(name, str(e)), status_code=500)
     except Exception as e:  # noqa: BLE001 — panel handler failures shouldn't kill the page
@@ -807,7 +1078,50 @@ async def panel_view(name: str):
             _panel_error_html(name, f"{type(e).__name__}: {e}", traceback.format_exc()),
             status_code=500,
         )
+    for evt in events:
+        await broadcast_app_event(evt)
     return HTMLResponse(html_body)
+
+
+@app.post("/panels/{name}/action/{fn_name}")
+async def panel_action(name: str, fn_name: str, req: Request):
+    """Invoke a whitelisted tier-3 panel action (manifest `actions` list).
+    The function is called as fn(harness_ctx=..., body=<parsed JSON>) and
+    should return a JSON-serializable dict. Queued app_events broadcast
+    after it returns. This is the panel-route convention app_hoops.md §8.2
+    assumes (e.g. the orders panel's turn submission)."""
+    from apps.context import StateSchemaMismatch
+    m = _panel_loader.get(name)
+    if m is None:
+        return JSONResponse({"error": f"unknown panel: {name}"}, status_code=404)
+    if m.tier != 3:
+        return JSONResponse({"error": "actions are tier-3 only"}, status_code=400)
+    if fn_name not in m.actions:
+        return JSONResponse(
+            {"error": f"action '{fn_name}' not in panel '{name}' actions whitelist"},
+            status_code=403,
+        )
+    try:
+        body = await req.json()
+    except Exception:
+        body = {}
+    instance = req.query_params.get("instance")
+    try:
+        fn = _panel_loader._import_handler(name, f"{m.handler.split(':', 1)[0]}:{fn_name}")
+    except _panel_loader.PanelLoadError as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+    ctx = _panel_loader.build_context(m, instance)
+    try:
+        result = fn(harness_ctx=ctx, body=body)
+        if hasattr(result, "__await__"):
+            result = await result
+    except StateSchemaMismatch as e:
+        return JSONResponse({"error": str(e), "schema_mismatch": True}, status_code=409)
+    except Exception as e:  # noqa: BLE001
+        return JSONResponse({"error": f"{type(e).__name__}: {e}"}, status_code=500)
+    for evt in ctx.pending_events:
+        await broadcast_app_event(evt)
+    return JSONResponse({"ok": True, "result": result if isinstance(result, (dict, list, str, int, float, bool, type(None))) else str(result)})
 
 
 def _panel_error_html(name: str, msg: str, trace: str = "") -> str:
@@ -876,6 +1190,7 @@ async def put_panel_layout(req: Request):
         _panel_loader.save_layout(layout)
     except OSError as e:
         return JSONResponse({"error": f"write failed: {e}"}, status_code=500)
+    await broadcast_layout_updated()
     return JSONResponse(layout.model_dump(by_alias=True))
 
 
@@ -906,6 +1221,7 @@ async def pin_instance(instance_id: str, req: Request):
         _panel_loader.save_layout(layout)
     except OSError as e:
         return JSONResponse({"error": f"write failed: {e}"}, status_code=500)
+    await broadcast_layout_updated()
     return JSONResponse(layout.model_dump(by_alias=True))
 
 
@@ -926,10 +1242,17 @@ async def unpin_instance(instance_id: str):
         _panel_loader.save_layout(layout)
     except OSError as e:
         return JSONResponse({"error": f"write failed: {e}"}, status_code=500)
+    await broadcast_layout_updated()
     return JSONResponse(layout.model_dump(by_alias=True))
 
 
 _TILEFLOW_STATES = {"dormant", "idle", "active", "focused"}
+
+# Tools (tools/core.py) whose success means the persisted layout sheet
+# changed — the dispatch site broadcasts `layout_updated` after them.
+_LAYOUT_MUTATING_TOOLS = {
+    "pin_instance", "unpin_instance", "set_instance_floor", "apply_layout_preset",
+}
 
 
 @app.post("/api/tileflow/state/{instance_id}")
@@ -956,7 +1279,7 @@ async def set_tileflow_state(instance_id: str, req: Request):
 async def clear_tileflow_state(instance_id: str):
     """Drop the runtime overlay for one instance. The client falls back to
     the manifest's `default_state`."""
-    had = _tileflow_overlay.pop(instance_id, None) is not None
+    had = _panel_loader.tileflow_overlay.pop(instance_id, None) is not None
     # We don't broadcast a "clear" — instead we set back to default_state on
     # the client. Easiest signal: broadcast `idle` (the conventional default
     # for everything except dormant-by-default panels). Callers that want a
@@ -1121,7 +1444,7 @@ async def websocket_endpoint(ws: WebSocket):
     # Register for tileflow broadcasts and replay current overlay so a
     # mid-session tab refresh restores the bento arrangement.
     _panel_ws.add(ws)
-    for inst_id, st in list(_tileflow_overlay.items()):
+    for inst_id, st in list(_panel_loader.tileflow_overlay.items()):
         try:
             await ws.send_json({"type": "tileflow_state", "instance": inst_id, "state": st})
         except Exception:

@@ -42,3 +42,7 @@ docs/archive/
 .DS_Store
 Thumbs.db
 active_model.txt
+
+# App runtime state (preserved across bundle updates, never committed)
+apps/*/state/
+apps/*.bak/

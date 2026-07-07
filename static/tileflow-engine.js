@@ -53,6 +53,7 @@
   // Same span table as panel-shell.js's SIZE_CLASS_SPANS, plus an ordering
   // we can step up/down by tier. `icon` is the floor; `hero` is the ceiling.
   const CLASS_ORDER = ["icon", "small", "medium", "large", "hero"];
+  const STATE_ORDER = { dormant: 0, idle: 1, active: 2, focused: 3 };
   const CLASS_SPANS = {
     icon:   null,
     small:  { cols: 3,  rows: 1 },
@@ -66,6 +67,19 @@
     if (idx < 0) return cls;
     const next = Math.max(0, Math.min(CLASS_ORDER.length - 1, idx + delta));
     return CLASS_ORDER[next];
+  }
+
+  // Hard row floor derived from display.min.height. The class table caps
+  // rows at 2, which used to squash any panel whose min.height exceeds two
+  // row tracks (e.g. settings min 280px inside 252px). A panel spanning
+  // `rows` rows gets `rows*rowPx + (rows-1)*gap` of track, so:
+  //   rows >= (minPx + gap) / (rowPx + gap)
+  const MAX_ROWS = 4;
+  function rowsCeilForMin(px, gridCfg) {
+    if (!px) return 1;
+    const rowPx = gridCfg.rowPx || 120;
+    const gap = (typeof gridCfg.gapPx === "number") ? gridCfg.gapPx : 12;
+    return Math.max(1, Math.min(MAX_ROWS, Math.ceil((px + gap) / (rowPx + gap))));
   }
 
   // ── Natural class — derived from manifest display.{preferred,min,max} ───
@@ -178,24 +192,47 @@
   }
 
   // ── flowPass: compute placements for the current layout ─────────────────
-  // Input: array of { instance, manifest, state, overrides, lastStateChangeAt, pinElement }
+  // Input: array of { instance, manifest, state, overrides, tileflow, lastStateChangeAt }
   // gridCfg: { cols, rowPx, gapPx, bentoWidthPx } — derived from the bento DOM.
   // Returns: { decisions: [{instance, bin: "bento"|"tray", cls, score, span?}],
   //            ordered: [decisions in placement order] }
   function flowPass(items, gridCfg) {
     const nowMs = Date.now();
     const decisions = items.map((it) => {
+      // User floors (layout-instance `tileflow` block, Stage 3): the floor
+      // wins over runtime state. A floored panel can grow above its floor
+      // but never shrink below it, and never routes to the tray.
+      const tf = it.tileflow || {};
+      let state = it.state;
+      if (tf.never_dormant && state === "dormant") state = "idle";
+      if (tf.locked_floor) {
+        const cur = STATE_ORDER[state], floor = STATE_ORDER[tf.locked_floor];
+        if (typeof cur === "number" && typeof floor === "number" && cur < floor) state = tf.locked_floor;
+      }
       const natCls = naturalClass(it.manifest, gridCfg);
-      const effCls = effectiveClass(it.state, natCls, it.manifest, gridCfg);
-      const score = instanceScore(it.state, effCls, it.overrides, it.lastStateChangeAt, nowMs);
+      let effCls = effectiveClass(state, natCls, it.manifest, gridCfg);
+      if (tf.locked_size && CLASS_ORDER.indexOf(effCls) < CLASS_ORDER.indexOf(tf.locked_size)) {
+        effCls = tf.locked_size;
+      }
+      const score = instanceScore(state, effCls, it.overrides, it.lastStateChangeAt, nowMs);
       // Tray routing: explicit dormant + tray_when_dormant, OR score below
-      // threshold AND tray_when_dormant allowed.
-      const trayOK = !it.manifest || (it.manifest.tileflow && it.manifest.tileflow.tray_when_dormant !== false);
+      // threshold AND tray_when_dormant allowed. Floored instances stay put.
+      const floored = !!(tf.locked_size || tf.never_dormant ||
+        (tf.locked_floor && tf.locked_floor !== "dormant"));
+      const trayOK = !floored &&
+        (!it.manifest || (it.manifest.tileflow && it.manifest.tileflow.tray_when_dormant !== false));
       const wantsTray =
-        (it.state === "dormant" && trayOK) ||
+        (state === "dormant" && trayOK) ||
         (score <= WEIGHTS.tray_threshold && trayOK);
       const bin = wantsTray ? "tray" : "bento";
-      const span = bin === "bento" ? CLASS_SPANS[effCls] : null;
+      let span = bin === "bento" ? CLASS_SPANS[effCls] : null;
+      if (span) {
+        // min.height is a hard floor: grow the row span past the class
+        // table when the class's track height can't satisfy it.
+        const disp = (it.manifest && it.manifest.display) || {};
+        const minRows = rowsCeilForMin((disp.min || {}).height, gridCfg);
+        if (minRows > span.rows) span = { cols: span.cols, rows: minRows };
+      }
       return { instance: it.instance, bin, cls: effCls, score, span, natural_class: natCls };
     });
     // Order: bento panels by score desc; tray icons by score desc (high

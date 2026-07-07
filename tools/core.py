@@ -176,6 +176,130 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "get_layout",
+            "description": (
+                "Read the live bento layout: grid dims, regions, and every panel "
+                "instance with its current tileflow state, pin, and floors. Call "
+                "this before proposing any layout change. Size classes: small=3 "
+                "cols, medium=6 cols, large=6 cols x 2 rows, hero=12 cols x 2 rows. "
+                "Pins are floors, not absolutes — a focused panel can still grow "
+                "past its pinned span."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_panels",
+            "description": (
+                "List installed panels: name, title, tier, multi_instance, min/"
+                "preferred pixel sizes, and default tileflow state. Answers 'is "
+                "there a clock panel?' and 'how small can it go?'. Instance ids "
+                "in the layout map to these panels via their `panel` field."
+            ),
+            "parameters": {"type": "object", "properties": {}, "required": []},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "pin_instance",
+            "description": (
+                "Pin a panel instance to a bento grid rectangle (persisted in the "
+                "layout file; the UI rearranges live). 1-indexed CSS Grid coords; "
+                "(1,1) is top-left. The pin is a floor: state promotion can grow "
+                "the panel past it, never shrink it. Validation errors (collision, "
+                "out of bounds) come back verbatim — fix the coords and retry."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "instance": {"type": "string", "description": "Instance id from the layout (NOT the panel name)."},
+                    "col":  {"type": "integer", "description": "Start column, 1-indexed."},
+                    "row":  {"type": "integer", "description": "Start row, 1-indexed."},
+                    "cols": {"type": "integer", "description": "Column span. Default 1. Valid rows sum to 12: 12, 6+6, 6+3+3, 3+3+3+3."},
+                    "rows": {"type": "integer", "description": "Row span. Default 1."},
+                },
+                "required": ["instance", "col", "row"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "unpin_instance",
+            "description": "Remove a panel instance's bento pin; it returns to score-ordered auto-flow.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "instance": {"type": "string", "description": "Instance id from the layout."},
+                },
+                "required": ["instance"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "set_instance_floor",
+            "description": (
+                "Set persistent floors on a panel instance (the 'settings stays "
+                "medium even when dormant' knob). locked_size lower-bounds the "
+                "size class and keeps the panel out of the tray; locked_floor "
+                "lower-bounds the runtime state; never_dormant clamps dormant to "
+                "idle. Omitted fields are left unchanged; pass clear=true to drop "
+                "all floors."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "instance":      {"type": "string", "description": "Instance id from the layout."},
+                    "locked_size":   {"type": "string", "enum": ["icon", "small", "medium", "large", "hero"], "description": "Size class the instance never shrinks below."},
+                    "locked_floor":  {"type": "string", "enum": ["dormant", "idle", "active", "focused"], "description": "State the instance never drops below."},
+                    "never_dormant": {"type": "boolean", "description": "If true, dormant requests clamp to idle."},
+                    "clear":         {"type": "boolean", "description": "Drop all floors on this instance."},
+                },
+                "required": ["instance"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "apply_layout_preset",
+            "description": (
+                "Replace the whole layout sheet with a named preset from "
+                "layout/presets/<name>.json. The preset passes the same pin "
+                "validator as any other layout write. Use save_layout_preset "
+                "first to capture the current arrangement under a name."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Preset name (filename without .json)."},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "save_layout_preset",
+            "description": "Save the current layout sheet as a named preset under layout/presets/ for later apply_layout_preset calls.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Preset name (filename without .json). Overwrites an existing preset of the same name."},
+                },
+                "required": ["name"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "update_task",
             "description": "Create or update the task checklist (task.md). Use markdown checkboxes: - [ ] todo, - [/] in-progress, - [x] done. If content is empty, returns the current checklist without modifying it.",
             "parameters": {
@@ -273,6 +397,129 @@ def _register_path(args: dict) -> str:
     new_text = original + suffix + block + "\n"
     _PATHS_FILE.write_text(new_text, encoding="utf-8")
     return f"Added `{name}` to paths.py → {new_line}"
+
+
+# ── Stage 3 layout tools ─────────────────────────────────────────────────────
+# Thin wrappers over panels/loader.py. Mutations write the layout file
+# directly; server.py's tool-dispatch site broadcasts `layout_updated` to
+# connected clients after any of these returns "OK: ..." (same pattern as
+# set_instance_state). Validator errors return verbatim so the model can
+# self-correct on the next call.
+
+_LAYOUT_TOOLS = {
+    "get_layout", "get_panels", "pin_instance", "unpin_instance",
+    "set_instance_floor", "apply_layout_preset", "save_layout_preset",
+}
+
+
+def _layout_tool(name: str, args: dict) -> str:
+    import json
+    from panels import loader
+    import paths as _paths
+
+    if not loader.registry():
+        loader.discover()
+
+    if name == "get_layout":
+        return json.dumps(loader.condensed_layout(), indent=1)
+
+    if name == "get_panels":
+        return json.dumps(loader.condensed_panels(), indent=1)
+
+    inst_id = (args.get("instance") or "").strip() if "instance" in args else ""
+
+    if name == "pin_instance":
+        if not inst_id:
+            return "Error: 'instance' is required"
+        try:
+            pin = loader.InstancePin(
+                col=int(args["col"]), row=int(args["row"]),
+                cols=int(args.get("cols") or 1), rows=int(args.get("rows") or 1),
+            )
+        except (KeyError, TypeError, ValueError) as e:
+            return f"Error: bad pin coordinates: {e}"
+        layout = loader.load_layout()
+        try:
+            loader.validate_pin_for_instance(layout, inst_id, pin)
+        except loader.PinValidationError as e:
+            return f"Pin rejected: {e}"
+        target = next(i for i in layout.instances if i.instance == inst_id)
+        target.pin = pin
+        loader.save_layout(layout)
+        return f"OK: pinned '{inst_id}' at col {pin.col}, row {pin.row}, span {pin.cols}x{pin.rows}."
+
+    if name == "unpin_instance":
+        if not inst_id:
+            return "Error: 'instance' is required"
+        layout = loader.load_layout()
+        target = next((i for i in layout.instances if i.instance == inst_id), None)
+        if target is None:
+            return f"Error: unknown instance: {inst_id}"
+        if target.pin is None:
+            return f"OK: '{inst_id}' was not pinned (no change)."
+        target.pin = None
+        loader.save_layout(layout)
+        return f"OK: unpinned '{inst_id}'."
+
+    if name == "set_instance_floor":
+        if not inst_id:
+            return "Error: 'instance' is required"
+        layout = loader.load_layout()
+        target = next((i for i in layout.instances if i.instance == inst_id), None)
+        if target is None:
+            return f"Error: unknown instance: {inst_id}"
+        if args.get("clear"):
+            target.tileflow = None
+            loader.save_layout(layout)
+            return f"OK: cleared all floors on '{inst_id}'."
+        tf = target.tileflow or loader.InstanceTileflow()
+        if "locked_size" in args and args["locked_size"]:
+            if args["locked_size"] not in ("icon", "small", "medium", "large", "hero"):
+                return "Error: locked_size must be one of icon/small/medium/large/hero"
+            tf.locked_size = args["locked_size"]
+        if "locked_floor" in args and args["locked_floor"]:
+            if args["locked_floor"] not in ("dormant", "idle", "active", "focused"):
+                return "Error: locked_floor must be one of dormant/idle/active/focused"
+            tf.locked_floor = args["locked_floor"]
+        if "never_dormant" in args:
+            tf.never_dormant = bool(args["never_dormant"])
+        target.tileflow = tf
+        loader.save_layout(layout)
+        floors = tf.model_dump(exclude_none=True, exclude_defaults=True)
+        return f"OK: floors on '{inst_id}' now {json.dumps(floors) if floors else '(none)'}."
+
+    if name == "apply_layout_preset":
+        pname = Path((args.get("name") or "").strip()).name
+        if not pname:
+            return "Error: 'name' is required"
+        preset_path = _paths.LAYOUT_PRESETS_DIR / f"{pname}.json"
+        if not preset_path.is_file():
+            avail = sorted(p.stem for p in _paths.LAYOUT_PRESETS_DIR.glob("*.json")) if _paths.LAYOUT_PRESETS_DIR.is_dir() else []
+            return f"Error: preset '{pname}' not found. Available: {', '.join(avail) or '(none)'}"
+        try:
+            candidate = loader.PanelLayout.model_validate(json.loads(preset_path.read_text(encoding="utf-8")))
+        except Exception as e:
+            return f"Error: preset '{pname}' is not a valid layout sheet: {e}"
+        errors = loader.validate_layout_pins(candidate)
+        if errors:
+            return "Preset rejected by pin validator:\n" + "\n".join(f"- {e}" for e in errors)
+        loader.save_layout(candidate)
+        return f"OK: applied preset '{pname}' ({len(candidate.instances)} instances)."
+
+    if name == "save_layout_preset":
+        pname = Path((args.get("name") or "").strip()).name
+        if not pname:
+            return "Error: 'name' is required"
+        layout = loader.load_layout()
+        _paths.LAYOUT_PRESETS_DIR.mkdir(parents=True, exist_ok=True)
+        preset_path = _paths.LAYOUT_PRESETS_DIR / f"{pname}.json"
+        preset_path.write_text(
+            json.dumps(layout.model_dump(by_alias=True, exclude_none=True), indent=2),
+            encoding="utf-8",
+        )
+        return f"OK: saved current layout as preset '{pname}'."
+
+    return f"Unknown layout tool: {name}"
 
 
 def execute_tool(
@@ -411,6 +658,9 @@ def execute_tool(
 
         if name == "register_path":
             return _register_path(args)
+
+        if name in _LAYOUT_TOOLS:
+            return _layout_tool(name, args)
 
         if name == "recompute_layout":
             # Server.py picks up the tool-name in the dispatch site and

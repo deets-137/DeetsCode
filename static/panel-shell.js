@@ -107,7 +107,14 @@
   }
 
   async function fetchAndInject(name, contentEl) {
-    const r = await fetch(`/panels/${name}/view`);
+    // Instance-aware fetch: the server passes the id through to tier-3
+    // handlers via harness_ctx so N instances of one panel can render
+    // different content (multi-instance / apps).
+    const instanceId = contentEl && contentEl.dataset
+      ? contentEl.dataset.panelContentInstance : null;
+    const url = `/panels/${name}/view` +
+      (instanceId ? `?instance=${encodeURIComponent(instanceId)}` : "");
+    const r = await fetch(url);
     // Clear any subscriptions registered by the prior view's script — the
     // new view's script will re-register fresh ones. Done before the
     // innerHTML swap so old subscribers can't see in-flight events.
@@ -140,6 +147,13 @@
     wrap.dataset.instance = inst.instance;
     wrap.dataset.panelName = manifest.name;
     wrap.dataset.tier = String(manifest.tier);
+    // App identity (D6): panels belonging to an app carry their app id +
+    // app-instance id on the tile so scripts (harness.app.*) and CSS can
+    // scope to them.
+    if (manifest.app) {
+      wrap.dataset.app = manifest.app;
+      wrap.dataset.appInstance = inst.app_instance || `${manifest.app}.default`;
+    }
 
     // Chrome: title + actions slot + standardized pill. Handlers don't
     // render headers — they optionally include a
@@ -153,6 +167,13 @@
     title.className = "panel-title";
     title.textContent = manifest.title || manifest.name;
     header.appendChild(title);
+    if (manifest.app) {
+      const chip = document.createElement("span");
+      chip.className = "panel-app-chip";
+      chip.textContent = manifest.app;
+      chip.title = `part of app: ${manifest.app}`;
+      header.appendChild(chip);
+    }
     const actions = document.createElement("div");
     actions.className = "panel-actions";
     header.appendChild(actions);
@@ -179,6 +200,11 @@
       content.className = "panel-content";
       content.dataset.panelContent = manifest.name;
       content.dataset.panelContentInstance = inst.instance;
+      // Per-instance config from the layout file, readable by tier-1 view
+      // scripts (tier-3 handlers get it via harness_ctx.config instead).
+      if (inst.config) {
+        try { content.dataset.instanceConfig = JSON.stringify(inst.config); } catch (e) {}
+      }
       // Min/preferred from manifest land on the outer instance — they
       // describe the panel's natural footprint including chrome.
       if (minH) wrap.style.minHeight = `${minH}px`;
@@ -246,7 +272,15 @@
     const subs = (_subs[panel] = _subs[panel] || {});
     (subs[event] = subs[event] || []).push(callback);
   };
-  harness._clearPanelSubs = function (panel) { delete _subs[panel]; };
+  harness._clearPanelSubs = function (panel) {
+    delete _subs[panel];
+    // App-scoped subs are keyed per registration; drop the ones whose
+    // panel matches (coarse, like _subs — refine per-instance if a
+    // multi-instance panel ever needs it).
+    for (let i = _appSubs.length - 1; i >= 0; i--) {
+      if (_appSubs[i].panel === panel) _appSubs.splice(i, 1);
+    }
+  };
   harness._dispatch = function (event, msg) {
     for (const panel in _subs) {
       for (const cb of (_subs[panel][event] || [])) {
@@ -254,6 +288,54 @@
       }
     }
   };
+
+  // ── harness.app — app-scoped surface (apps-over-panels, Phase C) ─────────
+  // Panels belonging to an app subscribe to their app instance's events:
+  //   harness.app.subscribe("state-changed", (payload, frame) => {...})
+  // Scope (app id + app instance) is discovered from the calling script's
+  // enclosing .panel-instance — a panel can only hear its own app instance.
+  // Frames with app_instance=null (e.g. bundle "updated") reach every
+  // instance of that app.
+  const _appSubs = []; // [{app, appInstance, panel, event, cb}]
+  harness.app = {
+    // Identity of the panel instance enclosing `el` (or the calling script).
+    of(el) {
+      const node = el && el.closest ? el.closest(".panel-instance") : null;
+      if (!node) return null;
+      return {
+        app: node.dataset.app || null,
+        appInstance: node.dataset.appInstance || null,
+        instance: node.dataset.instance || null,
+        panel: node.dataset.panelName || null,
+      };
+    },
+    subscribe(eventName, cb, scopeEl) {
+      const el = scopeEl ||
+        (document.currentScript && document.currentScript.closest(".panel-instance"));
+      const id = harness.app.of(el);
+      if (!id || !id.app) {
+        console.warn("[harness.app] subscribe: caller is not inside an app panel");
+        return;
+      }
+      _appSubs.push({
+        app: id.app, appInstance: id.appInstance, panel: id.panel,
+        event: String(eventName), cb,
+      });
+    },
+  };
+
+  // Fan incoming app_event frames out to matching app subscriptions. The
+  // synthetic "_shell" panel name is never cleared by panel re-renders.
+  harness.subscribe("_shell", "app_event", (msg) => {
+    if (!msg || !msg.app_id || !msg.event_name) return;
+    for (const s of _appSubs) {
+      if (s.app !== msg.app_id) continue;
+      if (msg.app_instance && s.appInstance !== msg.app_instance) continue;
+      if (s.event !== msg.event_name) continue;
+      try { s.cb(msg.payload || {}, msg); }
+      catch (e) { console.error(`[harness.app] subscriber ${s.app}/${s.event}`, e); }
+    }
+  });
 
   // ── Tileflow state engine ───────────────────────────────────────────────
   // Per-instance state: dormant | idle | active | focused. Routing (bento
@@ -366,8 +448,7 @@
     settingsBtn.textContent = "⚙";
     settingsBtn.addEventListener("click", (e) => {
       e.stopPropagation();
-      // Dummy: real settings UI lands with Stage 3 (drag-to-pin / lock floors).
-      console.log(`[panel-pill] settings clicked for "${instanceId}"`);
+      togglePillMenu(pill, instanceId);
     });
 
     const minimizeBtn = document.createElement("button");
@@ -386,6 +467,52 @@
     return pill;
   }
 
+  // ── ⚙ pill menu — manual state cycling ──────────────────────────────────
+  // Small popover under the pill with the four tileflow states. Lets the
+  // user (or a tester) drive state transitions without the JS console.
+  // One menu open at a time; any outside click closes it. The menu anchors
+  // to the .panel-header (the pill itself clips overflow).
+  const TILEFLOW_STATES = ["dormant", "idle", "active", "focused"];
+  let _openPillMenu = null;
+
+  function closePillMenu() {
+    if (_openPillMenu) {
+      _openPillMenu.remove();
+      _openPillMenu = null;
+    }
+  }
+
+  function togglePillMenu(pill, instanceId) {
+    if (_openPillMenu && _openPillMenu.dataset.instance === instanceId) {
+      closePillMenu();
+      return;
+    }
+    closePillMenu();
+    const menu = document.createElement("div");
+    menu.className = "panel-pill-menu";
+    menu.dataset.instance = instanceId;
+    menu.setAttribute("data-flip-skip", "");
+    const current = harness.getState(instanceId);
+    for (const st of TILEFLOW_STATES) {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "panel-pill-menu-item" + (st === current ? " is-current" : "");
+      b.textContent = st;
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        closePillMenu();
+        harness.logInteraction(instanceId, "custom", { act: "pill-state", to: st });
+        harness.setState(instanceId, st);
+      });
+      menu.appendChild(b);
+    }
+    const header = pill.closest(".panel-header") || pill.parentElement;
+    (header || pill).appendChild(menu);
+    _openPillMenu = menu;
+  }
+
+  document.addEventListener("click", () => closePillMenu());
+
   function buildTrayIcon(inst, manifest) {
     const cfg = tileflowConfig(manifest);
     const btn = document.createElement("button");
@@ -393,6 +520,15 @@
     btn.dataset.instance = inst.instance;
     btn.dataset.panelName = manifest.name;
     btn.title = manifest.title || manifest.name;
+    // Rudimentary app grouping (D6): same-app icons cluster together at the
+    // end of the tray via a shared order key; CSS tints them via [data-app].
+    if (manifest.app) {
+      btn.dataset.app = manifest.app;
+      let h = 0;
+      for (const c of manifest.app) h = (h * 31 + c.charCodeAt(0)) % 97;
+      btn.style.order = String(1000 + h);
+      btn.title = `${btn.title} (${manifest.app})`;
+    }
     btn.textContent = cfg.icon;
     btn.style.cssText = [
       "width:36px","height:36px","border-radius:8px",
@@ -516,7 +652,11 @@
     // Visual order: higher score → lower `order` → earlier in the flow.
     // CSS Grid honors `order` for dense packing without DOM reordering, so
     // iframes (and their playing media) stay intact across reflows.
-    node.style.order = String(-decision.score);
+    // Exception: app-owned tray icons keep their app-group order key
+    // (assigned in buildTrayIcon) so same-app icons stay clustered.
+    if (!(decision.bin === "tray" && node.dataset.app)) {
+      node.style.order = String(-decision.score);
+    }
     // Debug surface: visible in DevTools Inspect Element, so the score/
     // class/order behind any tile's position is one click away — no need
     // to mentally reconcile source vs visual order.
@@ -553,10 +693,15 @@
   function scheduleFlowPass(animate) {
     if (_flowScheduled) return;
     _flowScheduled = true;
-    requestAnimationFrame(() => {
+    const run = () => {
       _flowScheduled = false;
       runFlowPass(animate !== false);
-    });
+    };
+    // Chrome suspends rAF in hidden tabs — a wedged _flowScheduled would
+    // then swallow every later pass. Model/tool-driven layout changes must
+    // land even when the tab is backgrounded, so fall back to a timeout.
+    if (document.hidden) setTimeout(run, 0);
+    else requestAnimationFrame(run);
   }
 
   function runFlowPass(animate) {
@@ -584,6 +729,7 @@
         manifest,
         state,
         overrides,
+        tileflow: inst.tileflow || null,
         lastStateChangeAt: _lastStateChangeAt[id] || 0,
       });
     }
@@ -743,9 +889,36 @@
   // bentoWidthPx). Panels use this to convert an aspect ratio into a span.
   harness.gridConfig = function () { return currentGridConfig(); };
 
+  // ── Tier-0 postMessage bridge ────────────────────────────────────────────
+  // Sandboxed iframe panels can't reach window.harness, so they were locked
+  // to their manifest default_state. This listener lets any embedded panel
+  // participate in tileflow by posting:
+  //   parent.postMessage({ type: "tileflow.setState", state: "focused" }, "*")
+  // The sender is identified by its contentWindow — no instance id in the
+  // message, so a panel can't spoof state for a sibling. See docs/panels.md.
+  window.addEventListener("message", (e) => {
+    const data = e.data;
+    if (!data || typeof data !== "object" || data.type !== "tileflow.setState") return;
+    if (!TILEFLOW_STATES.includes(data.state)) return;
+    for (const iframe of document.querySelectorAll(".panel-instance > .panel-iframe")) {
+      if (iframe.contentWindow === e.source) {
+        const wrap = iframe.closest(".panel-instance");
+        const instanceId = wrap && wrap.dataset.instance;
+        if (instanceId) harness.setState(instanceId, data.state);
+        return;
+      }
+    }
+  });
+
   // Exposed so tools/console can force a fresh flow pass (e.g. after a
   // weights change via the future settings panel) without nudging state.
   harness.recomputeLayout = function () { scheduleFlowPass(true); };
+
+  // Debug: read-only snapshot of the live instance index (post layout
+  // re-syncs). Complements harness.tileflow.dump() which reads the DOM.
+  harness.debugInstances = function () {
+    return JSON.parse(JSON.stringify(_instances));
+  };
 
   // Per-instance mode visibility, mirrored from app.js's _PANEL_HIDE_RULES.
   // Defined here so panel-shell can hide-by-default at render time, before
@@ -939,6 +1112,69 @@
     // Force-recompute frame from the `recompute_layout` tool. No-op on state;
     // just bumps the engine to re-rank and re-apply.
     harness.subscribe("_shell", "tileflow_recompute", () => scheduleFlowPass(true));
+
+    // ── Layout re-sync ────────────────────────────────────────────────────
+    // `layout_updated` fires whenever the persisted layout sheet changes
+    // server-side (pin/unpin/floor tools, presets, app instance launches).
+    // Reconcile instead of rebooting: update the instance index, mount new
+    // instances, drop removed ones, leave everything else in place (anchored
+    // panels like chat must never re-inject — the boot buffer would replay).
+    // Region additions/removals are NOT handled — those need a reload.
+    harness.subscribe("_shell", "layout_updated", refreshLayoutFromServer);
+  }
+
+  async function refreshLayoutFromServer() {
+    let layout;
+    try {
+      const r = await fetch("/api/layout");
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      layout = await r.json();
+    } catch (e) {
+      console.warn("[panel-shell] layout re-sync failed:", e);
+      return;
+    }
+    // Manifests may have changed too (apps installed / panels reloaded).
+    const manifests = await fetchPanelManifests();
+    for (const name in manifests) _manifests[name] = manifests[name];
+
+    _layoutCache = layout;
+    const mode = bootMode();
+    const newIds = new Set();
+    for (const inst of layout.instances) {
+      newIds.add(inst.instance);
+      _instances[inst.instance] = inst; // picks up new pins/floors in place
+    }
+    // Drop instances that left the layout.
+    for (const id of Object.keys(_instances)) {
+      if (newIds.has(id)) continue;
+      const node = document.querySelector(
+        `section[data-instance="${id}"], .tray-icon[data-instance="${id}"]`
+      );
+      if (node) node.remove();
+      delete _instances[id];
+      delete _instanceStates[id];
+      delete _lastStateChangeAt[id];
+    }
+    // Mount instances that are new to the layout.
+    for (const inst of layout.instances) {
+      if (!inst.panel) continue;
+      const m = _manifests[inst.panel];
+      if (!m) continue;
+      const existing = document.querySelector(
+        `section[data-instance="${inst.instance}"], .tray-icon[data-instance="${inst.instance}"]`
+      );
+      if (existing) continue;
+      const target = _regionMapCache[inst.region];
+      if (!target) continue;
+      if (!_instanceStates[inst.instance]) {
+        _instanceStates[inst.instance] = tileflowConfig(m).default_state;
+      }
+      const node = renderPanelInstance(inst, m);
+      node.dataset.tileflowState = _instanceStates[inst.instance];
+      if (shouldHideForMode(inst.instance, mode)) node.classList.add("mode-hidden");
+      target.el.appendChild(node);
+    }
+    scheduleFlowPass(true);
   }
 
   // panel-shell.js is loaded before app.js but DOMContentLoaded may have

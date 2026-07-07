@@ -1,39 +1,145 @@
 {
   "schema": 2,
+  "regions": [
+    {
+      "id": "left",
+      "anchor": "left",
+      "width": "30%",
+      "stack": "vertical",
+      "kind": "stack"
+    },
+    {
+      "id": "bento",
+      "anchor": "center",
+      "width": "auto",
+      "stack": "vertical",
+      "kind": "bento"
+    },
+    {
+      "id": "tray",
+      "anchor": "right",
+      "width": "52px",
+      "stack": "vertical",
+      "kind": "tray"
+    }
+  ],
+  "instances": [
+    {
+      "instance": "chat",
+      "panel": "chat",
+      "region": "left",
+      "anchored": true,
+      "grow": false
+    },
+    {
+      "instance": "tool_log",
+      "panel": "tool_log",
+      "region": "bento",
+      "anchored": false,
+      "grow": false
+    },
+    {
+      "instance": "pending_writes",
+      "panel": "pending_writes",
+      "region": "bento",
+      "anchored": false,
+      "grow": false
+    },
+    {
+      "instance": "settings",
+      "panel": "settings",
+      "region": "bento",
+      "anchored": true,
+      "grow": false
+    },
+    {
+      "instance": "slash_commands",
+      "panel": "slash_commands",
+      "region": "bento",
+      "anchored": false,
+      "grow": false
+    },
+    {
+      "instance": "in_context_files",
+      "panel": "in_context_files",
+      "region": "bento",
+      "anchored": false,
+      "grow": false
+    },
+    {
+      "instance": "task_list",
+      "panel": "task_list",
+      "region": "bento",
+      "anchored": false,
+      "grow": false
+    },
+    {
+      "instance": "files",
+      "panel": "files",
+      "region": "bento",
+      "anchored": true,
+      "grow": false
+    },
+    {
+      "instance": "clock",
+      "panel": "clock",
+      "region": "bento",
+      "app": "clock",
+      "anchored": false,
+      "grow": false
+    },
+    {
+      "instance": "ollama_ps",
+      "panel": "ollama_ps",
+      "region": "bento",
+      "anchored": false,
+      "grow": false
+    },
+    {
+      "instance": "youtube_a",
+      "panel": "youtube",
+      "region": "bento",
+      "anchored": false,
+      "grow": false
+    },
+    {
+      "instance": "web",
+      "panel": "web",
+      "region": "bento",
+      "anchored": false,
+      "grow": false
+    },
+    {
+      "instance": "blog_ops",
+      "panel": "blog_ops",
+      "region": "bento",
+      "anchored": false,
+      "grow": false
+    },
+    {
+      "instance": "bot_ops",
+      "panel": "bot_ops",
+      "region": "bento",
+      "anchored": true,
+      "grow": false
+    }
+  ],
+  "mode_overrides": {
+    "blog": {
+      "instances": {
+        "files": {
+          "hidden": true
+        },
+        "bot_ops": {
+          "hidden": true
+        }
+      }
+    }
+  },
   "grid": {
     "cols": 12,
     "row_height_px": 120,
     "gap_px": 12,
     "narrow_breakpoint_px": 1200
-  },
-  "regions": [
-    { "id": "left",  "anchor": "left",   "width": "30%",  "stack": "vertical" },
-    { "id": "bento", "anchor": "center", "width": "auto", "kind": "bento" },
-    { "id": "tray",  "anchor": "right",  "width": "52px", "stack": "vertical", "kind": "tray" }
-  ],
-  "instances": [
-    { "instance": "chat",             "panel": "chat",             "region": "left",  "anchored": true },
-
-    { "instance": "tool_log",         "panel": "tool_log",         "region": "bento" },
-    { "instance": "pending_writes",   "panel": "pending_writes",   "region": "bento" },
-    { "instance": "settings",         "panel": "settings",         "region": "bento", "anchored": true },
-    { "instance": "slash_commands",   "panel": "slash_commands",   "region": "bento" },
-    { "instance": "in_context_files", "panel": "in_context_files", "region": "bento" },
-    { "instance": "task_list",        "panel": "task_list",        "region": "bento" },
-    { "instance": "files",            "panel": "files",            "region": "bento", "anchored": true },
-    { "instance": "clock",            "panel": "clock",            "region": "bento" },
-    { "instance": "ollama_ps",        "panel": "ollama_ps",        "region": "bento" },
-    { "instance": "youtube_a",        "panel": "youtube",          "region": "bento" },
-    { "instance": "web",              "panel": "web",              "region": "bento" },
-    { "instance": "blog_ops",         "panel": "blog_ops",         "region": "bento" },
-    { "instance": "bot_ops",          "panel": "bot_ops",          "region": "bento", "anchored": true }
-  ],
-  "mode_overrides": {
-    "blog": {
-      "instances": {
-        "files":   { "hidden": true },
-        "bot_ops": { "hidden": true }
-      }
-    }
   }
 }

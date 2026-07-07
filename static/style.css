@@ -1672,6 +1672,7 @@ input:checked + .toggle-slider:before {
 }
 
 .panel-header {
+  position: relative; /* anchor for .panel-pill-menu */
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1689,6 +1690,24 @@ input:checked + .toggle-slider:before {
   letter-spacing: 0.5px;
   font-size: 10px;
   opacity: 0.85;
+}
+
+/* App identity chip (apps-over-panels, D6): small tag after the title on
+   panels that belong to an app. Visually subordinate to the title. */
+.panel-app-chip {
+  font-size: 9px;
+  letter-spacing: 0.4px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--glass-border);
+  background: var(--panel-input, rgba(255, 255, 255, 0.05));
+  opacity: 0.6;
+  margin-right: auto; /* hug the title, push actions right */
+}
+
+/* Same-app tray icons: subtle shared tint so the cluster reads as a group. */
+.tray-icon[data-app] {
+  border-style: dashed;
 }
 
 .panel-actions {
@@ -1792,6 +1811,49 @@ input:checked + .toggle-slider:before {
 
 .panel-pill-btn:active {
   background: var(--panel-response, rgba(255, 255, 255, 0.12));
+}
+
+/* ⚙ pill popover: manual tileflow-state cycling. Anchored to the header
+   (the pill clips overflow); sits above sibling panels. */
+.panel-pill-menu {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  min-width: 96px;
+  padding: 4px;
+  background: var(--panel-outer, rgba(20, 20, 28, 0.92));
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid var(--glass-border);
+  border-radius: 10px;
+  box-shadow: var(--glass-shadow), inset 0 1px 0 var(--glass-highlight);
+}
+
+.panel-pill-menu-item {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--response-text);
+  font-family: inherit;
+  font-size: 11px;
+  text-align: left;
+  padding: 5px 8px;
+  border-radius: 6px;
+  opacity: 0.75;
+}
+
+.panel-pill-menu-item:hover {
+  opacity: 1;
+  background: var(--panel-input, rgba(255, 255, 255, 0.08));
+}
+
+.panel-pill-menu-item.is-current {
+  opacity: 1;
+  font-weight: 600;
+  background: var(--panel-response, rgba(255, 255, 255, 0.06));
 }
 
 /* Body container. Handlers' returned HTML lands here. Padding lives on the

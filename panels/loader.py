@@ -78,6 +78,14 @@ class PanelManifest(BaseModel):
     # whose content is per-instance (youtube, web) opt in.
     multi_instance: bool = False
     tileflow: PanelTileflow = Field(default_factory=PanelTileflow)
+    # Owning app (apps-over-panels primitive). None for top-level panels;
+    # set by discovery for panels found under apps/<app>/panels/<name>/.
+    # Never declared in panel.json — derived from the folder location.
+    app: Optional[str] = None
+    # Tier-3 action whitelist: module-level functions (in the handler's
+    # module) callable via POST /panels/{name}/action/{fn}. Empty = no
+    # actions. See docs/apps.md.
+    actions: list[str] = Field(default_factory=list)
 
     @field_validator("name")
     @classmethod
@@ -146,9 +154,12 @@ class InstanceScoreOverrides(BaseModel):
     force_state: Optional[Literal["dormant", "idle", "active", "focused"]] = None
 
 
-# Legacy alias — kept so existing layout files with `tileflow.locked_*` keep
-# loading. The engine ignores the locked_* fields; users who want those
-# semantics should migrate to score_overrides.
+# User floors (Stage 3). Set via the `set_instance_floor` tool or by hand in
+# the layout file; honored by static/tileflow-engine.js:
+#   - locked_floor:  runtime state never drops below this (dormant<idle<active<focused).
+#   - locked_size:   size class never shrinks below this; also blocks tray routing.
+#   - never_dormant: dormant requests clamp to idle.
+# Inherits the score-override fields so one block covers both knobs.
 class InstanceTileflow(InstanceScoreOverrides):
     locked_floor: Optional[Literal["dormant", "idle", "active", "focused"]] = None
     locked_size: Optional[Literal["icon", "small", "medium", "large", "hero"]] = None
@@ -162,6 +173,13 @@ class LayoutInstance(BaseModel):
     # real panel (panels/chat/). See docs/panels.md.
     panel: str
     region: str
+    # D12: owning app for instances spawned by the app launcher. None for
+    # plain panel instances.
+    app: Optional[str] = None
+    # The app-instance id shared by all panels of one launch (e.g.
+    # "hoops.g1" — dots, not colons: Windows filenames). None means
+    # "<app>.default" for hand-placed app panels.
+    app_instance: Optional[str] = None
     anchored: bool = False
     grow: bool = False
     grow_max_height: Optional[int] = None
@@ -202,6 +220,13 @@ class PanelLoadError(Exception):
 _REGISTRY: dict[str, PanelManifest] = {}
 _LAST_ERRORS: dict[str, str] = {}
 
+# Runtime overlay: last pushed tileflow state per instance (transient "right
+# now" intent — model bubbled a panel, video started playing). Lives here so
+# both server.py (WS broadcast + replay-on-connect) and tools/core.py
+# (get_layout / the prompt layout descriptor) can read it without an import
+# cycle. Cleared on process restart by design; panel_layout.json is the floor.
+tileflow_overlay: dict[str, str] = {}
+
 
 def _validate_tier_invariants(m: PanelManifest, panel_dir: Path) -> None:
     if m.tier == 0:
@@ -225,28 +250,64 @@ def _validate_tier_invariants(m: PanelManifest, panel_dir: Path) -> None:
             raise PanelLoadError(f"{m.name}: tier 3 must not set `url` or `view`")
 
 
+def _load_panel_manifest(child: Path, app_name: Optional[str] = None) -> None:
+    """Validate one panel folder into the registry; record errors per-panel
+    (keyed with the app prefix for app panels) so one bad manifest doesn't
+    tank the whole UI."""
+    err_key = f"{app_name}/{child.name}" if app_name else child.name
+    manifest_path = child / "panel.json"
+    if not manifest_path.is_file():
+        return
+    try:
+        data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        m = PanelManifest.model_validate(data)
+        if m.name != child.name:
+            raise PanelLoadError(f"name '{m.name}' must match folder '{child.name}'")
+        _validate_tier_invariants(m, child)
+        if m.name in _REGISTRY:
+            other = _REGISTRY[m.name]
+            raise PanelLoadError(
+                f"panel name '{m.name}' collides with the one from "
+                f"{'app ' + other.app if other.app else 'top-level panels/'} — "
+                "panel names are a single namespace across panels/ and apps/"
+            )
+        m.app = app_name
+        _REGISTRY[m.name] = m
+    except (json.JSONDecodeError, ValidationError, PanelLoadError, OSError) as e:
+        _LAST_ERRORS[err_key] = str(e)
+
+
 def discover() -> dict[str, PanelManifest]:
-    """Scan PANELS_DIR for panel.json manifests; build the registry. Errors
-    are recorded per-panel so one bad manifest doesn't tank the whole UI."""
+    """Scan PANELS_DIR — plus every discovered app's panels/ subdir — for
+    panel.json manifests; build the registry. Panel names are one namespace:
+    an app panel that shadows a top-level panel is an error. Top-level panels
+    load first so the error lands on the app (the later arrival)."""
     _REGISTRY.clear()
     _LAST_ERRORS.clear()
-    if not paths.PANELS_DIR.is_dir():
-        return {}
-    for child in sorted(paths.PANELS_DIR.iterdir()):
-        if not child.is_dir() or child.name.startswith("."):
-            continue
-        manifest_path = child / "panel.json"
-        if not manifest_path.is_file():
-            continue
-        try:
-            data = json.loads(manifest_path.read_text(encoding="utf-8"))
-            m = PanelManifest.model_validate(data)
-            if m.name != child.name:
-                raise PanelLoadError(f"name '{m.name}' must match folder '{child.name}'")
-            _validate_tier_invariants(m, child)
-            _REGISTRY[m.name] = m
-        except (json.JSONDecodeError, ValidationError, PanelLoadError, OSError) as e:
-            _LAST_ERRORS[child.name] = str(e)
+    if paths.PANELS_DIR.is_dir():
+        for child in sorted(paths.PANELS_DIR.iterdir()):
+            if not child.is_dir() or child.name.startswith("."):
+                continue
+            _load_panel_manifest(child, app_name=None)
+
+    # App-contributed panels. The apps loader validates that every declared
+    # panel folder has a manifest; here we validate the manifests themselves
+    # and enforce the multi-instance rule from app_harness.md §5.1.
+    from apps import loader as apps_loader
+    for app_name, app_manifest in apps_loader.registry().items():
+        for panel_name in app_manifest.panels:
+            pdir = paths.APPS_DIR / app_name / "panels" / panel_name
+            _load_panel_manifest(pdir, app_name=app_name)
+            m = _REGISTRY.get(panel_name)
+            if (
+                m is not None and m.app == app_name
+                and app_manifest.multi_instance and not m.multi_instance
+            ):
+                del _REGISTRY[panel_name]
+                _LAST_ERRORS[f"{app_name}/{panel_name}"] = (
+                    f"app '{app_name}' is multi_instance, so every member panel "
+                    f"must set multi_instance: true ('{panel_name}' does not)"
+                )
     return dict(_REGISTRY)
 
 
@@ -263,6 +324,9 @@ def get(name: str) -> Optional[PanelManifest]:
 
 
 def panel_dir(name: str) -> Path:
+    m = _REGISTRY.get(name)
+    if m is not None and m.app:
+        return paths.APPS_DIR / m.app / "panels" / name
     return paths.PANELS_DIR / name
 
 
@@ -377,6 +441,93 @@ def validate_pin_for_instance(
             )
 
 
+# ── Condensed views for the model (Stage 3) ────────────────────────────────
+# The full layout sheet / manifest registry is more than a model needs to
+# reason about placement. These strip down to placement-relevant fields and
+# merge the live runtime overlay so tools and the per-turn prompt descriptor
+# share one picture. See docs/tileflow.md "Stage 3".
+
+def _instance_state(inst: LayoutInstance, manifest: Optional[PanelManifest]) -> str:
+    live = tileflow_overlay.get(inst.instance)
+    if live:
+        return live
+    if manifest is not None:
+        return manifest.tileflow.default_state
+    return "idle"
+
+
+def condensed_layout() -> dict:
+    layout = load_layout()
+    grid = layout.grid or GridConfig()
+    instances = []
+    for inst in layout.instances:
+        m = _REGISTRY.get(inst.panel)
+        entry: dict[str, Any] = {
+            "instance": inst.instance,
+            "panel": inst.panel,
+            "region": inst.region,
+            "state": _instance_state(inst, m),
+        }
+        if inst.anchored:
+            entry["anchored"] = True
+        if inst.pin is not None:
+            entry["pin"] = inst.pin.model_dump()
+        if inst.tileflow is not None:
+            tf = inst.tileflow.model_dump(exclude_none=True, exclude_defaults=True)
+            if tf:
+                entry["floors"] = tf
+        instances.append(entry)
+    return {
+        "grid": {"cols": grid.cols, "row_height_px": grid.row_height_px, "gap_px": grid.gap_px},
+        "regions": [{"id": r.id, "kind": r.kind} for r in layout.regions],
+        "instances": instances,
+    }
+
+
+def condensed_panels() -> list[dict]:
+    out = []
+    for m in _REGISTRY.values():
+        out.append({
+            "name": m.name,
+            "title": m.title,
+            "tier": m.tier,
+            "multi_instance": m.multi_instance,
+            "min": m.display.min,
+            "preferred": m.display.preferred,
+            "default_state": m.tileflow.default_state,
+        })
+    return out
+
+
+def layout_descriptor() -> str:
+    """Compact per-turn prompt block describing the live bento. Kept short —
+    it rides along in every system prompt where layout tools are available."""
+    c = condensed_layout()
+    g = c["grid"]
+    lines = [
+        "<layout>",
+        f"bento grid: {g['cols']} cols × {g['row_height_px']}px rows, {g['gap_px']}px gap. "
+        "Size classes: small=3 cols, medium=6, large=6×2rows, hero=12×2. "
+        "Pins are floors, not absolutes — a focused panel can still outgrow its pin.",
+        "instances (instance / panel / region / state / extras):",
+    ]
+    for i in c["instances"]:
+        extras = []
+        if i.get("anchored"):
+            extras.append("anchored")
+        if "pin" in i:
+            p = i["pin"]
+            extras.append(f"pin {p['col']},{p['row']} span {p['cols']}x{p['rows']}")
+        if "floors" in i:
+            extras.append("floors " + json.dumps(i["floors"]))
+        lines.append(
+            f"- {i['instance']} / {i['panel']} / {i['region']} / {i['state']}"
+            + (f" / {'; '.join(extras)}" if extras else "")
+        )
+    lines.append("</layout>")
+    return "\n".join(lines)
+
+
 # ── Tier-3 view rendering ──────────────────────────────────────────────────
 
 def _import_handler(name: str, spec: str):
@@ -404,12 +555,60 @@ def _import_handler(name: str, spec: str):
     return fn
 
 
-async def render_view(name: str) -> str:
+def build_context(m: PanelManifest, instance_id: Optional[str]):
+    """Construct the HarnessContext for one render/action call (D4: always
+    present; app-less panels get app_id=None and raising state methods).
+    Looks the layout instance up for per-instance config + app_instance."""
+    from apps.context import HarnessContext
+    config = None
+    app_instance = None
+    if instance_id:
+        try:
+            layout = load_layout()
+            inst = next((i for i in layout.instances if i.instance == instance_id), None)
+            if inst is not None:
+                config = inst.config
+                app_instance = inst.app_instance
+        except Exception:
+            pass  # a broken layout file shouldn't block rendering
+    return HarnessContext(
+        app_id=m.app,
+        instance_id=instance_id,
+        app_instance=app_instance,
+        config=config,
+    )
+
+
+def _schema_mismatch_banner(m: PanelManifest, e: Exception) -> str:
+    """In-panel banner for StateSchemaMismatch (D11): offer a one-click state
+    reset via the Phase D endpoint (reset-only mode — empty body)."""
+    import html as _html
+    return f"""
+<div class="panel-error" style="display:flex;flex-direction:column;gap:8px;padding:12px;">
+  <div style="font-size:12px;opacity:.85;">{_html.escape(str(e))}</div>
+  <div style="font-size:11px;opacity:.6;">This save is from an older version of the app. Reset state to continue?</div>
+  <button style="align-self:flex-start;font-size:11px;padding:4px 10px;cursor:pointer;"
+          onclick="fetch('/api/apps/{m.app}/update?reset_state=1', {{method:'POST'}})
+                   .then(() => window.harness && window.harness.refreshNow('{m.name}'))">
+    reset app state
+  </button>
+</div>"""
+
+
+async def render_view(
+    name: str,
+    instance_id: Optional[str] = None,
+    event_sink: Optional[list] = None,
+) -> str:
     """Render a tier-1 or tier-3 panel's view as an HTML fragment.
 
-    Tier 1: read the static file. Tier 3: call the handler function.
-    Tier 0/2 panels do not have a host-rendered view — caller should not call
-    this for them.
+    Tier 1: read the static file. Tier 3: call the handler function — with a
+    `harness_ctx` kwarg iff the handler declares one (kwarg-only, so legacy
+    zero-arg handlers keep working). Tier 0/2 panels do not have a
+    host-rendered view — caller should not call this for them.
+
+    `event_sink`: caller-owned list; any app_events the handler queued on its
+    context are appended here for the caller to broadcast (Phase C).
     """
     m = _REGISTRY.get(name)
     if m is None:
@@ -417,11 +616,26 @@ async def render_view(name: str) -> str:
     if m.tier == 1:
         return (panel_dir(name) / m.view).read_text(encoding="utf-8")
     if m.tier == 3:
+        import inspect
+        from apps.context import StateSchemaMismatch
         fn = _import_handler(name, m.handler)
-        result = fn()
-        # Allow handlers to be sync or async.
-        if hasattr(result, "__await__"):
-            result = await result
+        kwargs = {}
+        ctx = None
+        try:
+            if "harness_ctx" in inspect.signature(fn).parameters:
+                ctx = build_context(m, instance_id)
+                kwargs["harness_ctx"] = ctx
+        except (TypeError, ValueError):
+            pass  # builtins/uninspectable callables: call bare
+        try:
+            result = fn(**kwargs)
+            # Allow handlers to be sync or async.
+            if hasattr(result, "__await__"):
+                result = await result
+        except StateSchemaMismatch as e:
+            return _schema_mismatch_banner(m, e)
+        if ctx is not None and ctx.pending_events and event_sink is not None:
+            event_sink.extend(ctx.pending_events)
         if not isinstance(result, str):
             raise PanelLoadError(f"{name}: handler must return str (HTML), got {type(result).__name__}")
         return result
