@@ -1,9 +1,17 @@
 # UI structure
 
-Single-page app. All logic is in `static/app.js`. No frameworks, no build step —
-edit → hard-refresh.
+Single-page app. No frameworks, no build step — edit → hard-refresh.
 
-## DOM layout (index.html)
+> **Scope note (2026-07):** the *outer* layout is now the panel system —
+> regions + tiles built by `static/panel-shell.js` from
+> `layout/panel_layout.json`, with the tileflow engine arranging the bento
+> (see `docs/panels.md`, `docs/tileflow.md`, `docs/apps.md`). This doc
+> remains accurate for what lives *inside* panel content (the
+> `.nested-panel` primitives, chat DOM ids, event flow in `static/app.js`)
+> — but the top-level tree below is historical: those blocks are now
+> individual panels' view content, not hardcoded index.html structure.
+
+## DOM layout (historical shape — now distributed across panel views)
 
 ```
 body.canvas
@@ -28,8 +36,9 @@ body.canvas
 │   │   ├─ .nested-panel#context-panel  files the model has read
 │   │   └─ .nested-panel#task-panel     task.md checklist
 │   └─ .file-panel.info-panel     reference — stacked sub-panels:
-│       ├─ .nested-panel         knowledge-pack chips
 │       └─ .nested-panel         editable slash commands
+│                                (pack chips retired — manuals are
+│                                 model-pulled via list_manual/load_manual)
 └─ .right-column
     ├─ .right-grid
     │   └─ .file-panel            project file tree
@@ -75,8 +84,7 @@ Elements with ids the JS hooks into:
 | id              | what it is                                   |
 | --------------- | -------------------------------------------- |
 | `dir-input`     | project path textbox                         |
-| `packs-chips`   | pack chip container                          |
-| `chat-textbox`  | main input textarea                          |
+| `chat-textbox`  | main input textarea                         |
 | `stop-btn`      | cancel button (disabled unless `busy`)       |
 | `response-text` | streamed assistant output target             |
 | `tool-panel`    | tool log panel (sits center)                 |
@@ -103,7 +111,7 @@ tool_result   → updateToolResult(content)
 pending_writes → showPendingWrites(writes)    (apply/reject banner)
 writes_applied / writes_rejected → hidePendingWrites()
 reset_complete → clearResponse / clearToolPanel / clearContextFiles
-info          → log() + refreshTree() + refreshPacks() + retitle
+info          → log() + refreshTree() + retitle
 error         → log(..., "error")
 usage         → updateContextBar(total, max)
 done          → setInputEnabled(true) ; addDivider()
@@ -116,7 +124,6 @@ Outbound calls are all simple `ws.send(JSON.stringify({...}))`:
 - `resetConversation()` — from the reset button
 - `compactConversation()` — from the compact button
 - `setDir()` — from the "set" button next to the dir input
-- `syncPacksToServer()` — whenever a pack chip is toggled
 
 ## Slash commands
 

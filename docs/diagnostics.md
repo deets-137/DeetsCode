@@ -24,6 +24,8 @@ on every flow pass. Hover-inspect any `.panel-instance` to read them:
 | `data-tileflow-class` | Effective size class: `icon` / `small` / `medium` / `large` / `hero`. |
 | `data-tileflow-score` | Final score the engine computed for this panel this pass. |
 | `data-tileflow-order` | CSS `order` value driving grid placement (negative of score). |
+| `data-app` / `data-app-instance` | Owning app + app-instance id, on app-owned tiles and tray icons only. The `.panel-app-chip` in the header shows the same. |
+| `data-instance-config` | JSON of the layout instance's `config` dict, on `.panel-content` (tier-1 consumption path). |
 
 If a panel looks wrong, this is the first place to look — no script required.
 
@@ -49,6 +51,8 @@ nothing persists past a page reload.
 | `harness.gridConfig()` | `{cols, rowPx, gapPx, colPx, bentoWidthPx}` | Live measurement of the bento grid. Useful for `setSpan` math. |
 | `harness.getState(instanceId)` | state string | Peek current state without mutating. |
 | `harness.recomputeLayout()` | — | Force a flow pass without changing state. Use after editing WEIGHTS. |
+| `harness.debugInstances()` | `{id: layoutInstance}` | Snapshot of the shell's live instance index — the fastest way to check whether a `layout_updated` re-sync actually landed (pins, floors, app fields). |
+| `harness.app.of(el)` | `{app, appInstance, instance, panel}` | Identity of the tile enclosing any element. |
 
 ### Runtime cell sizing
 
@@ -94,6 +98,24 @@ Plain curl / browser-bar friendly. All read-only unless noted.
 | PUT | `/api/layout` | Replace the layout (validated via Pydantic before write). |
 | POST | `/api/layout/instances/{id}/pin` body `{col, row, cols, rows}` | Pin an instance to a grid cell. |
 | DELETE | `/api/layout/instances/{id}/pin` | Unpin. |
+
+All three layout writes broadcast a `layout_updated` WS frame; every
+connected tab re-syncs live (no reload).
+
+### Apps
+
+| Method | URL | Purpose |
+|---|---|---|
+| GET | `/api/apps` | Discovered app manifests + per-app load errors. |
+| GET | `/api/apps/{name}` | One app manifest. |
+| POST | `/api/apps/reload` | Re-discover apps, then panels. |
+| POST | `/api/apps/{name}/instances` | Launch an app instance (mounts its panels live). |
+| DELETE | `/api/apps/{name}/instances/{app_instance}` | Unmount one app instance. |
+| POST | `/api/apps/{name}/update` | Bundle update from zip; `?reset_state=1` for state wipes. See [apps.md](apps.md). |
+
+App state DBs are plain sqlite at `apps/<app>/state/<app_instance>.db`
+(table `state(key, value, schema_version, updated_at)`) — open them
+directly when debugging an app's ledger.
 
 ### Tileflow runtime overlay
 

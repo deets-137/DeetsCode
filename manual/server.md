@@ -8,7 +8,6 @@ single user, state in module globals + per-WebSocket locals + SQLite.
 | Method | Path         | Returns                                     | Caller              |
 | ------ | ------------ | ------------------------------------------- | ------------------- |
 | GET    | `/tree`      | `{tree: [...], root: str}` JSON of files    | `refreshTree()`     |
-| GET    | `/packs`     | `{packs: [{name, chars, scope}]}`           | `refreshPacks()`    |
 | GET    | `/pending`   | `{writes: {path: content}}` (debug)         | manual curl only    |
 | GET    | `/api/prompts` | `{prompts: [name, …]}`                    | mode picker         |
 | GET    | `/models`    | Ollama model list                           | model picker        |
@@ -17,6 +16,11 @@ single user, state in module globals + per-WebSocket locals + SQLite.
 | POST   | `/api/session/{sid}/control` | `{action, ...}` → routes to live session's control queue | bot-ops control panel, external scripts |
 | WS     | `/ws`        | bidirectional JSON events                   | `app.js connect()`  |
 | GET    | `/*`         | static files under `static/`                | browser             |
+
+Panel/layout/tileflow/system_log routes (`/api/panels*`, `/api/layout*`,
+`/api/tileflow/*`, `/api/system_log*`, `/panels/<name>/view|action|static`)
+are cataloged in `docs/panels.md` § Endpoints and `docs/diagnostics.md`;
+app lifecycle routes (`/api/apps*`) in `docs/apps.md` § Endpoints.
 
 ## WebSocket protocol
 
@@ -32,8 +36,8 @@ with a `type` the client's `ws.onmessage` switches on.
 | `cancel`         | —                           | cancels current agent task                                    |
 | `reset`          | —                           | cancels task + clears messages/pending/read-files             |
 | `set_dir`        | `path: str`                 | switches `project_dir`, clears state                          |
-| `set_packs`      | `names: list[str]`          | stores selected pack names for next turn                      |
 | `set_prompt`     | `prompt: str`               | switches mode; **scrubs tool artifacts from history**         |
+| `system_log`     | `events: list[dict]`        | batched UI interaction events → `storage.system_log`          |
 | `slash`          | `tool: str, args: dict`     | run a whitelisted tool directly (no model call)               |
 | `compact`        | —                           | summarize + replace `messages` with a 2-entry summary         |
 | `apply_writes`   | —                           | flushes `pending_writes` to disk                              |
@@ -59,24 +63,31 @@ with a `type` the client's `ws.onmessage` switches on.
 | `error`          | `content: str`                      | red-flagged error line                           |
 | `reset_complete` | —                                   | clear UI after a reset                           |
 | `done`           | —                                   | turn over; re-enable input                       |
+| `task_updated`   | —                                   | task panel should refresh                        |
+| `tileflow_state` | `instance, state`                   | runtime bento-state overlay (replayed on connect)|
+| `tileflow_recompute` | —                               | client re-runs its flow pass                     |
+| `layout_updated` | —                                   | persisted layout changed; client re-syncs from `/api/layout` |
+| `app_event`      | `app_id, app_instance, event_name, payload` | app-scoped panel event (see docs/apps.md) |
+
+(Blog mode adds a `blog_*` family — see the blog WS handlers in server.py.)
 
 `done` is guaranteed by the `finally` block in `agent_loop`, even on cancel or
 exception. The client relies on this to un-gray the input.
 
 ## The agent loop
 
-`_agent_loop_impl(ws, user_content, messages, state, selected_packs, selected_prompt, session_id, user_name)`:
+`_agent_loop_impl(ws, user_content, messages, state, selected_prompt, session_id, user_name)`:
 
 1. Reads `prompts/<selected_prompt>.md` (so edits take effect without restart).
 2. Substitutes `{project_dir}` and `{file_tree}` (tree is cached on `state` — built once per turn, not per iteration).
-3. Appends a `## Reference Documentation (on-demand)` manifest — pack names and `## ` section headings only, NOT bodies.
+3. Appends a live `<layout>` bento descriptor (`panels/loader.py:layout_descriptor`) — rebuilt every turn so the model sees current pins/states/floors. Manual docs are NOT inlined; the model pulls them via `list_manual`/`load_manual`.
 4. `tool_defs, execute = load_tools(selected_prompt)` — re-loaded every iteration so `/mode` changes take effect mid-session without a restart.
 5. Builds `loop_messages = [system] + messages`.
 6. Per iteration:
    - `_trim_stale_tool_results(loop_messages)` — older `role: tool` bodies (>400 chars, not in the most recent 3) replaced with a stub.
    - `force_tool = iteration == 1 AND task.md has no [/] step AND message is not conversational`. If true, `tool_choice="required"`. Otherwise `"auto"`.
    - Open streaming `chat.completions.create` with `tool_defs`.
-7. Accumulates `reasoning_buf`, `content_buf`, `tool_calls_buf`. `<think>…</think>` blocks inside `content` are filtered by `ThinkStreamFilter` before client and before append.
+7. Accumulates `reasoning_buf`, `content_buf`, `tool_calls_buf`. `<think>…</think>` AND `<system>…</system>` blocks inside `content` are filtered by `ThinkStreamFilter` before client and before append (echoed directives route to the thinking stream).
 8. If no tool calls in the final chunk → append assistant text to `messages`, save session, exit.
 9. Else append assistant-with-tool-calls to `loop_messages`, execute each tool, append `{role: "tool", content}` results, loop.
 10. Cap: `MAX_ITERATIONS = 25`. Past that, emits an error and stops.
@@ -116,9 +127,13 @@ per-channel state and per-player action enforcement.
 - `list_dir(path)` — directory listing, hides dotfiles.
 - `roll_dice(sides, count?, modifier?, advantage?, label?)` — instant probabilistic outcomes.
 - `update_task(content?)` — writes `task.md` (markdown checklist). Empty `content` returns the current file.
-- `list_packs()` — manifest of available reference packs and their sections.
-- `load_pack(name, section?)` — pull a pack (or one `## ` section) into context.
+- `list_manual()` / `load_manual(name, section?)` — lazy project manual docs.
 - `register_path(name, value, kind)` — append/replace a constant in `paths.py`. Single source of truth for filesystem paths; see `manual/tools.md`.
+- Layout set (`manual/tools.md` § Layout tools): `get_layout`, `get_panels`,
+  `pin_instance`, `unpin_instance`, `set_instance_floor`,
+  `apply_layout_preset`, `save_layout_preset`, `set_instance_state`,
+  `recompute_layout`. Mutations broadcast `layout_updated` /
+  `tileflow_state` from the dispatch site in `_agent_loop_impl`.
 
 **DeetsCode pack (mode = "DeetsCode"):**
 - `write_file(path, content)` — queues into `pending_writes`, never touches disk.
@@ -129,6 +144,13 @@ per-channel state and per-player action enforcement.
 - `run_command(command)` — allowlisted, metachar-rejected, `shell=False` + `shlex.split`, timeout + output cap.
 
 **Chess pack (mode = "chess"):** new_game, move, board, resign, etc. See `tools/chess.py`.
+
+**DnD pack (mode = "dnd"):** dnd_new_campaign, dnd_get_state,
+dnd_update_character, dnd_set_scene, dnd_log_event, dnd_combat — a campaign
+ledger over `{project_dir}/dnd/campaign_state.json`. Dice come from core
+`roll_dice`. See `tools/dnd.py`.
+
+**Blog pack (mode = "blog"):** see `tools/blog.py` / `tools/blog_service.py`.
 
 ## Adding a new tool / new mode
 
@@ -188,23 +210,22 @@ On `{type: "compact"}`:
 3. Replaces `messages` with `[{user: "Summary of prior conversation:"}, {assistant: summary}]`.
 4. Emits a `compacted` event.
 
-Pending writes, read-files, and pack selection are untouched.
+Pending writes and read-files are untouched.
 
 ## Security guards
 
 - **Path escape**: every path is `(project_dir / arg).resolve()` then checked against `project_dir.resolve()`.
-- **Pack name injection**: `Path(name).name` strips any separators before building the `.md` filename.
+- **Manual/preset name injection**: `Path(name).name` strips any separators before building the `.md`/`.json` filename (same guard in `load_manual` and the layout-preset tools).
 - **run_command**: metachar reject + allowlist + `shell=False`. Do not loosen without thought.
 - **XSS**: tool names/args/results go through `escapeHtml()` on the client. Don't bypass that helper.
 
 ## State that resets
 
-| Action          | `messages`    | `pending_writes` | `read_files` | `selected_packs` | `selected_prompt` | `project_dir` |
-| --------------- | :-----------: | :--------------: | :----------: | :--------------: | :---------------: | :-----------: |
-| `set_dir`       | ✓             | ✓                | ✓            | —                | —                 | →new          |
-| `reset`         | ✓             | ✓                | ✓            | —                | —                 | —             |
-| `set_prompt`    | tool calls scrubbed | —          | —            | —                | →new              | —             |
-| WS disconnect   | —             | ✓                | ✓            | —                | —                 | —             |
-| `set_packs`     | —             | —                | —            | →incoming        | —                 | —             |
+| Action          | `messages`    | `pending_writes` | `read_files` | `selected_prompt` | `project_dir` |
+| --------------- | :-----------: | :--------------: | :----------: | :---------------: | :-----------: |
+| `set_dir`       | ✓             | ✓                | ✓            | —                 | →new          |
+| `reset`         | ✓             | ✓                | ✓            | —                 | —             |
+| `set_prompt`    | tool calls scrubbed | —          | —            | →new              | —             |
+| WS disconnect   | —             | ✓                | ✓            | —                 | —             |
 
 (`✓` = fully cleared. `set_prompt` preserves user/assistant text turns but drops `role: tool` messages and `tool_calls` fields on assistant messages.)

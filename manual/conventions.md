@@ -8,7 +8,8 @@ Keep these in mind when changing the harness.
 - **No build step on the client.** Edit `static/*.js|css|html`, hard-refresh.
 - **No auto-reload on the server.** Edit `server.py` or any file under `tools/`, restart uvicorn.
 - **`prompts/<mode>.md` is hot.** Re-read every turn — no restart needed for prompt tweaks.
-- **Packs are hot.** `/packs` scan runs on every request. Pack bodies are not in the standing prompt — the model pulls them via `load_pack` on demand.
+- **Manual docs are hot.** `list_manual` scans the folder per call. Bodies are not in the standing prompt — the model pulls them via `load_manual` on demand.
+- **Panels/layout are hot-ish.** `POST /api/panels/reload` (or `/api/apps/reload`) rescans without a restart; any layout write broadcasts `layout_updated` and every tab re-syncs live.
 - **Tool schema is hot-per-turn.** `load_tools(mode)` is called at the top of every agent-loop iteration, so `/mode` switches pick up a new schema without a restart.
 
 ## Security guards that must stay
@@ -16,10 +17,10 @@ Keep these in mind when changing the harness.
 Nothing here runs behind auth, but Gemma can still write tool-call JSON that
 includes shell commands or path traversal. These guards catch that:
 
-- **Path escape** (`read_file`, `edit_file`, `write_file`, `list_dir`, `search`, `load_pack`):
+- **Path escape** (`read_file`, `edit_file`, `write_file`, `list_dir`, `search`, `load_manual`):
   `(project_dir / arg).resolve()` then `.is_relative_to(project_dir.resolve())`.
   Don't skip this on any new path-taking tool.
-- **Pack names**: `Path(name).name` strips separators before filename construction.
+- **Manual/preset names**: `Path(name).name` strips separators before filename construction.
 - **`run_command`**: metacharacter reject + `shlex.split` + `shell=False` + a short allowlist in `tools/coding.py`. Don't loosen without thought.
 - **XSS**: `escapeHtml()` wraps every tool arg/result/filename before innerHTML.
 
@@ -57,7 +58,7 @@ older than the 3 most recent (and >400 chars) with a short stub. Large
 `read_file` dumps stop accumulating across a 25-iteration loop. Tools that
 return frequently-referenced small output (`list_context_files`) stay intact.
 
-## `<think>` blocks
+## `<think>` / `<system>` blocks
 
 The model's reasoning is streamed in two ways:
 1. OpenAI `reasoning` field in `model_extra` → server forwards as `thinking` events.
@@ -65,18 +66,22 @@ The model's reasoning is streamed in two ways:
 
 `ThinkStreamFilter` strips (2) before forwarding to the client and before
 appending to `messages`, so it doesn't leak into the next turn's prompt.
+It hides `<system>…</system>` blocks the same way: the agent loop injects
+system directives after tool results, and models sometimes echo them back
+verbatim — those echoes route to the thinking stream, never visible chat
+(fixed 2026-07-06; see friction.md).
 
-## Prompt + packs pattern
+## Prompt + manual pattern
 
-System prompt = `prompts/<mode>.md` + file tree + a `## Reference Documentation (on-demand)`
-manifest listing selected pack names and their `## ` section headings. Pack
-bodies are NOT inlined — the model calls `load_pack(name, section?)` to pull
-them in as tool output only when needed.
+System prompt = `prompts/<mode>.md` + file tree + a live `<layout>` bento
+descriptor (rebuilt every turn — see `panels/loader.py:layout_descriptor`).
+Manual bodies are NOT inlined — the model calls `load_manual(name, section?)`
+to pull them in as tool output only when needed.
 
-- Global packs live in `packs/*.md`.
-- Project-scoped packs live in `<project_dir>/manual/*.md` and override globals on name collision.
-- `readme.md` in either folder is skipped (it's documentation about the folder, not a pack).
-- Pack files should be terse and factual. The local model is small; verbose prose dilutes the signal.
+- Manual docs live in `<project_dir>/manual/*.md` (project-scoped only; the
+  legacy global `packs/` folder was retired).
+- `readme.md` in the folder is skipped (it's documentation about the folder, not a manual doc).
+- Manual files should be terse and factual. The local model is small; verbose prose dilutes the signal.
 - **Structure packs with `## ` level-2 headings.** A pack with no subheadings can only be loaded whole, defeating the on-demand loader.
 
 ## Prompt authoring

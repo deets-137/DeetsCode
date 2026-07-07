@@ -1,6 +1,10 @@
 # app_harness.md — Apps-over-Panels primitive
 
-**Status:** spec, pre-implementation. Date stamped 2026-05-19.
+**Status:** BUILT 2026-07-06 (Phases A–D all landed; see docs/apps.md for the
+as-built contract and deviations — WS envelope key is `type` not `kind`;
+app-instance ids use dots not colons for Windows filenames; a generic panel
+action route `POST /panels/{name}/action/{fn}` was added for app_hoops §8.2).
+Originally specced 2026-05-19.
 **Forcing function:** Hoops (see `../New folder/Hoops/app_hoops.md`).
 **Reads alongside:** `docs/archive/dev_project.md` (north star), `docs/panels.md` (panel contract), `docs/tileflow.md` (sizing/state model).
 

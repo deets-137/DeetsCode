@@ -95,6 +95,21 @@ wrapper. There is **no shadow DOM** — host CSS wins by design, so panels
 look native without effort. Inline `<script>` tags re-execute on every
 view fetch via clone-and-replace.
 
+### Tier-0 panels and tileflow state
+
+Sandboxed iframes can't reach `window.harness`, so tier-0 panels default to
+their manifest `default_state`. To participate in the bento anyway, post a
+message to the host from inside the iframe:
+
+```js
+parent.postMessage({ type: "tileflow.setState", state: "focused" }, "*");
+```
+
+`state` is one of `dormant | idle | active | focused`. The host identifies
+the sender by its `contentWindow` — the message carries no instance id, so a
+panel can only change *its own* state, never a sibling's. Anything else in
+the message is ignored.
+
 ---
 
 ## Manifest reference (`panel.json`)
@@ -116,6 +131,10 @@ engine derives them from `display.preferred`/`min`/`max`. See
   "url":     "...",              // tier 0 only
   "view":    "view.html",        // tier 1 only
   "handler": "server:view",      // tier 3 only ("module:function")
+
+  // Tier 3 only: module-level functions callable via
+  // POST /panels/<name>/action/<fn> (see docs/apps.md § Actions).
+  "actions": ["submit_turn"],
 
   // Display-only in v1 — no enforcement yet. Future tiers will gate.
   "permissions": {
@@ -145,10 +164,13 @@ engine derives them from `display.preferred`/`min`/`max`. See
   // an anchored panel can still go dormant and route to the tray.
   "anchored": false,
 
-  // True = the runtime launcher (coming in a later phase) may spawn
-  // additional instances of this panel. Singletons (settings, files,
-  // clock) leave this false; per-content panels (youtube, web) opt in.
-  // Inert today — flag is consumed by the launcher when it lands.
+  // True = additional instances of this panel may exist at runtime.
+  // Singletons (settings, files, clock) leave this false; per-content
+  // panels (youtube, web) opt in. The app launcher enforces it for app
+  // panels (a multi_instance app requires multi_instance panels), and
+  // view fetches carry `?instance=` so each instance can render its own
+  // content. NOT declared: `app` — the loader derives it from folder
+  // location for panels living under apps/<app>/panels/.
   "multi_instance": false,
 
   // Tileflow knobs (see tileflow.md for the engine).
@@ -275,16 +297,30 @@ for the source of truth):
 | Tools        | `tool_call`, `tool_result` |
 | Writes       | `pending_writes`, `writes_applied`, `writes_rejected` |
 | Tasks        | `task_updated` |
-| Tileflow     | `tileflow_state`, `tileflow_recompute` (shell handles these — usually you don't subscribe directly) |
+| Tileflow     | `tileflow_state`, `tileflow_recompute`, `layout_updated` (shell handles these — usually you don't subscribe directly; `layout_updated` triggers a live re-sync from `/api/layout`) |
+| Apps         | `app_event` — app-scoped panel events; subscribe via `harness.app.subscribe`, not `harness.subscribe` (see [apps.md](apps.md)) |
 | Blog mode    | `blog_posts`, `blog_post`, `blog_post_saved`, `blog_post_deleted`, `blog_song_results`, `blog_movie_results`, `blog_comments`, `blog_comment_deleted`, `blog_preview_url`, `blog_passphrase`, `blog_error` |
 
 ### Tileflow state
 
 | Call | Purpose |
 |------|---------|
-| `harness.setState(instanceId, state)` | Set state for an instance. Triggers a coalesced flow pass on the next frame. No-op if state unchanged. |
+| `harness.setState(instanceId, state)` | Set state for an instance. Triggers a coalesced flow pass on the next frame (falls back to `setTimeout` in hidden tabs where rAF is suspended). No-op if state unchanged. |
 | `harness.getState(instanceId)` | Read the current state. |
+| `harness.setSpan(instanceId, {cols, rows} \| null)` | Panel-controlled span override past the class table (e.g. match a video's aspect). `null` releases it. |
+| `harness.gridConfig()` | Live grid metrics: `{cols, rowPx, gapPx, colPx, bentoWidthPx}`. |
 | `harness.recomputeLayout()` | Force a fresh flow pass without changing state. |
+| `harness.debugInstances()` | Read-only snapshot of the live instance index (post layout re-syncs). Debug only. |
+
+### App-scoped API (`harness.app.*`)
+
+For panels that belong to an app — subscription scope is discovered from
+the calling script's enclosing tile. Full contract in [apps.md](apps.md).
+
+| Call | Purpose |
+|------|---------|
+| `harness.app.subscribe(eventName, cb, scopeEl?)` | Hear `app_event` frames for *your own* app instance. `cb(payload, frame)`. |
+| `harness.app.of(el)` | `{app, appInstance, instance, panel}` for any element inside a tile. |
 
 ### Interaction logging (`system_log`)
 
@@ -356,7 +392,10 @@ Every panel renders as:
 
 Glass surface, padding, border-radius, title styling, and the pill
 are all shell-rendered. **Your handler returns content only — never
-a title bar.**
+a title bar.** The ⚙ button opens a popover with the four tileflow
+states (manual state cycling); − minimizes to the tray. App panels
+additionally get a `.panel-app-chip` after the title (see
+[apps.md](apps.md)).
 
 To put buttons in the chrome's title bar, return a
 `<div data-panel-actions>` block — the shell hoists its children into
@@ -401,6 +440,15 @@ or localStorage keys.
 `harness.refresh(name, seconds)` and `harness.refreshNow(name)` accept
 either an instance id or a panel name — instance id is more specific
 and the right call for multi-instance panels.
+
+Server side, the shell appends `?instance=<id>` to every view fetch, so
+tier-3 handlers can render per-instance content: declare a `harness_ctx`
+keyword parameter and read `harness_ctx.instance_id` /
+`harness_ctx.config` (the layout instance's `config` dict). Tier-1 views
+get the config as a `data-instance-config` JSON attribute on their
+`.panel-content` element. New instances can be added at runtime — any
+layout write broadcasts `layout_updated` and every client mounts the
+difference live (the app launcher uses this; see [apps.md](apps.md)).
 
 ---
 
@@ -502,17 +550,21 @@ if your new field isn't in the response, it's been stripped at step
 
 | Method | URL                                          | Purpose |
 |--------|----------------------------------------------|---------|
-| GET    | `/api/panels`                                | Registry of discovered panels + load errors |
+| GET    | `/api/panels`                                | Registry of discovered panels (top-level + app-contributed) + load errors |
 | GET    | `/api/panels/<name>`                         | One panel's manifest + status |
-| POST   | `/api/panels/reload`                         | Rescan `panels/` dir (hot reload) |
+| POST   | `/api/panels/reload`                         | Re-discover apps, then panels (hot reload) |
 | GET    | `/api/layout`                                | Current layout JSON |
-| PUT    | `/api/layout`                                | Replace the whole layout (validated) |
-| POST   | `/api/layout/instances/<id>/pin`             | Pin an instance to `{col,row,cols,rows}` |
-| DELETE | `/api/layout/instances/<id>/pin`             | Unpin |
+| PUT    | `/api/layout`                                | Replace the whole layout (validated; broadcasts `layout_updated`) |
+| POST   | `/api/layout/instances/<id>/pin`             | Pin an instance to `{col,row,cols,rows}` (broadcasts `layout_updated`) |
+| DELETE | `/api/layout/instances/<id>/pin`             | Unpin (broadcasts `layout_updated`) |
 | POST   | `/api/tileflow/state/<instance_id>`          | Push runtime state overlay (broadcast over WS) |
 | DELETE | `/api/tileflow/state/<instance_id>`          | Clear overlay (broadcasts `idle`) |
-| GET    | `/panels/<name>/view`                        | Tier-1/3 rendered HTML body |
+| GET    | `/panels/<name>/view?instance=<id>`          | Tier-1/3 rendered HTML body; instance id reaches tier-3 handlers via `harness_ctx` |
+| POST   | `/panels/<name>/action/<fn>?instance=<id>`   | Invoke a whitelisted tier-3 action (manifest `actions`) — see [apps.md](apps.md) |
 | GET    | `/panels/<name>/static/<file>`               | Panel-local static asset |
+
+App lifecycle endpoints (`/api/apps*` — list/launch/unmount/update/reload)
+live in [apps.md § Endpoints](apps.md#endpoints).
 
 ---
 
@@ -630,19 +682,22 @@ delete `server.py`. The harness embeds the URL in a sandboxed iframe.
 
 Working examples in the repo:
 
-- [`panels/clock/`](../panels/clock/) — tier 0 (self-served URL), minimal.
+- [`apps/clock/panels/clock/`](../apps/clock/panels/clock/) — tier 0 (self-served URL), minimal. Also the app-migration dogfood (`apps/clock/`).
 - [`panels/slash_commands/`](../panels/slash_commands/) — tier 1, single `view.html`.
 - [`panels/ollama_ps/`](../panels/ollama_ps/) — tier 3, polls a subprocess and renders bars.
 - [`panels/pending_writes/`](../panels/pending_writes/) — tier 3, WS-subscribing + `setState` to `focused` while writes are pending.
-- [`panels/youtube/`](../panels/youtube/) — multi-instance-capable tier 1, iframe-based with `bubble_on_active`. Uses `harness.setSpan` to claim an aspect-ratio-matched cell at runtime.
+- [`panels/youtube/`](../panels/youtube/) — multi-instance-capable tier 1. Drives a `YT.Player` (IFrame API, nocookie host): playback events map to tileflow states (PLAYING→focused, PAUSED→active, ENDED→idle); restored videos are cued, not auto-bubbled. Uses `harness.setSpan` to claim an aspect-ratio-matched cell.
 - [`panels/web/`](../panels/web/) — tier 1, freeform URL browser.
 - [`panels/settings/`](../panels/settings/) — tier 3, anchored, larger preferred footprint.
 - [`panels/chat/`](../panels/chat/) — tier 1, anchored to the `left` region. Demonstrates the "panel mounts after app.js boots" race: app.js buffers chat-bound writes in `_chatBootBuffer` and the view's inline script drains them via `window._flushChatBootBuffer`.
+- [`apps/hello/`](../apps/hello/) — the reference *app*: two tier-3 panels sharing state via `harness_ctx`, an `actions` endpoint, and an `app_event` subscription. Start here for anything app-shaped.
 
 ---
 
 ## Cross-references
 
+- [apps.md](apps.md) — the apps layer: multi-panel bundles, `harness_ctx`,
+  app events, launcher + zip update endpoints.
 - [tileflow.md](tileflow.md) — the layout engine, scoring formula,
   size-class derivation, style guide.
 - [tileflow.md § Style guide](tileflow.md#style-guide) — design rules

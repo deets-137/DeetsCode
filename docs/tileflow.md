@@ -370,7 +370,7 @@ Goal: validate the state-declaration API and the bento↔tray transition.
 Out of scope for stage 1: hero slot, size classes, reflow, user-locked
 floors, motion polish. Bento stays vertically stacked as it is today.
 
-### Stage 2 — fixed-grid bento + size classes + pins  *(in progress)*
+### Stage 2 — fixed-grid bento + size classes + pins  *(complete 2026-05-12; row-span height floor added 2026-07-06)*
 
 - [x] Schema v2 layout file: `grid` block, `bento` region kind,
       optional `pin` per instance. Backwards-compatible with v1.
@@ -434,7 +434,7 @@ floors, motion polish. Bento stays vertically stacked as it is today.
       synthetic `_shell` panel name that funnels `tileflow_state`
       frames into `harness.setState`, riding the existing FLIP path.
 
-### Stage 3 — model-driven layout + user floors
+### Stage 3 — model-driven layout + user floors  *(core landed 2026-07-06 — tools, descriptor, floors, live re-sync; drag-to-pin UI still open)*
 
 Goal: the user types "make this YouTube hero and tuck the rest" or
 "pull settings up — I'm tweaking themes" into chat, and the local model
@@ -448,7 +448,7 @@ introduces *user floors*: pins the user (or model) commits become the
 floor for runtime rules — settings stays `medium` even if `dormant`
 fires, because the floor said so.
 
-#### Tools exposed to the local model
+#### Tools exposed to the local model  *(built 2026-07-06 — all in `tools/core.py`, plus `save_layout_preset` beyond this list; `set_instance_floor` writes the `tileflow` floors block rather than the individual args below)*
 
 Wired through the harness tool layer (alongside the existing read/write
 tools), so they're available in any conversation. Same naming scheme:
@@ -510,16 +510,19 @@ The model needs context to make good calls. Two pieces of plumbing:
 
 #### User floors (shared with model path)
 
-- [ ] Per-instance `tileflow.locked_floor` (state) and
+- [x] Per-instance `tileflow.locked_floor` (state) and
       `tileflow.locked_size` (size class), persisted in the layout
       file. Honored by both the runtime state engine (state max-clamps
       to floor) and the size-class resolver (span lower-bounds to
-      floor's class).
-- [ ] User layout = floor for runtime rules. Panel can grow above
+      floor's class). *(landed 2026-07-06 — `flowPass` clamps state/
+      class/tray-routing from the instance `tileflow` block; write via
+      the `set_instance_floor` tool.)*
+- [x] User layout = floor for runtime rules. Panel can grow above
       floor (active → bigger) but never shrink below ("settings stays
       medium even if you mark it dormant"). Same rule for both pinning
       paths: when the model writes a pin, that pin is the floor for
-      that instance until it's unpinned.
+      that instance until it's unpinned. *(landed — pins were already
+      floors in `applyDecision`; floored instances now also never tray.)*
 
 ---
 
@@ -645,45 +648,39 @@ Ranked by impact for the personal-ecosystem trajectory. Pulled from the
 scattered Stage 2/3 checklists + open questions so a fresh session has
 one read for orientation. Update as items land.
 
-1. **YouTube play-event → `harness.setState(instance, 'focused')`** —
-   completes the canonical "media bubbles when playing" demo.
-   `panels/youtube/panel.json` already has `bubble_on_active: true`;
-   the player JS in `panels/youtube/view.html` just needs to call
-   `setState` on the iframe's `play` / `pause` / `ended` events. ~30
-   min. High visceral payoff — the bento finally *responds* to media
-   the user actually started.
+1. ~~**YouTube play-event → `harness.setState(instance, 'focused')`**~~
+   *(landed 2026-07-06)* — bigger than estimated: a bare `/embed/` iframe
+   exposes no playback events, so the view now drives a `YT.Player` via the
+   IFrame API (`host: youtube-nocookie.com`). PLAYING→focused,
+   PAUSED→active, ENDED→idle; restored videos are *cued*, not auto-bubbled.
 
-2. **`get_layout` + `get_panels` model tools** — unblocks the local
-   model from reasoning about layout. Server-side everything exists
-   (`/api/layout`, `/api/panels`); just need tool wrappers in
-   `tools/core.py` returning the condensed views described in
-   "Tools exposed to the local model" above. ~1 hour. Pairs with the
-   9B-model panel-authoring goal — the model can't propose layout
-   changes without seeing layout state.
+2. ~~**`get_layout` + `get_panels` model tools**~~ *(landed 2026-07-06,
+   along with the full Stage 3 tool set)* — seven tools in
+   `tools/core.py`: `get_layout`, `get_panels`, `pin_instance`,
+   `unpin_instance`, `set_instance_floor`, `apply_layout_preset`,
+   `save_layout_preset`. Mutations broadcast a new `layout_updated` WS
+   frame; panel-shell re-syncs from `/api/layout` live. A compact
+   `<layout>` descriptor now rides in every turn's system prompt
+   (built by `panels/loader.py:layout_descriptor`). Note: any layout
+   write through tools/endpoints canonicalizes `panel_layout.json`
+   formatting (pydantic round-trip).
 
-3. **Iframe (tier-0) `setState` bridge via postMessage** — critical
-   for Wikipedia / Gmail / Spotify direction. Today tier-0 panels are
-   locked to their `default_state` because iframes can't reach
-   `window.harness`. Add a postMessage listener on the host that
-   accepts `{type: "tileflow.setState", state}` from any iframe panel.
-   ~2-3 hours. Without this, third-party panels can't participate in
-   the bento.
+3. ~~**Iframe (tier-0) `setState` bridge via postMessage**~~ *(landed
+   2026-07-06)* — host listener in panel-shell.js accepts
+   `{type: "tileflow.setState", state}`; sender is identified by
+   `contentWindow` so a panel can't spoof a sibling's state. See
+   docs/panels.md § Tier-0 panels and tileflow state.
 
-4. **⚙ pill action** — still a stub. Natural fit: small menu to cycle
-   the panel's state (idle → active → focused) for manual testing
-   without the JS console. ~1 hour. Lowest priority but completes the
-   chrome.
+4. ~~**⚙ pill action**~~ *(landed 2026-07-06)* — popover with the four
+   states; selections flow through `harness.setState` + `logInteraction`
+   (`kind: "custom", act: "pill-state"`).
 
-5. **Sizing-floor bug: `min.height` is not honored.** Repro: on a 2560×1080
-   viewport the settings panel renders at 834×252 even though
-   `panels/settings/panel.json` declares `min: { width: 400, height: 280 }`.
-   The width floor is respected, height is not. Net effect is the panel's
-   internal content (316px tall after the 2026-05-14 flatten) scrolls
-   inside a 202px content area. Likely the bento packer divides a fixed
-   row height across N panels and ignores per-panel min when the row is
-   short. Check `tileflow` sizing path for where `display.min.height` is
-   read vs. ignored. Reproduce with the settings panel at ultrawide-short
-   aspect; fix should generalize to any panel hitting its height floor.
+5. ~~**Sizing-floor bug: `min.height` is not honored.**~~ *(fixed
+   2026-07-06)* — root cause was the class table capping rows at 2:
+   settings (min 280px) already got its 2-row promotion but 2 rows = 252px
+   of track. `flowPass` now grows the row span past the class table to
+   satisfy `display.min.height` (`rowsCeilForMin`, MAX_ROWS=4). Settings
+   renders 384px tall; the floor generalizes to any panel.
 
 Lower-priority / can wait:
 - Auto-demote ("idle for N minutes → dormant") — Stage 4+ concern.
@@ -722,10 +719,10 @@ Things we haven't decided. Append answers here as we resolve them.
 - **Tray on the left vs. right.** Right matches the user's first
   description; left matches "icons next to chat." Configurable per
   mode? Per user setting?
-- **Iframe panels (tier 0/2) and state.** Tier 0 can't `setState` from
-  inside without a postMessage bridge. For now they're locked to their
-  manifest `default_state`. Add a postMessage listener on the host side
-  when the first tier-0 panel actually wants to change state.
+- ~~**Iframe panels (tier 0/2) and state.**~~ Resolved 2026-07-06: host
+  postMessage listener accepts `{type: "tileflow.setState", state}` from
+  any embedded panel; sender identified by `contentWindow`. See
+  [panels.md § Tier-0 panels and tileflow state](panels.md#tier-0-panels-and-tileflow-state).
 
 ---
 
@@ -897,8 +894,9 @@ client. The shell subscribes via the synthetic `_shell` panel key.
 - `panels/loader.py`: `PanelTileflow.size_classes` removed (engine derives
   from `display.preferred/min/max`); `PanelTileflow.score_bonus` added.
 - `panels/loader.py`: `InstanceScoreOverrides` model + optional
-  `LayoutInstance.score_overrides` field. Legacy `InstanceTileflow` kept
-  as alias for back-compat (locked_* fields ignored by engine).
+  `LayoutInstance.score_overrides` field. `InstanceTileflow` extends it
+  with the user-floor fields (`locked_floor`, `locked_size`,
+  `never_dormant`) — honored by the engine since 2026-07-06 (Stage 3).
 
 
 ## Reference

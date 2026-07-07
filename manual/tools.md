@@ -8,11 +8,18 @@ adding or editing anything under `tools/`.
 ```
 tools/
   __init__.py   load_tools(mode) entry point + shared re-exports
-  core.py       Always-loaded tools (read_file, list_dir, roll_dice, update_task,
-                list_packs, load_pack, register_path). Shared state (pending_writes, read_files).
+  core.py       Always-loaded tools: read_file, list_dir, roll_dice, update_task,
+                list_manual, load_manual, register_path, plus the tileflow/layout
+                set (set_instance_state, recompute_layout, get_layout, get_panels,
+                pin_instance, unpin_instance, set_instance_floor,
+                apply_layout_preset, save_layout_preset). Shared state
+                (pending_writes, read_files).
   coding.py     DeetsCode-mode pack: write_file, edit_file, search, list_symbols,
                 list_context_files, run_command.
   chess.py      Chess-mode pack: new_game, move, board, resign, etc.
+  blog.py       Blog-mode pack (edits the sibling blog repo).
+  dnd.py        DnD-mode pack: campaign/scene/character/combat ledger over
+                {project_dir}/dnd/campaign_state.json.
 ```
 
 Core tools ship in every mode. Mode packs add domain tools on top and are
@@ -164,17 +171,32 @@ tool. The server enforces it: on turn 1 with no `[/]` step, `tool_choice` is
 set to `"required"` (see `_agent_loop_impl`). Do not add tools that bypass or
 duplicate this mechanism — strengthen `update_task` instead.
 
-## list_packs / load_pack (lazy reference docs)
+## list_manual / load_manual (lazy reference docs)
 
-Reference packs (this folder + global `packs/`) are NOT dumped into the system
+Manual docs (this folder, project-scoped) are NOT dumped into the system
 prompt. Only a manifest is — names + section headings. The model calls:
 
-- `list_packs()` — enumerate available packs with their section headings.
-- `load_pack(name, section?)` — pull one section (split by `## ` headings) or
-  the whole pack into context on demand.
+- `list_manual()` — enumerate available manual docs with their section headings.
+- `load_manual(name, section?)` — pull one section (split by `## ` headings) or
+  the whole doc into context on demand.
 
-Implication for pack authors: **structure packs with `## ` level-2 headings**.
-A pack with no subheadings can only be loaded whole, which defeats the point.
+Implication for manual authors: **structure docs with `## ` level-2 headings**.
+A doc with no subheadings can only be loaded whole, which defeats the point.
+
+## Layout tools (model-driven bento, Stage 3)
+
+Core tools; loaded in every mode. `get_layout` / `get_panels` return condensed
+views built in `panels/loader.py`; the mutating four (`pin_instance`,
+`unpin_instance`, `set_instance_floor`, `apply_layout_preset`) write
+`layout/panel_layout.json` directly through the loader's validators, and
+`server.py`'s dispatch site broadcasts a `layout_updated` WS frame after any
+of them returns `"OK: …"` — that broadcast is what makes every open tab
+rearrange live. Validator failures return verbatim (`"Pin rejected: …"`)
+so the model self-corrects. A compact `<layout>` descriptor is appended to
+the system prompt every turn (`panels/loader.py:layout_descriptor`), so the
+model always sees current pins/states/floors without calling `get_layout`
+first. Same broadcast pattern as `set_instance_state` — side effects live at
+the dispatch site, tool functions stay sync.
 
 ## Stale tool-result trimming
 
@@ -246,8 +268,9 @@ destructive or write-queuing tool to the allowlist.
 - **Reading `tool_defs` at module import time.** Modes rebuild it every turn
   via `load_tools`. Don't cache it at the top of a pack.
 - **Module-level state that game packs need.** Put per-session state in
-  `storage.db` (see `chess.py` for the pattern). Process-globals reset on
-  restart and don't distinguish between sessions.
+  `storage.db` (chess pattern) or a project-dir file (dnd pattern —
+  `dnd/campaign_state.json`). Process-globals reset on restart and don't
+  distinguish between sessions.
 - **Tool descriptions that describe *when* to use the tool.** That belongs in
   `prompt.md` — the system prompt has global priority. Tool descriptions say
   what the tool DOES.

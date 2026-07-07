@@ -11,10 +11,15 @@ chess, D&D, blog editing, and coding.
 
 - **`server.py`** — FastAPI server. Streams thinking + text tokens from any
   OpenAI-compatible endpoint (defaults to local Ollama). Hosts the static UI.
-- **`static/`** — vanilla JS browser client: chat, file tree, packs, themes,
-  task panel, dev controls.
-- **`tools/`** — tool packs the model can call. `core.py` has file/edit/search
-  primitives; `chess.py`, `blog.py`, `coding.py` are mode-specific.
+- **`static/`** — vanilla JS browser client. The UI is a panel system with a
+  self-arranging bento layout ([docs/panels.md](docs/panels.md),
+  [docs/tileflow.md](docs/tileflow.md)) that the model itself can rearrange
+  via layout tools.
+- **`panels/`** — self-contained UI panels (chat, files, settings, youtube, …).
+- **`apps/`** — multi-panel app bundles with shared per-instance state
+  ([docs/apps.md](docs/apps.md)); `apps/hello/` is the reference app.
+- **`tools/`** — tool packs the model can call. `core.py` has file/dice/layout
+  primitives; `chess.py`, `blog.py`, `dnd.py`, `coding.py` are mode-specific.
 - **`discord_bot.py`** — optional Discord bridge that proxies messages into the
   same WS pipeline (used for the D&D mode).
 - **`prompts/`** — system prompts per mode (chess, blog, dnd, coding).

@@ -1,8 +1,16 @@
 # Building a new UI panel
 
-Step-by-step recipe for adding a panel to the harness web UI. Load this when
-the task involves adding or modifying a panel, a button that talks to the
-server, or a new WebSocket message type.
+> **Read this first (2026-07):** for a NEW panel, the modern path is a
+> self-contained folder under `panels/<name>/` (or an app bundle under
+> `apps/<name>/`) — see `docs/panels.md` (manifest, tiers, skeleton) and
+> `docs/apps.md`. No index.html or app.js edits needed. **This doc remains
+> the recipe for the other case:** adding a new *WebSocket message type* or
+> wiring controls inside an existing panel's view that talk to `server.py`
+> — that three-file pattern below is still exactly how chat/bot-ops work.
+
+Step-by-step recipe for wiring UI controls to the server. Load this when
+the task involves a button that talks to the server or a new WebSocket
+message type.
 
 Cross-refs: [ui.md](ui.md) for DOM layout and existing ids.
 [server.md](server.md) for the WS protocol tables. [styling.md](styling.md)
