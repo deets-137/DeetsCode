@@ -45,6 +45,20 @@ python server.py
 # open http://127.0.0.1:8000
 ```
 
+### Discord bridge configuration
+
+`discord_bot.py` is configured entirely through env vars (or `.env`):
+
+- `DISCORD_TOKEN` — bot token; required, the bot refuses to start without it.
+- `GAME_CHANNEL_IDS` — comma-separated channel IDs where the bot answers every
+  message without a mention (developer mode on → right-click a channel → Copy ID).
+  Empty by default; the bot still responds to @mentions anywhere.
+- `DISCORD_GUILD_ID` — guild to sync slash commands to (instant); omit for global
+  sync, which can take up to an hour to propagate.
+
+Other overrides (`AUTO_APPLY`, `PROMPT_MODE`, `HARNESS_WS`, `OLLAMA_URL`) are
+documented at the top of `discord_bot.py`.
+
 **Tip:** to keep `__pycache__` directories from cluttering the repo, set
 `PYTHONPYCACHEPREFIX=.pycache` in your shell — bytecode for every module
 goes under one out-of-tree directory instead of polluting each package.

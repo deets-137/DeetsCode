@@ -1,5 +1,7 @@
 # Discord Bot Review
 
+*Point-in-time self-review — kept for the record; some items below may since have been fixed or gone stale.*
+
 Date: 2026-04-19. Reviewed: `discord_bot.py` (pre- and post-fixes from this session).
 Use case context: harness is single-user locally, but the Discord bot is multi-user — it's the path for running DnD / Mafia / other shared games off the same harness.
 

@@ -1,5 +1,7 @@
 # Harness Review & Stress Test
 
+*Point-in-time self-review — kept for the record; some items below may since have been fixed or gone stale.*
+
 Date: 2026-04-18. Model used: `qwen3.6:latest` (qwen35moe, 36B Q4_K_M).
 
 ## What I tested
