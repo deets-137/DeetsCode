@@ -141,7 +141,7 @@ per-channel state and per-player action enforcement.
 - `search(pattern, path?, glob?)` — regex, up to 50 matches, skips bin/vendor dirs.
 - `list_symbols(path)` — defs/classes/headings + line numbers.
 - `list_context_files()` — dumps `read_files`.
-- `run_command(command)` — allowlisted, metachar-rejected, `shell=False` + `shlex.split`, timeout + output cap.
+- `run_command(command)` — **not sandboxed.** Runs `subprocess.run(..., shell=True)` in the project directory with a 120s timeout and a 5,000-char output cap. There is no allowlist and no metacharacter rejection. Treat it as a shell.
 
 **Chess pack (mode = "chess"):** new_game, move, board, resign, etc. See `tools/chess.py`.
 
@@ -216,7 +216,7 @@ Pending writes and read-files are untouched.
 
 - **Path escape**: every path is `(project_dir / arg).resolve()` then checked against `project_dir.resolve()`.
 - **Manual/preset name injection**: `Path(name).name` strips any separators before building the `.md`/`.json` filename (same guard in `load_manual` and the layout-preset tools).
-- **run_command**: metachar reject + allowlist + `shell=False`. Do not loosen without thought.
+- **run_command**: **no guard.** `shell=True`, no allowlist, no metacharacter rejection — only a 120s timeout and an output cap. This is the weakest surface in the harness and the reason the server binds `127.0.0.1` only. Hardening it (allowlist + `shlex.split` + `shell=False`) is open work.
 - **XSS**: tool names/args/results go through `escapeHtml()` on the client. Don't bypass that helper.
 
 ## State that resets
