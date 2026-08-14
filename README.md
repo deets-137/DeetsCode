@@ -74,9 +74,9 @@ OpenAI-compatible endpoint · WebSockets · SQLite · discord.py · vanilla ES6
 ## Running it
 
 ```bash
-ollama pull qwen3:8b
+ollama pull <any-tool-calling-model>   # e.g. qwen3:8b, llama3.1:8b
 pip install -r requirements.txt
-cp config.example.py config.py     # model, port, temperature
+cp config.example.py config.py         # port, temperature; MODEL auto-picks
 npm install                        # one-time: Tauri CLI
 npm run tauri dev                  # native app (spawns the server itself)
 ```

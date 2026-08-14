@@ -8,19 +8,44 @@ import uuid
 from pathlib import Path
 from typing import Optional
 
-THINK_BLOCK_RE = re.compile(r"<think>.*?</think>", re.DOTALL)
+# ── Hidden blocks ────────────────────────────────────────────────────────────
+# Reasoning tags, by model family. Ollama's OpenAI-compat endpoint exposes some
+# models' reasoning through the `reasoning` delta field, but many emit it inline
+# in content instead, and each family picked its own tag. Listing them all is
+# free: a tag a model never emits simply never matches. Add new families here —
+# this is the only place tag names are written down.
+REASONING_TAGS = [
+    ("<think>", "</think>"),          # Qwen3, DeepSeek-R1, QwQ
+    ("<thinking>", "</thinking>"),    # Claude-style / several finetunes
+    ("<thought>", "</thought>"),      # Gemma-derived reasoning finetunes
+    ("<reasoning>", "</reasoning>"),  # Granite, assorted others
+]
+
+# Harness-defined, never model-specific: the agent loop injects <system>
+# directives after tool results and models echo them back verbatim. Those
+# echoes must never reach the visible channel (see friction.md).
+HARNESS_TAGS = [("<system>", "</system>")]
+
+# Longest open tag first. Both the streaming filter and strip_hidden() resolve
+# ties by list order, so this is what stops "<think>" from matching the prefix
+# of "<thinking>" and leaving "ing>" in the visible stream.
+HIDDEN_TAGS = sorted(REASONING_TAGS + HARNESS_TAGS, key=lambda pair: -len(pair[0]))
+
 TOOL_CODE_RE = re.compile(r"<tool_code>.*?</tool_code>", re.DOTALL)
-SYSTEM_BLOCK_RE = re.compile(r"<system>.*?</system>", re.DOTALL)
+_HIDDEN_BLOCK_RES = [
+    re.compile(re.escape(o) + r".*?" + re.escape(c), re.DOTALL) for o, c in HIDDEN_TAGS
+]
 
 
 class ThinkStreamFilter:
     """Split a streaming text channel into (visible, thinking) segments.
 
-    Models like Qwen3 emit reasoning as inline `<think>...</think>` blocks in
-    regular content. Ollama's OpenAI-compat endpoint doesn't expose these via
-    the `reasoning` field, so we parse them here. Contents of hidden blocks are
-    returned via the second tuple element so the caller can forward them as
-    `thinking` events instead of dropping them.
+    Many models emit reasoning as inline blocks in regular content rather than
+    through the `reasoning` field — Qwen3 uses `<think>`, other families use
+    `<thinking>`/`<thought>`/`<reasoning>`. All of them are parsed here; see
+    REASONING_TAGS. Contents of hidden blocks are returned via the second tuple
+    element so the caller can forward them as `thinking` events instead of
+    dropping them.
 
     `<system>...</system>` blocks are hidden the same way: the agent loop
     injects system directives after tool results, and models sometimes echo
@@ -31,7 +56,7 @@ class ThinkStreamFilter:
     flush() at the end to release any held suffix.
     """
 
-    HIDDEN_TAGS = [("<think>", "</think>"), ("<system>", "</system>")]
+    HIDDEN_TAGS = HIDDEN_TAGS
 
     def __init__(self):
         self.close = None  # closing tag of the hidden block we're inside, or None
@@ -101,11 +126,17 @@ File tree:
 Do exactly what the user asks. Use the provided tools. Keep responses short."""
 
 
-def strip_think(text: str) -> str:
-    text = THINK_BLOCK_RE.sub("", text)
+def strip_hidden(text: str) -> str:
+    """Non-streaming counterpart to ThinkStreamFilter — same tag list, so the
+    two can't drift apart."""
+    for rx in _HIDDEN_BLOCK_RES:
+        text = rx.sub("", text)
     text = TOOL_CODE_RE.sub("", text)
-    text = SYSTEM_BLOCK_RE.sub("", text)
     return text.strip()
+
+
+# Back-compat alias: this was strip_think() when <think> was the only tag.
+strip_think = strip_hidden
 
 
 def load_prompt_template(name: str = "DeetsCode") -> str:
@@ -172,16 +203,22 @@ if _installed is None:
     print(f"[preflight] WARNING: Ollama not reachable at {OLLAMA_BASE_URL} — start it with `ollama serve`")
 elif MODEL not in _installed:
     if _installed:
-        # config.MODEL is stale (e.g. the model was deleted). Rather than boot
+        # Either MODEL is empty (config.example's default — "just use what I
+        # have") or it's stale, e.g. the model was deleted. Rather than boot
         # against a model Ollama doesn't have, fall back to whatever's installed
         # (same 'first installed' convention as the config-creation auto-pick).
         # The UI model picker still overrides this via ACTIVE_MODEL_FILE.
         _fallback = _installed[0]
-        print(f"[preflight] MODEL=\"{MODEL}\" not installed — falling back to \"{_fallback}\". Installed: {_installed}")
+        if MODEL:
+            print(f"[preflight] MODEL=\"{MODEL}\" not installed — falling back to \"{_fallback}\". Installed: {_installed}")
+        else:
+            print(f"[preflight] MODEL unset — using \"{_fallback}\". Installed: {_installed}")
         print(f"[preflight] pin a specific one by editing config.py or using the UI model picker.")
         MODEL = _fallback
-    else:
+    elif MODEL:
         print(f"[preflight] WARNING: MODEL=\"{MODEL}\" not installed and Ollama has no models — run `ollama pull {MODEL}`")
+    else:
+        print(f"[preflight] WARNING: Ollama has no models installed — run `ollama pull <model>`")
 from tools import clear_pending_writes, clear_read_files, load_tools, pending_writes
 from core import storage
 import paths

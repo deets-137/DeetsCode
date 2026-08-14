@@ -1,3 +1,11 @@
+# EXAMPLE Modelfile for the **Qwen3 family** — not a generic template.
+#
+# A Modelfile's TEMPLATE/RENDERER/PARSER/stop tokens are inherently
+# model-specific; there is no model-agnostic version of this file. Copy it to
+# `Modelfile` and adapt, or write your own from `ollama show <model> --modelfile`.
+# The harness does not read this file — it exists so a Qwen3 import gets the
+# ChatML template and sampler settings the model was trained with.
+#
 # Point FROM at your own local model blob (or a model name like `qwen2.5-coder:14b`).
 FROM /path/to/your/.ollama/models/blobs/sha256-XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
 
