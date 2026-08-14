@@ -689,7 +689,7 @@
     node.dataset.tileflowOrder = String(-decision.score);
     if (decision.bin === "bento" && decision.span) {
       // Panel-controlled span override (harness.setSpan). Lets a panel grow
-      // to fit its own content (e.g. youtube matching video aspect) past
+      // to fit its own content (e.g. matching an embed's aspect ratio) past
       // the class table. Falls back to the engine's class span otherwise.
       const override = _spanOverrides[decision.instance];
       const span = override || decision.span;
@@ -930,8 +930,8 @@
   // Panel-controlled grid span. Pass `{cols, rows}` to claim a custom-sized
   // bento cell that ignores the class table; pass null/undefined to release
   // the override and fall back to the engine's decision. Used by panels
-  // whose ideal shape depends on runtime content (e.g. youtube matching
-  // video aspect ratio).
+  // whose ideal shape depends on runtime content (e.g. matching an
+  // embed's aspect ratio).
   harness.setSpan = function (instanceId, span) {
     if (!_instances[instanceId]) return;
     if (span && typeof span.cols === "number" && typeof span.rows === "number") {
@@ -983,10 +983,10 @@
 
   // Per-instance mode visibility, mirrored from app.js's _PANEL_HIDE_RULES.
   // Defined here so panel-shell can hide-by-default at render time, before
-  // app.js's applyModeVisibility runs (which previously caused blog_ops to
-  // flash visible in non-blog modes during boot).
-  // Empty since the blog mode was deleted (2026-08); repopulate when a mode
-  // needs per-instance visibility again. Keep in sync with app.js's
+  // app.js's applyModeVisibility runs (prevents mode-hidden panels from
+  // flashing visible during boot).
+  // Empty since the game/blog modes were deleted (2026-08); repopulate when
+  // a mode needs per-instance visibility again. Keep in sync with app.js's
   // _PANEL_HIDE_RULES.
   const INSTANCE_MODE_RULES = {};
 

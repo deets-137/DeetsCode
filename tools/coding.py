@@ -3,9 +3,9 @@ Coding tool pack — loaded for the `DeetsCode` mode (and its legacy `default`
 alias). These are the tools a coding agent needs: search, write/edit with
 approval queueing, symbol listing, context tracking, and shell.
 
-Game modes (chess, dnd, ...) deliberately do NOT load this pack. Chess doesn't
-need shell or `write_file`; adding them would bloat the schema and invite bugs.
-`read_file` lives in tools/core.py so game modes have a narrow escape hatch.
+Non-coding modes (if any return) should NOT load this pack — shell and
+`write_file` would bloat their schema and invite bugs. `read_file` lives in
+tools/core.py so other modes keep a narrow escape hatch.
 """
 
 import re

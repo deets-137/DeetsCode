@@ -16,10 +16,6 @@ start here if you don't know which doc to read.
   launcher, and a state-preserving zip update endpoint.
   `apps/hello/` is the living reference.
 
-- **[app_harness.md](app_harness.md)** — The built apps-over-panels
-  design spec that led to `apps.md`. Useful when you want the original
-  decisions and implementation notes.
-
 - **[tileflow.md](tileflow.md)** — The layout engine. How the bento
   decides size + order from per-panel scores, runtime overlay system
   (live rearrange driven by `setState` or model tool calls), full
@@ -44,6 +40,11 @@ start here if you don't know which doc to read.
   projects the harness leans on.
 
 - **[reports/](reports/)** — Older review notes kept out of the root.
+
+- **[archive/](archive/)** — Executed specs kept for archaeology:
+  `dev_project.md` (the original panel-system north star),
+  `app_harness.md` (apps-over-panels spec that led to `apps.md`),
+  `build_plan.md` (the one-shot build touch-map, executed 2026-07-06).
 
 ---
 

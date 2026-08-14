@@ -4,8 +4,7 @@ Core tool pack — loaded in every mode.
 Kept deliberately small: the tool deck is the model's attention budget, so
 every definition here rides in every request. TOOL_DEFINITIONS is the
 always-on set (file reading, manual, task checklist, paths, and the single
-consolidated `layout` tool). GAME_TOOLS (roll_dice) only load for game modes
-— see tools/__init__.py. The coding toolkit lives in tools/coding.py and
+consolidated `layout` tool). The coding toolkit lives in tools/coding.py and
 only loads for the DeetsCode mode.
 
 Shared state (pending_writes, read_files) lives here even though most of its
@@ -13,7 +12,6 @@ consumers are in coding.py, because server.py imports it via `tools` and we
 don't want the import path to depend on which mode happens to be loaded.
 """
 
-import random
 from pathlib import Path
 from typing import Optional
 
@@ -141,7 +139,7 @@ TOOL_DEFINITIONS = [
                 "never_dormant; clear=true drops all floors).\n"
                 "- 'recompute': force a fresh flow pass (refreshes recency decay).\n"
                 "- 'preset_save' / 'preset_apply': capture or apply a named layout sheet.\n"
-                "Use instance ids from the layout (e.g. 'youtube_a', 'tool_log'), "
+                "Use instance ids from the layout (e.g. 'clock', 'tool_log'), "
                 "NOT panel names. Grid is 12 columns: spans across one row sum to "
                 "12 (12, 6+6, 6+3+3, 3+3+3+3). Size classes: small=3 cols, "
                 "medium=6, large=6×2 rows, hero=12×2."
@@ -178,32 +176,6 @@ TOOL_DEFINITIONS = [
                     "clear": {"type": "boolean", "description": "Set true to delete task.md entirely (clears the task list). Takes precedence over content."},
                 },
                 "required": [],
-            },
-        },
-    },
-]
-
-
-# Game-mode-only core tools (dnd, chess, mafia…). Defined here because the
-# handlers share this module's execute_tool, but kept out of TOOL_DEFINITIONS
-# so coding/blog decks don't carry dice they'll never roll — see
-# tools/__init__.py's _GAME_MODES gate.
-GAME_TOOLS = [
-    {
-        "type": "function",
-        "function": {
-            "name": "roll_dice",
-            "description": "Roll dice. Use this for any probabilistic outcome — it's instant and cannot be hallucinated. Returns individual rolls, the total, and the expression for narration.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "sides":     {"type": "integer", "description": "Number of sides on each die (e.g. 20 for d20, 6 for d6). Must be >= 2."},
-                    "count":     {"type": "integer", "description": "How many dice to roll. Default 1."},
-                    "modifier":  {"type": "integer", "description": "Flat modifier to add to the total (e.g. +3 for a Strength bonus). Default 0."},
-                    "advantage": {"type": "string", "enum": ["none", "advantage", "disadvantage"], "description": "For a single die: roll twice and keep higher (advantage) or lower (disadvantage). Ignored when count > 1."},
-                    "label":     {"type": "string", "description": "Optional short label for narration (e.g. 'attack', 'persuasion', 'damage')."},
-                },
-                "required": ["sides"],
             },
         },
     },
@@ -551,42 +523,6 @@ def execute_tool(
                 for e in entries
                 if not e.name.startswith(".") and e.name not in SKIP_DIRS_HIDDEN
             )
-
-        if name == "roll_dice":
-            try:
-                sides = int(args.get("sides", 0))
-            except (TypeError, ValueError):
-                return "Error: 'sides' must be an integer"
-            if sides < 2:
-                return "Error: 'sides' must be >= 2"
-            try:
-                count = int(args.get("count", 1) or 1)
-            except (TypeError, ValueError):
-                return "Error: 'count' must be an integer"
-            if count < 1 or count > 100:
-                return "Error: 'count' must be between 1 and 100"
-            try:
-                modifier = int(args.get("modifier", 0) or 0)
-            except (TypeError, ValueError):
-                return "Error: 'modifier' must be an integer"
-            adv = (args.get("advantage") or "none").lower()
-            label = (args.get("label") or "").strip()
-
-            if count == 1 and adv in ("advantage", "disadvantage"):
-                a, b = random.randint(1, sides), random.randint(1, sides)
-                kept = max(a, b) if adv == "advantage" else min(a, b)
-                total = kept + modifier
-                rolls_str = f"[{a}, {b}] → kept {kept} ({adv})"
-                expr = f"1d{sides}{'+' if modifier >= 0 else ''}{modifier or ''} with {adv}"
-            else:
-                rolls = [random.randint(1, sides) for _ in range(count)]
-                total = sum(rolls) + modifier
-                rolls_str = "[" + ", ".join(str(r) for r in rolls) + "]"
-                mod_str = f"{'+' if modifier >= 0 else ''}{modifier}" if modifier else ""
-                expr = f"{count}d{sides}{mod_str}"
-
-            head = f"{label}: " if label else ""
-            return f"{head}{expr} = {rolls_str}" + (f" + {modifier}" if modifier and count > 1 else "") + f" → **{total}**"
 
         if name == "list_manual":
             lines = []

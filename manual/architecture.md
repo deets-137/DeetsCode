@@ -5,9 +5,9 @@ via `discord_bot.py`) → FastAPI server relays to a local Ollama model
 (OpenAI-compatible API) → model emits tool calls → server executes them →
 result streams back.
 
-Modes swap the system prompt AND the available tool pack together — DeetsCode
-for coding, chess for chess, etc. One process, one user, one active mode per
-session.
+Modes swap the system prompt AND the available tool pack together. DeetsCode
+(coding) is the only live mode — the chess/dnd/blog packs were deleted Aug
+2026 pending redesign. One process, one user, one active mode per session.
 
 ## File map
 
@@ -19,34 +19,24 @@ paths.py          Single source of truth for filesystem paths. Every module
                   hand-edit. See CLAUDE.md.
 tools/            Tool package (see manual/tools.md).
   __init__.py       load_tools(mode) — returns (schemas, dispatcher).
-  core.py           Always-loaded: read_file, list_dir, roll_dice, update_task,
-                    list_manual, load_manual, register_path, plus the layout
-                    tools (get_layout/get_panels/pin/unpin/floors/presets,
-                    set_instance_state, recompute_layout). Shared state.
+  core.py           Always-loaded: read_file, list_dir, update_task,
+                    list_manual, load_manual, register_path, plus the
+                    consolidated `layout` tool (get/panels/state/pin/unpin/
+                    floor/recompute/presets). Shared state.
   coding.py         DeetsCode pack: write_file, edit_file, search,
                     list_symbols, list_context_files, run_command.
-  chess.py          Chess pack.
-  dnd.py            DnD GM pack — campaign ledger over
-                    {project_dir}/.harness/dnd/campaign_state.json.
-  blog.py           Blog pack — model-callable tools for the DeetsOTD blog.
-  blog_service.py   Shared service layer for blog mode. Imports the sibling
-                    blog repo (paths.BLOG_DIR) on demand. Used by BOTH
-                    tools/blog.py and the blog_* WS handlers in server.py
-                    so panel actions and model actions stay in sync against
-                    the same SQLite.
 panels/           Self-contained UI panels (see docs/panels.md); loader.py is
                   discovery + layout schema + tier-3 rendering + harness_ctx.
 apps/             Multi-panel app bundles (see docs/apps.md); loader.py +
                   context.py (HarnessContext). apps/hello/ is the reference.
 storage.py        SQLite wrapper: sessions, games, moves, events, system_log.
-discord_bot.py    Alternate frontend. Shares server-side logic.
-bot_media.py      Per-tool media extractors. Lets the bot forward tool-
-                  produced image URLs (e.g. chess boards) to Discord
-                  deterministically instead of relying on the model.
+discord_bot.py    Alternate frontend (dormant). Shares server-side logic.
+bot_cogs/         Bot helpers: bot_media.py per-tool media extractors,
+                  notes.py, stats.py. Dormant with the bot.
 config.py         MODEL, OLLAMA_BASE_URL, HOST, PORT, TEMPERATURE, etc.
-CLAUDE.md         Project notes for Claude sessions: paths.py rule,
-                  bot_media extractor registry, chess identity conventions.
-prompts/          Per-mode prompt files (DeetsCode.md, chess.md, dnd.md, blog.md).
+CLAUDE.md         Project notes for Claude sessions: paths.py rule, modes
+                  status, panel-system pointers.
+prompts/          Per-mode prompt files (DeetsCode.md only today).
                   All have {project_dir} and {file_tree} slots. server.py's
                   load_prompt_template() reads prompts/<mode>.md per turn.
 manual/           Project-scoped manual docs (this project's self-docs;
@@ -60,7 +50,7 @@ static/
   tileflow-engine.js  Pure scoring/placement engine.
   style.css       Layout + glass design language.
   theme.css       Palette variables per theme.
-requirements.txt  fastapi, uvicorn[standard], openai, python-chess, …
+requirements.txt  fastapi, uvicorn[standard], openai, httpx
 ```
 
 ## Lifecycle of a user turn
@@ -85,10 +75,10 @@ requirements.txt  fastapi, uvicorn[standard], openai, python-chess, …
 - `pending_writes: dict[str, str]` — module global in `tools/core.py`. File writes queued until user Applies/Rejects.
 - `read_files: list[str]` — module global in `tools/core.py`. Tracks which files the model has read.
 - App state — per-app-instance sqlite at `apps/<app>/state/<app_instance>.db`, written via `harness_ctx.app_state` (see docs/apps.md). Survives restarts and bundle updates.
-- `selected_prompt: str` — per-WebSocket. Active mode ("DeetsCode", "chess", etc).
+- `selected_prompt: str` — per-WebSocket. Active mode ("DeetsCode" today).
 - `project_dir: Path` — module global in `server.py`. The project the agent is working on.
 - `state: dict` — per-turn only (created fresh in `agent_loop`). Holds the cached `file_tree` and streaming handles.
-- SQLite (`storage.db`) — sessions, chess games, chess moves. Persists across restarts.
+- SQLite (`storage.db`) — sessions, events, system_log (plus a legacy games/moves schema kept for future game modes). Persists across restarts.
 
 ## Where to intervene
 

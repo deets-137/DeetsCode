@@ -2,11 +2,9 @@
 Tool packs, gated by prompt mode.
 
 `core` is always loaded (read_file, list_dir, manual access, update_task,
-register_path, the `layout` workspace tool). Game modes additionally get
-core's GAME_TOOLS (roll_dice); mode packs add their own tools on top
-(tools/coding.py for DeetsCode, tools/dnd.py for dnd, …). Keep decks small:
-every definition rides in every request and dilutes a small model's
-tool-selection attention.
+register_path, the `layout` workspace tool); mode packs add their own tools
+on top (tools/coding.py for DeetsCode). Keep decks small: every definition
+rides in every request and dilutes a small model's tool-selection attention.
 
 Usage from server.py:
     from tools import load_tools
@@ -27,7 +25,6 @@ from typing import Callable
 
 from .core import (
     TOOL_DEFINITIONS as CORE_TOOLS,
-    GAME_TOOLS,
     pending_writes,
     read_files,
     clear_pending_writes,
@@ -42,11 +39,6 @@ _MODE_PACKS: dict[str, str] = {
     "default":   "coding",  # backcompat alias for pre-rename sessions
 }
 
-# Modes whose decks include core's GAME_TOOLS (roll_dice). None today;
-# repopulate when a game mode returns.
-_GAME_MODES: set[str] = set()
-
-
 def load_tools(mode: str) -> tuple[list[dict], Callable]:
     """Return (tool_definitions, execute_fn) merged for the given mode.
 
@@ -59,14 +51,11 @@ def load_tools(mode: str) -> tuple[list[dict], Callable]:
     from . import core as _core_mod
 
     defs: list[dict] = list(CORE_TOOLS)
-    if mode in _GAME_MODES:
-        defs.extend(GAME_TOOLS)
     # dispatch[name] = module with execute_tool(name, args, session_id, project_dir, user_name=None)
-    # GAME_TOOLS handlers always dispatch (compat for old sessions) even when
-    # their defs aren't in the mode's deck; same for the pre-consolidation
-    # layout tool names, which core keeps as aliases for the `layout` tool.
+    # Pre-consolidation layout tool names always dispatch — core keeps them
+    # as aliases for the `layout` tool (compat for old sessions).
     dispatch: dict[str, object] = {
-        t["function"]["name"]: _core_mod for t in (*CORE_TOOLS, *GAME_TOOLS)
+        t["function"]["name"]: _core_mod for t in CORE_TOOLS
     }
     for legacy in (
         "get_layout", "get_panels", "pin_instance", "unpin_instance",

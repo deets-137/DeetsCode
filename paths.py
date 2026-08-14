@@ -26,18 +26,9 @@ SESSIONS_DIR: Path = RUNTIME_DIR / "sessions"
 SAVES_DIR:    Path = RUNTIME_DIR / "saves"
 DB_PATH:      Path = RUNTIME_DIR / "storage.db"
 
-# Sibling repo: the DeetsOTD blog (`~/Documents/blog`). The harness's `blog`
-# mode talks to this repo directly — adds it to sys.path and imports app.repo
-# / app.itunes for authoring posts. See harness/tools/blog_service.py.
-# Harness lives at ~/Documents/Vibe Coding Era/harness, blog at ~/Documents/blog,
-# so we go up two levels.
-BLOG_DIR: Path = HARNESS_ROOT.parent.parent / "blog"
-
 # Per-project-dir filenames (resolved against a project root, not HARNESS_ROOT).
 # Kept as bare strings because the project dir is chosen at runtime.
 TASK_FILENAME = "task.md"
-CAMPAIGN_STATE_FILENAME = "campaign_state.json"
-DND_SUBDIR = ".harness/dnd"  # runtime campaign state; gitignored via .harness/
 PROJECT_MANUAL_SUBDIR = "manual"
 # Per-panel folders (panel.json + view/handler).
 PANELS_DIR: Path = HARNESS_ROOT / "panels"

@@ -1,12 +1,4 @@
 fastapi
 uvicorn[standard]
 openai
-chess
-# Blog mode talks to ~/Documents/blog. The blog repo's app.itunes uses httpx;
-# app.repo uses only stdlib. pydantic-settings is needed because the blog's
-# settings.py is imported when we import app.repo.
 httpx
-pydantic-settings
-markdown-it-py
-itsdangerous
-jinja2

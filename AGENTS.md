@@ -10,15 +10,11 @@ All filesystem paths the harness uses (directories, files, per-project subdir/fi
 - `dir` / `file` values are relative to `HARNESS_ROOT`.
 - The tool replaces the constant in place if it already exists, so re-registering is safe.
 
-Call sites that currently go through `paths.py`: `storage.py` (DB_PATH), `server.py` (PROMPTS_DIR, SESSIONS_DIR, THEME_CSS, DND_SUBDIR, CAMPAIGN_STATE_FILENAME, PANEL_LAYOUT_FILE), `discord_bot.py` (HARNESS_ROOT, SAVES_DIR), `tools/core.py` (PROJECT_MANUAL_SUBDIR, TASK_FILENAME), `panels/loader.py` (PANELS_DIR, PANEL_LAYOUT_FILE). If you're editing any of these and the constant you need isn't there yet, call `register_path` first, then import from `paths`.
+Call sites that currently go through `paths.py`: `storage.py` (DB_PATH), `server.py` (PROMPTS_DIR, SESSIONS_DIR, THEME_CSS, PANEL_LAYOUT_FILE), `discord_bot.py` (HARNESS_ROOT, SAVES_DIR), `tools/core.py` (PROJECT_MANUAL_SUBDIR, TASK_FILENAME), `panels/loader.py` (PANELS_DIR, PANEL_LAYOUT_FILE). If you're editing any of these and the constant you need isn't there yet, call `register_path` first, then import from `paths`.
 
 ## Discord bot media
 
 Per-tool board/image extraction lives in `bot_media.py`. To surface images or links from a new game's tool results, add an extractor function and register it under the tool names in `EXTRACTORS`. No bot changes needed.
-
-## Chess identity
-
-Chess uses display names end-to-end — no Discord user ids. The envelope is `{"name": ..., "text": ...}`; chess state has `{white, black, fen, result}` where white/black are name strings or the literal `"computer"`.
 
 ## UI tokens (theme × skin)
 
@@ -45,7 +41,7 @@ Boot-race detail worth knowing: app.js owns the WebSocket singleton and still ro
 
 ### Layout & mode visibility
 
-`layout/panel_layout.json` is **the** UI layout — Codex can edit it directly to rearrange the dev UI without touching panel code. `mode_overrides` hides regions/instances per harness mode (e.g. `blog` mode hides the file tree).
+`layout/panel_layout.json` is **the** UI layout — Codex can edit it directly to rearrange the dev UI without touching panel code. `mode_overrides` hides regions/instances per harness mode (empty today — DeetsCode is the only mode; the schema stays for future modes).
 
 Per-instance show/hide that depends on JS state lives in **two parallel tables** for now: `panel-shell.js`'s `INSTANCE_MODE_RULES` applies at hoist time (synchronous, reads `localStorage.harness-mode`, prevents flash on first paint), and `app.js`'s `_PANEL_HIDE_RULES` re-applies on mode change. Keep them in sync. Consolidating into one source of truth is on the cleanup list.
 

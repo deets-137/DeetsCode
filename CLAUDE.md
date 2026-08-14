@@ -10,20 +10,22 @@ All filesystem paths the harness uses (directories, files, per-project subdir/fi
 - `dir` / `file` values are relative to `HARNESS_ROOT`.
 - The tool replaces the constant in place if it already exists, so re-registering is safe.
 
-Call sites that currently go through `paths.py`: `core/storage.py` (DB_PATH), `server.py` (PROMPTS_DIR, SESSIONS_DIR, THEME_CSS, DND_SUBDIR, CAMPAIGN_STATE_FILENAME, PANEL_LAYOUT_FILE), `discord_bot.py` (HARNESS_ROOT, SAVES_DIR), `tools/core.py` (PROJECT_MANUAL_SUBDIR, TASK_FILENAME), `panels/loader.py` (PANELS_DIR, PANEL_LAYOUT_FILE). If you're editing any of these and the constant you need isn't there yet, call `register_path` first, then import from `paths`.
+Call sites that currently go through `paths.py`: `core/storage.py` (DB_PATH), `server.py` (PROMPTS_DIR, SESSIONS_DIR, THEME_CSS, PANEL_LAYOUT_FILE), `discord_bot.py` (HARNESS_ROOT), `tools/core.py` (PROJECT_MANUAL_SUBDIR, TASK_FILENAME), `panels/loader.py` (PANELS_DIR, PANEL_LAYOUT_FILE). If you're editing any of these and the constant you need isn't there yet, call `register_path` first, then import from `paths`.
 
 ## Discord bot media
 
-Per-tool board/image extraction lives in `bot_cogs/bot_media.py`. To surface images or links from a new game's tool results, add an extractor function and register it under the tool names in `EXTRACTORS`. No bot changes needed.
+Per-tool image/link extraction lives in `bot_cogs/bot_media.py`. To surface media from a tool's results, add an extractor function and register it under the tool name in `EXTRACTORS`. No bot changes needed. `EXTRACTORS` is empty today — the chess extractors went with the game modes and no DeetsCode tool emits media yet.
 
 ## Modes
 
 **Modes:** DeetsCode (coding) is the only live mode. The chess/dnd/blog
-packs, prompts, and the blog_ops panel were deleted in Aug 2026 pending
-redesign (git history has their last state). The Discord bot and
-`bot_cogs/` remain in-tree but are dormant until game modes return;
-`tools/blog_service.py` and server.py's blog WS handlers likewise remain
-as inert plumbing for a future blog mode.
+packs, prompts, and panels were deleted in Aug 2026 (git history has
+their last state); all blog plumbing (blog_service, server.py WS
+handlers, app.js module, CSS) was torn out with them. The Discord bridge
+was de-gamed to match: it is now purely a way to drive a DeetsCode
+session from a Discord channel (9 slash commands, one conversation per
+channel). `bot_cogs/` holds only `bot_media.py`; the notes and stats cogs
+were removed.
 
 ## Native shell (Tauri)
 

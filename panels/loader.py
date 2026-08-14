@@ -75,7 +75,7 @@ class PanelManifest(BaseModel):
     anchored: bool = False
     # Whether the launcher may spawn additional instances of this panel at
     # runtime. Singletons (settings, files, clock) leave this false; panels
-    # whose content is per-instance (youtube, web) opt in.
+    # whose content is per-instance (web) opt in.
     multi_instance: bool = False
     tileflow: PanelTileflow = Field(default_factory=PanelTileflow)
     # Owning app (apps-over-panels primitive). None for top-level panels;

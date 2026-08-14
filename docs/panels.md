@@ -166,7 +166,7 @@ engine derives them from `display.preferred`/`min`/`max`. See
 
   // True = additional instances of this panel may exist at runtime.
   // Singletons (settings, files, clock) leave this false; per-content
-  // panels (youtube, web) opt in. The app launcher enforces it for app
+  // panels (web) opt in. The app launcher enforces it for app
   // panels (a multi_instance app requires multi_instance panels), and
   // view fetches carry `?instance=` so each instance can render its own
   // content. NOT declared: `app` — the loader derives it from folder
@@ -319,7 +319,6 @@ for the source of truth):
 | Tasks        | `task_updated` |
 | Tileflow     | `tileflow_state`, `tileflow_recompute`, `layout_updated` (shell handles these — usually you don't subscribe directly; `layout_updated` triggers a live re-sync from `/api/layout`) |
 | Apps         | `app_event` — app-scoped panel events; subscribe via `harness.app.subscribe`, not `harness.subscribe` (see [apps.md](apps.md)) |
-| Blog mode    | `blog_posts`, `blog_post`, `blog_post_saved`, `blog_post_deleted`, `blog_song_results`, `blog_movie_results`, `blog_comments`, `blog_comment_deleted`, `blog_preview_url`, `blog_passphrase`, `blog_error` |
 
 ### Tileflow state
 
@@ -454,7 +453,7 @@ or localStorage keys.
 <script>
 (function () {
   const root = document.currentScript.closest(".panel-instance");
-  const instance = root.dataset.instance;  // "youtube_a" or "youtube_b"
+  const instance = root.dataset.instance;  // "web_a" or "web_b"
   const KEY = "harness.myPanel." + instance + ".value";
   // Scope every storage key, query selector, and harness.setState arg
   // to `instance`, not to manifest.name.
@@ -545,7 +544,7 @@ if your new field isn't in the response, it's been stripped at step
       "score_overrides": { "score_floor": 5 } }   // never demotes to tray
   ],
   "mode_overrides": {
-    "blog": {
+    "some_future_mode": {
       "instances": { "hello": { "hidden": true } }
     }
   }
@@ -740,8 +739,7 @@ Working examples in the repo:
 - [`panels/slash_commands/`](../panels/slash_commands/) — tier 1, single `view.html`.
 - [`panels/ollama_ps/`](../panels/ollama_ps/) — tier 3, polls a subprocess and renders bars.
 - [`panels/pending_writes/`](../panels/pending_writes/) — tier 3, WS-subscribing + `setState` to `focused` while writes are pending.
-- [`panels/youtube/`](../panels/youtube/) — multi-instance-capable tier 1. Drives a `YT.Player` (IFrame API, nocookie host): playback events map to tileflow states (PLAYING→focused, PAUSED→active, ENDED→idle); restored videos are cued, not auto-bubbled. Uses `harness.setSpan` to claim an aspect-ratio-matched cell.
-- [`panels/web/`](../panels/web/) — tier 1, freeform URL browser.
+- [`panels/web/`](../panels/web/) — tier 1, freeform URL browser; multi-instance-capable.
 - [`panels/chat/`](../panels/chat/) — tier 1, anchored to the `left` region. Demonstrates the "panel mounts after app.js boots" race: app.js buffers chat-bound writes in `_chatBootBuffer` and the view's inline script drains them via `window._flushChatBootBuffer`.
 - [`apps/hello/`](../apps/hello/) — the reference *app*: two tier-3 panels sharing state via `harness_ctx`, an `actions` endpoint, and an `app_event` subscription. Start here for anything app-shaped.
 

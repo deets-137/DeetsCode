@@ -19,7 +19,7 @@ on every flow pass. Hover-inspect any `.panel-instance` to read them:
 
 | Attribute | Meaning |
 |---|---|
-| `data-instance` | Layout-instance id (e.g. `youtube_a`). |
+| `data-instance` | Layout-instance id (e.g. `tool_log`). |
 | `data-tileflow-state` | Current state: `dormant` / `idle` / `active` / `focused`. |
 | `data-tileflow-class` | Effective size class: `icon` / `small` / `medium` / `large` / `hero`. |
 | `data-tileflow-score` | Final score the engine computed for this panel this pass. |
@@ -58,7 +58,7 @@ nothing persists past a page reload.
 
 | Call | Purpose |
 |---|---|
-| `harness.setSpan(instance, {cols, rows} \| null)` | Override a panel's bento cell shape past the size-class table. Pass `null` to clear. See youtube panel for the canonical use case. |
+| `harness.setSpan(instance, {cols, rows} \| null)` | Override a panel's bento cell shape past the size-class table. Pass `null` to clear. For panels whose ideal shape depends on runtime content (e.g. matching a video's aspect ratio). |
 
 ### Interaction ring (debug-side of system_log)
 
@@ -160,8 +160,8 @@ for the meta shape per kind.
 | `games` | One row per game (chess, dnd, mafia). State in `state_json`. | `create_game`, `load_game`, `save_state`, `list_games`, `end_game` |
 | `moves` | Append-only move log per game. | `record_move`, `game_history` |
 | `players` | Discord display-name cache. | `upsert_player`, `get_player` |
-| `notes` | Free-text notes (Discord bot feature). | `add_note`, `list_notes`, `set_note_status` |
-| `stats` | Per-turn duration / mode / model rollup. | `record_stat`, `stats_summary` |
+| `notes` | Free-text notes. Orphaned — the `/note` cog was removed Aug 2026; the helpers remain unused. | `add_note`, `list_notes`, `set_note_status` |
+| `stats` | Per-turn duration / mode / model rollup. Still written by the Discord bridge on every turn; query it here (the `/stats` cog was removed). | `record_stat`, `stats_summary` |
 | `events` | Recorded WS frames for spectate / replay. | `record_event`, `query_events`, `list_event_sessions` |
 | `system_log` | UI interaction stream — clicks, state changes, bin migrations, custom. | `record_system_event`, `record_system_events`, `query_system_log`, `panel_usage_summary`, `prune_system_log` |
 
@@ -193,7 +193,7 @@ sqlite3 .harness/storage.db "
 sqlite3 .harness/storage.db "
   SELECT datetime(ts/1000, 'unixepoch') AS when, kind, meta_json
   FROM system_log
-  WHERE instance = 'youtube_a'
+  WHERE instance = 'tool_log'
   ORDER BY ts DESC LIMIT 50;
 "
 ```
@@ -231,12 +231,12 @@ The cheapest path:
 
 ```js
 // From a panel's inline script:
-harness.logInteraction(instance, "video_play", { video_id, duration });
+harness.logInteraction(instance, "page_open", { url });
 ```
 
-That row lands in `system_log` with `panel="youtube"` (denormalized from
-`instance`), `kind="video_play"`, and the meta JSON. Both
-`/api/system_log?kind=video_play` and a SQLite `WHERE kind='video_play'`
+That row lands in `system_log` with `panel="web"` (denormalized from
+`instance`), `kind="page_open"`, and the meta JSON. Both
+`/api/system_log?kind=page_open` and a SQLite `WHERE kind='page_open'`
 query will find it.
 
 For lifecycle events (mount / unmount / refetch / mode-hide), the

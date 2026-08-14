@@ -23,8 +23,8 @@ multi-tenant or production use. · **Platform:** Tauri shell + Python server + W
   server and draws its own chrome: the DeetsCode title menu hosts theme/skin/model/mode
   flyouts and settings; the token design system (fonts → palette → theme → skin, ported
   from DeetsMusic/DeetsSolutions) is previewable at `/swatch.html`.
-- **Discord bridge** — 20 slash commands over the same WebSocket the browser uses, with one
-  conversation per channel (dormant until game modes return).
+- **Discord bridge** — 9 slash commands over the same WebSocket the browser uses, with one
+  conversation per channel: a phone as a remote control for a DeetsCode session.
 
 ## Tool packs
 
@@ -89,12 +89,14 @@ goes under one out-of-tree directory instead of polluting each package.
 
 ### Discord bridge
 
-`pip install discord.py websockets python-dotenv`, then set env vars (or `.env`):
+`pip install discord.py websockets python-dotenv`, then `cp .env.example .env` and
+fill it in. Every setting is commented there; the ones you'll actually touch:
 
 - `DISCORD_TOKEN` — required; the bot refuses to start without it
-- `GAME_CHANNEL_IDS` — channels where the bot answers every message; it responds to
+- `CHANNEL_IDS` — channels where the bot answers every message; it responds to
   @mentions anywhere regardless
-- `DISCORD_GUILD_ID` — guild for instant slash-command sync; omit for global
+- `DISCORD_GUILD_ID` — guild for instant slash-command sync. Auto-detected when the
+  bot is in exactly one guild; set it once it joins a second, or omit for global sync
 
 `/emergency` is a kill switch with a dry-run preview and a typed confirmation, targeting the
 session, Ollama, the harness, the bot, or all of them.

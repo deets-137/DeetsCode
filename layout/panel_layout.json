@@ -82,13 +82,6 @@
       "grow": false
     },
     {
-      "instance": "youtube_a",
-      "panel": "youtube",
-      "region": "bento",
-      "anchored": false,
-      "grow": false
-    },
-    {
       "instance": "web",
       "panel": "web",
       "region": "bento",

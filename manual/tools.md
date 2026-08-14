@@ -8,19 +8,16 @@ adding or editing anything under `tools/`.
 ```
 tools/
   __init__.py   load_tools(mode) entry point + shared re-exports
-  core.py       Always-loaded tools: read_file, list_dir, roll_dice, update_task,
-                list_manual, load_manual, register_path, plus the tileflow/layout
-                set (set_instance_state, recompute_layout, get_layout, get_panels,
-                pin_instance, unpin_instance, set_instance_floor,
-                apply_layout_preset, save_layout_preset). Shared state
-                (pending_writes, read_files).
+  core.py       Always-loaded tools: read_file, list_dir, update_task,
+                list_manual, load_manual, register_path, plus the consolidated
+                `layout` tool (legacy names like get_layout/pin_instance stay
+                as dispatch aliases). Shared state (pending_writes, read_files).
   coding.py     DeetsCode-mode pack: write_file, edit_file, search, list_symbols,
                 list_context_files, run_command.
-  chess.py      Chess-mode pack: new_game, move, board, resign, etc.
-  blog.py       Blog-mode pack (edits the sibling blog repo).
-  dnd.py        DnD-mode pack: campaign/scene/character/combat ledger over
-                {project_dir}/.harness/dnd/campaign_state.json.
 ```
+
+(The chess/dnd/blog packs were deleted Aug 2026 — git history has their
+last state.)
 
 Core tools ship in every mode. Mode packs add domain tools on top and are
 gated by `_MODE_PACKS` in `__init__.py`. Adding `"mafia": "mafia"` there plus
@@ -30,7 +27,7 @@ a `tools/mafia.py` is how a new mode shows up.
 
 ```python
 from tools import load_tools
-tool_defs, execute = load_tools(selected_prompt)   # e.g. "DeetsCode", "chess"
+tool_defs, execute = load_tools(selected_prompt)   # e.g. "DeetsCode"
 ```
 
 Returns `(list[dict], Callable)`:
@@ -84,10 +81,10 @@ def execute_tool(
 
 - Always returns a string (never dict, never None). Error cases return
   `"Error: …"` as a string — the model handles it from there.
-- Core tools ignore `session_id` / `user_name`. Game packs use them for
-  per-channel state and per-player action enforcement. `user_name` is the
-  caller's display name (Discord display name in the bot frontend, or a
-  default). Chess uses it to enforce whose turn it is.
+- Core tools ignore `session_id` / `user_name`; the signature keeps them so
+  future packs can use them for per-channel state or per-player enforcement.
+  `user_name` is the caller's display name (Discord display name in the bot
+  frontend, or a default).
 - Wrap the whole body in `try/except Exception as e: return f"Error: {e}"`.
   A raised exception crashes the agent loop; a returned error string lets the
   model recover.
@@ -225,12 +222,11 @@ On `set_prompt` to a different mode, the server scrubs `role: tool` messages
 and strips `tool_calls` off assistant messages in history. Rationale:
 
 - The new mode's tool schema won't match the old mode's recorded calls.
-- Stale tool output (chess boards in a DeetsCode turn, or vice versa)
-  confuses the model.
+- Stale tool output from another mode's tools confuses the model.
 
 So: don't design a tool that relies on tool-call history surviving a mode
 switch. State that must persist across modes belongs on disk
-(`campaign_state.json`, `storage.db`, `task.md`).
+(`storage.db`, `task.md`).
 
 ## Slash-tool allowlist
 
@@ -260,17 +256,17 @@ destructive or write-queuing tool to the allowlist.
 2. Register in `_MODE_PACKS` in `tools/__init__.py`: `"<mode>": "<mode>"`.
 3. Drop a matching `prompts/<mode>.md` — see `manual/writing_prompts.md`.
 4. (Optional) Add mode-gated branching in `server.py` if the mode needs
-   special lifecycle hooks (see how `"dnd"` and `"chess"` branches look now).
+   special lifecycle hooks (the deleted `"dnd"`/`"chess"` branches in git
+   history show the pattern).
 5. Restart.
 
 ## Anti-patterns
 
 - **Reading `tool_defs` at module import time.** Modes rebuild it every turn
   via `load_tools`. Don't cache it at the top of a pack.
-- **Module-level state that game packs need.** Put per-session state in
-  `storage.db` (chess pattern) or a project-dir file (dnd pattern —
-  `.harness/dnd/campaign_state.json`). Process-globals reset on restart and don't
-  distinguish between sessions.
+- **Module-level state that mode packs need.** Put per-session state in
+  `storage.db` or a project-dir file. Process-globals reset on restart and
+  don't distinguish between sessions.
 - **Tool descriptions that describe *when* to use the tool.** That belongs in
   `prompt.md` — the system prompt has global priority. Tool descriptions say
   what the tool DOES.

@@ -5,25 +5,17 @@ that tool produces postable media (image URLs, attachment links, etc). Any URLs
 returned get posted to the channel after the model's reply, so Discord's
 auto-embed renders them — without relying on the model to paste them verbatim.
 
-Add a new game by writing a function that takes the tool_result content string
-and returns a list of URLs, then registering it in EXTRACTORS below.
+To surface media from a tool, write a function that takes the tool_result
+content string and returns a list of URLs, then register it in EXTRACTORS
+below under that tool's name.
+
+EXTRACTORS is empty today: the chess board-image extractors were removed with
+the game modes in Aug 2026, and no DeetsCode tool emits media yet. `extract()`
+returns [] for every tool until something is registered.
 """
-import re
 from typing import Callable
 
-_CHESS_BOARD_URL = re.compile(r"https?://\S*web-boardimage\S+")
-
-
-def _chess_extract(content: str) -> list[str]:
-    return _CHESS_BOARD_URL.findall(content)
-
-
-EXTRACTORS: dict[str, Callable[[str], list[str]]] = {
-    "chess_new":   _chess_extract,
-    "chess_move":  _chess_extract,
-    "chess_board": _chess_extract,
-    "chess_undo":  _chess_extract,
-}
+EXTRACTORS: dict[str, Callable[[str], list[str]]] = {}
 
 
 def extract(tool_name: str, content: str) -> list[str]:

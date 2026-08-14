@@ -1,5 +1,8 @@
 """
-Discord bot that bridges Discord messages to the harness WebSocket.
+Discord bot that connects a harness (DeetsCode) session to a Discord channel.
+
+One persistent conversation per channel, driven over the same WebSocket the
+browser UI uses — so a phone becomes a remote control for local development.
 
 Setup:
   pip install discord.py websockets python-dotenv
@@ -7,15 +10,15 @@ Setup:
   python discord_bot.py
 
 Usage:
-  - In a game channel (listed in GAME_CHANNEL_IDS), type normally.
+  - In a bound channel (listed in CHANNEL_IDS), type normally.
   - In any other channel, @mention the bot to get its attention.
   - All control actions use Discord slash commands: /reset, /compact, /cancel,
-    /apply, /reject, /setdir, /mode, /fastmode, /save, /load, /saves,
-    /state, /spectate, /health, /emergency.
+    /apply, /reject, /setdir, /mode, /health, /emergency.
 
 Config (defaults in the block below; all overridable via .env):
-  GAME_CHANNEL_IDS  — comma-separated channel IDs where the bot answers every message
-  DISCORD_GUILD_ID  — guild for instant slash-command sync (omit for global sync)
+  CHANNEL_IDS       — comma-separated channel IDs where the bot answers every message
+  DISCORD_GUILD_ID  — guild for instant slash-command sync (auto-detected if
+                      the bot is in exactly one guild; omit for global sync)
   AUTO_APPLY        — auto-write queued files without asking Discord for confirmation
   PROMPT_MODE       — default server prompt mode
   HARNESS_WS        — WebSocket URL of the running harness
@@ -26,7 +29,6 @@ import asyncio
 import json
 import logging
 import os
-import pathlib as _pathlib
 import platform
 import subprocess
 import sys
@@ -71,18 +73,22 @@ def _env_ids(name: str, default: set[int]) -> set[int]:
 
 # Channel IDs where the bot responds to ALL messages (no prefix/mention needed).
 # Right-click a channel in Discord (developer mode on) → Copy ID.
-# .env: GAME_CHANNEL_IDS=123456789012345678,234567890123456789
-GAME_CHANNEL_IDS: set[int] = _env_ids("GAME_CHANNEL_IDS", set())
+# .env: CHANNEL_IDS=123456789012345678,234567890123456789
+CHANNEL_IDS: set[int] = _env_ids("CHANNEL_IDS", _env_ids("GAME_CHANNEL_IDS", set()))
 
 # Guild to sync slash commands to. Guild-scoped sync is instant; global sync
-# can take up to an hour to propagate. .env: DISCORD_GUILD_ID=...
+# can take up to an hour to propagate. Leave unset and the bot picks the guild
+# automatically when it is a member of exactly one — set it explicitly once the
+# bot joins more than one server. .env: DISCORD_GUILD_ID=...
 DISCORD_GUILD_ID: int = int(os.environ.get("DISCORD_GUILD_ID", "0") or 0)
 
 # If True, file writes queued by the AI are applied automatically without asking.
 AUTO_APPLY = _env_bool("AUTO_APPLY", True)
 
-# Server prompt mode to use for this bot ("DeetsCode", "dnd", "chess", etc — see prompts/)
-PROMPT_MODE = os.environ.get("PROMPT_MODE", "dnd")
+# Server prompt mode to use for this bot. Must name a file in prompts/ (minus
+# the .md). DeetsCode is the only live mode; game modes may return later, which
+# is why this stays configurable rather than hardcoded.
+PROMPT_MODE = os.environ.get("PROMPT_MODE", "DeetsCode")
 
 HARNESS_WS = os.environ.get("HARNESS_WS", "ws://localhost:8000/ws")
 
@@ -102,20 +108,10 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 # Persistent = conversation history is maintained per channel.
 _connections: dict[int, websockets.ClientConnection] = {}
 _locks: dict[int, asyncio.Lock] = {}
-# Channels in fastmode get "/no_think" appended to every player message so Qwen3
-# skips the reasoning channel. Good for combat rounds; turn off for RP/rules.
-_fastmode: dict[int, bool] = {}
 # Per-channel active prompt mode, initialized to PROMPT_MODE and updated on /mode.
 _mode_by_channel: dict[int, str] = {}
 
-# Game saves live under PROJECT_ROOT/saves/<name>.json. The harness runs out of
-# the project dir; the bot just passes the relative path.
-from paths import (
-    HARNESS_ROOT as _BOT_ROOT,
-    SAVES_DIR as _SAVES_DIR,
-    DND_SUBDIR as _DND_SUBDIR,
-    CAMPAIGN_STATE_FILENAME as _CAMPAIGN_STATE_FILENAME,
-)
+from paths import HARNESS_ROOT as _BOT_ROOT
 
 # ─── WS helpers ──────────────────────────────────────────────────────────────
 
@@ -306,34 +302,32 @@ class PendingWritesView(discord.ui.View):
 
 # ─── Events ──────────────────────────────────────────────────────────────────
 
-_cogs_loaded = False
 _synced = False
 
 
 @bot.event
 async def on_ready():
-    global _cogs_loaded, _synced
+    global _synced
     log.info(f"Logged in as {bot.user}  (id: {bot.user.id})")
     log.info(f"Harness: {HARNESS_WS}")
-    log.info(f"Game channels: {GAME_CHANNEL_IDS or '(none — use @mention)'}")
-    if not _cogs_loaded:
-        for ext in ("bot_cogs.notes", "bot_cogs.stats"):
-            try:
-                await bot.load_extension(ext)
-                log.info(f"Loaded cog: {ext}")
-            except Exception as e:
-                log.error(f"Failed to load {ext}: {e}")
-        _cogs_loaded = True
+    log.info(f"Bound channels: {CHANNEL_IDS or '(none — use @mention)'}")
     # Sync once per process, not on every gateway reconnect. Guild-scoped sync
     # (DISCORD_GUILD_ID set) shows up instantly; global sync can take up to an
     # hour to propagate and is rate-limited.
     if not _synced:
         try:
-            if DISCORD_GUILD_ID:
-                guild = discord.Object(id=DISCORD_GUILD_ID)
+            guild_id = DISCORD_GUILD_ID
+            if not guild_id and len(bot.guilds) == 1:
+                guild_id = bot.guilds[0].id
+                log.info(
+                    f"DISCORD_GUILD_ID unset; syncing to the only guild we're in: "
+                    f"{bot.guilds[0].name} ({guild_id})."
+                )
+            if guild_id:
+                guild = discord.Object(id=guild_id)
                 bot.tree.copy_global_to(guild=guild)
                 synced = await bot.tree.sync(guild=guild)
-                log.info(f"Synced {len(synced)} slash command(s) to guild {DISCORD_GUILD_ID}.")
+                log.info(f"Synced {len(synced)} slash command(s) to guild {guild_id}.")
             else:
                 synced = await bot.tree.sync()
                 log.info(f"Synced {len(synced)} slash command(s) globally (may take up to 1h to appear).")
@@ -390,9 +384,9 @@ async def on_message(message: discord.Message):
     content = message.content
 
     mentioned = bot.user in message.mentions
-    in_game_channel = cid in GAME_CHANNEL_IDS
+    in_bound_channel = cid in CHANNEL_IDS
 
-    if not (mentioned or in_game_channel):
+    if not (mentioned or in_bound_channel):
         return
 
     # Strip mention to isolate the prompt
@@ -403,13 +397,9 @@ async def on_message(message: discord.Message):
 
     if not prompt:
         return
-    # Fastmode: append /no_think so Qwen3 skips its reasoning pass.
-    if _fastmode.get(cid):
-        prompt = f"{prompt} /no_think"
     # Wrap the prompt so the server knows who is talking. Identity is by
     # display name only — we don't ship the raw Discord id since nothing
-    # downstream needs it and it just confuses small models that have to
-    # quote it verbatim into chess tool calls.
+    # downstream needs it and small models tend to echo it back verbatim.
     user_payload = {
         "name": message.author.display_name,
         "text": prompt,
@@ -461,9 +451,9 @@ async def on_message(message: discord.Message):
         )
 
 # ─── Slash (application) commands ────────────────────────────────────────────
-# These mirror the `!` prefix commands but appear in Discord's native `/` menu
-# with autocomplete. Useful for game channels where players want a clean
-# "clear context" button without typing a raw prefix.
+# Every control action is a slash command so it stays deterministic: no model
+# call, no prompt tokens, no chance of the model misreading an instruction as
+# conversation.
 
 
 async def _simple_ws_action(interaction: discord.Interaction, payload: dict, expect: set[str], ok_msg: str):
@@ -568,7 +558,7 @@ async def slash_setdir(interaction: discord.Interaction, path: str):
             await interaction.followup.send(f"❌ {e}")
 
 
-@bot.tree.command(name="mode", description="Switch prompt mode (DeetsCode, dnd, chess, etc).")
+@bot.tree.command(name="mode", description="Switch prompt mode — a filename in prompts/ (DeetsCode).")
 async def slash_mode(interaction: discord.Interaction, prompt: str):
     cid = interaction.channel_id
     await interaction.response.defer(thinking=False)
@@ -580,60 +570,6 @@ async def slash_mode(interaction: discord.Interaction, prompt: str):
             await interaction.followup.send(f"🎭 Prompt mode → `{prompt}` (takes effect on next turn).")
         except Exception as e:
             await interaction.followup.send(f"❌ {e}")
-
-
-@bot.tree.command(name="state", description="Show active game state for this channel (deterministic — no model call).")
-async def slash_state(interaction: discord.Interaction):
-    cid = str(interaction.channel_id)
-    try:
-        games = storage.list_games(channel_id=cid, status="active", limit=10)
-    except Exception as e:
-        await interaction.response.send_message(f"❌ storage error: {e}", ephemeral=True)
-        return
-    if not games:
-        await interaction.response.send_message(
-            "No active games in this channel. Use chess/dnd tools to start one.",
-            ephemeral=True,
-        )
-        return
-    lines = [f"**Active games in this channel ({len(games)}):**"]
-    for g in games:
-        full = storage.load_game(g["game_id"])
-        if full is None:
-            continue
-        gtype = full.get("game_type", "?")
-        gid = full["game_id"]
-        state = full.get("state") or {}
-        if gtype == "chess":
-            try:
-                import chess as _chess  # python-chess
-                board = _chess.Board(state["fen"])
-                turn = "White" if board.turn == _chess.WHITE else "Black"
-                turn_name = state.get("white") if board.turn == _chess.WHITE else state.get("black")
-                lines.append(
-                    f"\n`{gid}` · chess · {turn} to move ({turn_name})\n"
-                    f"FEN: `{board.fen()}`\n"
-                    f"```\n{board.unicode(invert_color=True, borders=True)}\n```"
-                )
-            except Exception as e:
-                lines.append(f"\n`{gid}` · chess · (failed to render: {e})")
-        else:
-            lines.append(f"\n`{gid}` · {gtype} · state keys: {list(state.keys())}")
-    msg = "\n".join(lines)
-    # Discord message cap is 2000 chars; truncate safely if multiple games.
-    if len(msg) > 1900:
-        msg = msg[:1900] + "\n…(truncated)"
-    await interaction.response.send_message(msg, ephemeral=False)
-
-
-@bot.tree.command(name="spectate", description="Show the session id to paste into the web UI's spectate picker.")
-async def slash_spectate(interaction: discord.Interaction):
-    cid = interaction.channel_id
-    sid = f"discord-{cid}"
-    await interaction.response.send_message(
-        f"🔭 Session id for this channel: `{sid}`\nOpen the web UI → pick it in the spectate dropdown → watch live.",
-        ephemeral=True,
-    )
 
 
 @bot.tree.command(name="health", description="Ping the harness and Ollama — deterministic, no model call.")
@@ -660,81 +596,6 @@ async def slash_health(interaction: discord.Interaction):
     except Exception as e:
         lines.append(f"🔴 Ollama: `{e}`")
     await interaction.followup.send("\n".join(lines))
-
-
-@bot.tree.command(name="fastmode", description="Toggle appending /no_think to every message (skip reasoning — instant replies).")
-async def slash_fastmode(interaction: discord.Interaction):
-    cid = interaction.channel_id
-    _fastmode[cid] = not _fastmode.get(cid, False)
-    state = "ON" if _fastmode[cid] else "OFF"
-    hint = "Model will skip its reasoning pass — fast, less thoughtful." if _fastmode[cid] else "Model will think fully before replying."
-    await interaction.response.send_message(f"⚡ Fastmode **{state}** for this channel. {hint}")
-
-
-def _campaign_path() -> _pathlib.Path:
-    # Game state lives in the dnd/ folder at project root.
-    return _BOT_ROOT / _DND_SUBDIR / _CAMPAIGN_STATE_FILENAME
-
-
-@bot.tree.command(name="save", description="Snapshot campaign_state.json so you can /load it later.")
-async def slash_save(interaction: discord.Interaction, name: str):
-    await interaction.response.defer(thinking=False)
-    safe = _pathlib.Path(name).name  # strip path separators
-    if not safe or safe.startswith("."):
-        await interaction.followup.send("❌ Invalid save name.")
-        return
-    src = _campaign_path()
-    if not src.is_file():
-        await interaction.followup.send("❌ No `campaign_state.json` to save yet.")
-        return
-    try:
-        _SAVES_DIR.mkdir(parents=True, exist_ok=True)
-        dst = _SAVES_DIR / f"{safe}.json"
-        dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-        await interaction.followup.send(f"💾 Saved to `saves/{safe}.json`.")
-    except Exception as e:
-        await interaction.followup.send(f"❌ {e}")
-
-
-@bot.tree.command(name="load", description="Restore a saved campaign into campaign_state.json. Also clears conversation.")
-async def slash_load(interaction: discord.Interaction, name: str):
-    cid = interaction.channel_id
-    await interaction.response.defer(thinking=False)
-    safe = _pathlib.Path(name).name
-    src = _SAVES_DIR / f"{safe}.json"
-    if not src.is_file():
-        await interaction.followup.send(f"❌ No save named `{safe}`. Use `/saves` to list.")
-        return
-    try:
-        dst = _campaign_path()
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        dst.write_text(src.read_text(encoding="utf-8"), encoding="utf-8")
-    except Exception as e:
-        await interaction.followup.send(f"❌ Write failed: {e}")
-        return
-    # Reset the channel's conversation so the model cold-starts from the
-    # restored state rather than continuing whatever was happening.
-    async with _get_lock(cid):
-        try:
-            ws = await _get_ws(cid)
-            await ws.send(json.dumps({"type": "reset"}))
-            await _recv_until(ws, {"reset_complete"})
-        except Exception as e:
-            await interaction.followup.send(f"⚠️ Loaded file but reset failed: {e}")
-            return
-    await interaction.followup.send(f"📂 Loaded `{safe}`. Conversation reset — next message bootstraps from saved state.")
-
-
-@bot.tree.command(name="saves", description="List available campaign saves.")
-async def slash_saves(interaction: discord.Interaction):
-    if not _SAVES_DIR.is_dir():
-        await interaction.response.send_message("(no saves yet)")
-        return
-    files = sorted(p.stem for p in _SAVES_DIR.glob("*.json"))
-    if not files:
-        await interaction.response.send_message("(no saves yet)")
-        return
-    await interaction.response.send_message("**Saves:** " + ", ".join(f"`{f}`" for f in files))
 
 
 # ─── Emergency kill switch ───────────────────────────────────────────────────

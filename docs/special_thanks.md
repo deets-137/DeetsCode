@@ -6,9 +6,10 @@ of the people below.
 
 ## Niklas Fiekas — [@niklasf](https://github.com/niklasf)
 
-Every chess feature in this repo is powered by Niklas's work. He has maintained
-these libraries for over a decade and they are, frankly, the reason we could
-ship a rules-correct chess agent in an afternoon instead of a month.
+The harness's chess mode (removed Aug 2026 pending redesign — see git history)
+was powered end-to-end by Niklas's work: he has maintained these libraries for
+over a decade, and they are the reason we could ship a rules-correct chess
+agent in an afternoon instead of a month.
 
 - **[python-chess](https://github.com/niklasf/python-chess)** — full chess
   engine in pure Python: move generation, legality, FEN/PGN/SAN/UCI parsing,
@@ -17,14 +18,8 @@ ship a rules-correct chess agent in an afternoon instead of a month.
   GPL-3.0.
 - **[web-boardimage](https://github.com/niklasf/web-boardimage)** — the tiny
   service hosted at `backscattering.de` that renders a FEN to a PNG. We just
-  embed the URL and Discord auto-attaches the image — no rendering deps on
+  embedded the URL and Discord auto-attached the image — no rendering deps on
   our side.
 
-### Files in this repo that depend on Niklas's code
-
-- [`tools/chess.py`](tools/chess.py) — imports `chess` and `chess.pgn`;
-  embeds web-boardimage URLs in tool output.
-- [`requirements.txt`](requirements.txt) — lists `chess` as a dependency.
-
-If you end up using or extending the chess tools, please consider
+If a chess mode returns and you use or extend it, please consider
 [sponsoring Niklas](https://github.com/sponsors/niklasf).

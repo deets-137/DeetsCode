@@ -69,8 +69,6 @@ with a `type` the client's `ws.onmessage` switches on.
 | `layout_updated` | —                                   | persisted layout changed; client re-syncs from `/api/layout` |
 | `app_event`      | `app_id, app_instance, event_name, payload` | app-scoped panel event (see docs/apps.md) |
 
-(Blog mode adds a `blog_*` family — see the blog WS handlers in server.py.)
-
 `done` is guaranteed by the `finally` block in `agent_loop`, even on cancel or
 exception. The client relies on this to un-gray the input.
 
@@ -97,8 +95,8 @@ emitted by the outer wrapper in `finally`.
 
 ## Tool definitions
 
-Schemas live in `tools/core.py` (always loaded) and per-mode packs in
-`tools/coding.py`, `tools/chess.py`, etc. Each is an OpenAI-style function:
+Schemas live in `tools/core.py` (always loaded) and per-mode packs
+(`tools/coding.py` today). Each is an OpenAI-style function:
 
 ```python
 {
@@ -117,15 +115,14 @@ Dispatched by name via the unified signature:
 execute(name, args, session_id, project_dir, user_name=None) -> str
 ```
 
-Core tools ignore `session_id` / `user_name`. Game packs use them for
-per-channel state and per-player action enforcement.
+Core tools ignore `session_id` / `user_name`; the signature keeps them so
+future packs can use them for per-channel state or per-player enforcement.
 
 ### Current tools
 
 **Core (always loaded):**
 - `read_file(path, start_line?, end_line?)` — 100k char cap, line-numbered `N<TAB>` output, records `read_files`.
 - `list_dir(path)` — directory listing, hides dotfiles.
-- `roll_dice(sides, count?, modifier?, advantage?, label?)` — instant probabilistic outcomes.
 - `update_task(content?)` — writes `task.md` (markdown checklist). Empty `content` returns the current file.
 - `list_manual()` / `load_manual(name, section?)` — lazy project manual docs.
 - `register_path(name, value, kind)` — append/replace a constant in `paths.py`. Single source of truth for filesystem paths; see `manual/tools.md`.
@@ -143,14 +140,8 @@ per-channel state and per-player action enforcement.
 - `list_context_files()` — dumps `read_files`.
 - `run_command(command)` — **not sandboxed.** Runs `subprocess.run(..., shell=True)` in the project directory with a 120s timeout and a 5,000-char output cap. There is no allowlist and no metacharacter rejection. Treat it as a shell.
 
-**Chess pack (mode = "chess"):** new_game, move, board, resign, etc. See `tools/chess.py`.
-
-**DnD pack (mode = "dnd"):** dnd_new_campaign, dnd_get_state,
-dnd_update_character, dnd_set_scene, dnd_log_event, dnd_combat — a campaign
-ledger over `{project_dir}/.harness/dnd/campaign_state.json`. Dice come from core
-`roll_dice`. See `tools/dnd.py`.
-
-**Blog pack (mode = "blog"):** see `tools/blog.py` / `tools/blog_service.py`.
+(The chess/dnd/blog packs were deleted Aug 2026 — git history has their
+last state.)
 
 ## Adding a new tool / new mode
 
