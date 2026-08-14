@@ -71,8 +71,8 @@ def _env_ids(name: str, default: set[int]) -> set[int]:
 
 # Channel IDs where the bot responds to ALL messages (no prefix/mention needed).
 # Right-click a channel in Discord (developer mode on) → Copy ID.
-# .env: GAME_CHANNEL_IDS=1344481118287695904,932359665122177104
-GAME_CHANNEL_IDS: set[int] = _env_ids("GAME_CHANNEL_IDS", {1344481118287695904, 932359665122177104})
+# .env: GAME_CHANNEL_IDS=123456789012345678,234567890123456789
+GAME_CHANNEL_IDS: set[int] = _env_ids("GAME_CHANNEL_IDS", set())
 
 # Guild to sync slash commands to. Guild-scoped sync is instant; global sync
 # can take up to an hour to propagate. .env: DISCORD_GUILD_ID=...
