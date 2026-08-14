@@ -9,8 +9,11 @@ env/
 # Config (has local URLs/settings — copy config.example.py instead)
 config.py
 
-# Secrets
+# Secrets — .env and any local variant (.env.local, .env.bak, …).
+# .env.example is the tracked template and is explicitly re-included.
 .env
+.env.*
+!.env.example
 
 # Claude Code session data
 .claude/
