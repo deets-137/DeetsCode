@@ -59,7 +59,7 @@ requirements.txt  fastapi, uvicorn[standard], openai, httpx
 2. `websocket_endpoint()` dispatches by `type` → spawns `agent_loop(…)` as an asyncio task.
 3. `agent_loop` wraps `_agent_loop_impl` and guarantees a `done` event fires in `finally`.
 4. `_agent_loop_impl`:
-   - Builds system prompt: `prompts/<mode>.md` + file tree (cached on `state`) + a live `<layout>` bento descriptor (rebuilt every turn from `panels/loader.py:layout_descriptor`).
+   - Builds system prompt: `prompts/<mode>.md` + file tree (cached on `state`).
    - Calls `load_tools(mode)` to get the mode-gated schema + dispatcher.
    - Trims stale `role: tool` messages older than the 3 most recent (>400 chars → stub).
    - On turn 1, if no `[/]` step in `task.md` and the message isn't conversational, sets `tool_choice="required"` to force an initial `update_task` call.

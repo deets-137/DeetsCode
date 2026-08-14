@@ -9,9 +9,8 @@ adding or editing anything under `tools/`.
 tools/
   __init__.py   load_tools(mode) entry point + shared re-exports
   core.py       Always-loaded tools: read_file, list_dir, update_task,
-                list_manual, load_manual, register_path, plus the consolidated
-                `layout` tool (legacy names like get_layout/pin_instance stay
-                as dispatch aliases). Shared state (pending_writes, read_files).
+                list_manual, load_manual, register_path. Shared state
+                (pending_writes, read_files).
   coding.py     DeetsCode-mode pack: write_file, edit_file, search, list_symbols,
                 list_context_files, run_command.
 ```
@@ -179,21 +178,6 @@ prompt. Only a manifest is — names + section headings. The model calls:
 
 Implication for manual authors: **structure docs with `## ` level-2 headings**.
 A doc with no subheadings can only be loaded whole, which defeats the point.
-
-## Layout tools (model-driven bento, Stage 3)
-
-Core tools; loaded in every mode. `get_layout` / `get_panels` return condensed
-views built in `panels/loader.py`; the mutating four (`pin_instance`,
-`unpin_instance`, `set_instance_floor`, `apply_layout_preset`) write
-`layout/panel_layout.json` directly through the loader's validators, and
-`server.py`'s dispatch site broadcasts a `layout_updated` WS frame after any
-of them returns `"OK: …"` — that broadcast is what makes every open tab
-rearrange live. Validator failures return verbatim (`"Pin rejected: …"`)
-so the model self-corrects. A compact `<layout>` descriptor is appended to
-the system prompt every turn (`panels/loader.py:layout_descriptor`), so the
-model always sees current pins/states/floors without calling `get_layout`
-first. Same broadcast pattern as `set_instance_state` — side effects live at
-the dispatch site, tool functions stay sync.
 
 ## Stale tool-result trimming
 

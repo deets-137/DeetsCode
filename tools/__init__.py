@@ -2,7 +2,7 @@
 Tool packs, gated by prompt mode.
 
 `core` is always loaded (read_file, list_dir, manual access, update_task,
-register_path, the `layout` workspace tool); mode packs add their own tools
+register_path); mode packs add their own tools
 on top (tools/coding.py for DeetsCode). Keep decks small: every definition
 rides in every request and dilutes a small model's tool-selection attention.
 
@@ -52,17 +52,9 @@ def load_tools(mode: str) -> tuple[list[dict], Callable]:
 
     defs: list[dict] = list(CORE_TOOLS)
     # dispatch[name] = module with execute_tool(name, args, session_id, project_dir, user_name=None)
-    # Pre-consolidation layout tool names always dispatch — core keeps them
-    # as aliases for the `layout` tool (compat for old sessions).
     dispatch: dict[str, object] = {
         t["function"]["name"]: _core_mod for t in CORE_TOOLS
     }
-    for legacy in (
-        "get_layout", "get_panels", "pin_instance", "unpin_instance",
-        "set_instance_floor", "apply_layout_preset", "save_layout_preset",
-        "set_instance_state", "recompute_layout",
-    ):
-        dispatch[legacy] = _core_mod
 
     pack_name = _MODE_PACKS.get(mode)
     if pack_name:

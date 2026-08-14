@@ -4,13 +4,14 @@
 
 All filesystem paths the harness uses (directories, files, per-project subdir/filename constants) live in **`paths.py`**. It is the single source of truth; no other module should compute paths with `Path(__file__).parent / "..."`.
 
-**When you need a new path constant, use the `register_path` core tool — do not hand-edit `paths.py`.**
+**Add new constants by editing `paths.py` directly.** (The `register_path` tool
+that used to own this was retired 2026-08-14 with the rest of the deck trim.)
 
 - Kinds: `dir` (exports a `Path` directory), `file` (exports a `Path` file), `str` (bare string for per-project relative names like `"task.md"`).
 - `dir` / `file` values are relative to `HARNESS_ROOT`.
-- The tool replaces the constant in place if it already exists, so re-registering is safe.
+- Never reassign `HARNESS_ROOT` — everything else hangs off it.
 
-Call sites that currently go through `paths.py`: `core/storage.py` (DB_PATH), `server.py` (PROMPTS_DIR, SESSIONS_DIR, THEME_CSS, PANEL_LAYOUT_FILE), `discord_bot.py` (HARNESS_ROOT), `tools/core.py` (PROJECT_MANUAL_SUBDIR, TASK_FILENAME), `panels/loader.py` (PANELS_DIR, PANEL_LAYOUT_FILE). If you're editing any of these and the constant you need isn't there yet, call `register_path` first, then import from `paths`.
+Call sites that currently go through `paths.py`: `core/storage.py` (DB_PATH), `server.py` (PROMPTS_DIR, SESSIONS_DIR, THEME_CSS, PANEL_LAYOUT_FILE), `discord_bot.py` (HARNESS_ROOT), `tools/core.py` (TASK_FILENAME), `panels/loader.py` (PANELS_DIR, PANEL_LAYOUT_FILE). If you're editing any of these and the constant you need isn't there yet, add it to `paths.py` first, then import from `paths`.
 
 ## Discord bot media
 

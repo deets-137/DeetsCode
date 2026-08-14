@@ -29,7 +29,6 @@ DB_PATH:      Path = RUNTIME_DIR / "storage.db"
 # Per-project-dir filenames (resolved against a project root, not HARNESS_ROOT).
 # Kept as bare strings because the project dir is chosen at runtime.
 TASK_FILENAME = "task.md"
-PROJECT_MANUAL_SUBDIR = "manual"
 # Per-panel folders (panel.json + view/handler).
 PANELS_DIR: Path = HARNESS_ROOT / "panels"
 # Declarative layout: regions + panel instances.

@@ -78,7 +78,7 @@ exception. The client relies on this to un-gray the input.
 
 1. Reads `prompts/<selected_prompt>.md` (so edits take effect without restart).
 2. Substitutes `{project_dir}` and `{file_tree}` (tree is cached on `state` — built once per turn, not per iteration).
-3. Appends a live `<layout>` bento descriptor (`panels/loader.py:layout_descriptor`) — rebuilt every turn so the model sees current pins/states/floors. Manual docs are NOT inlined; the model pulls them via `list_manual`/`load_manual`.
+3. Manual docs are NOT inlined; the model pulls them via `list_manual`/`load_manual`.
 4. `tool_defs, execute = load_tools(selected_prompt)` — re-loaded every iteration so `/mode` changes take effect mid-session without a restart.
 5. Builds `loop_messages = [system] + messages`.
 6. Per iteration:
@@ -126,11 +126,6 @@ future packs can use them for per-channel state or per-player enforcement.
 - `update_task(content?)` — writes `task.md` (markdown checklist). Empty `content` returns the current file.
 - `list_manual()` / `load_manual(name, section?)` — lazy project manual docs.
 - `register_path(name, value, kind)` — append/replace a constant in `paths.py`. Single source of truth for filesystem paths; see `manual/tools.md`.
-- Layout set (`manual/tools.md` § Layout tools): `get_layout`, `get_panels`,
-  `pin_instance`, `unpin_instance`, `set_instance_floor`,
-  `apply_layout_preset`, `save_layout_preset`, `set_instance_state`,
-  `recompute_layout`. Mutations broadcast `layout_updated` /
-  `tileflow_state` from the dispatch site in `_agent_loop_impl`.
 
 **DeetsCode pack (mode = "DeetsCode"):**
 - `write_file(path, content)` — queues into `pending_writes`, never touches disk.

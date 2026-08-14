@@ -208,7 +208,7 @@ they don't keep emitting events.
 State sources, in priority order:
 1. Explicit JS call (`harness.setState`) from the panel itself.
 2. Server-side overlay broadcast (`POST /api/tileflow/state/:id`,
-   `set_instance_state` model tool).
+   the `/api/tileflow/state` endpoint).
 3. Manifest `default_state` on first render.
 4. Per-instance `score_overrides.force_state` (a hard override).
 
@@ -267,7 +267,7 @@ Same pattern works for: a `web` panel becoming `active` when its
 iframe navigates, a chat panel going `focused` on user typing, a
 status panel going `dormant` when its data is stale.
 
-### Recipe: a model bubbles a panel via tool call
+### Recipe: bubbling a panel from outside the page
 
 Both endpoints are wired and broadcast over WS to every connected tab:
 
@@ -276,16 +276,9 @@ POST /api/tileflow/state/<instance_id>   body: {"state": "focused"}
 DELETE /api/tileflow/state/<instance_id> // clears to idle
 ```
 
-The local model gets the same affordance via the consolidated `layout`
-tool (`tools/core.py`):
-
-- `{"action": "state", "instance": "...", "state": "focused"}` — bubble a panel.
-- `{"action": "recompute"}` — force a fresh flow pass (e.g. after a burst
-  of state changes, to refresh recency decay).
-
-No per-panel setup — they just work against any registered instance.
-(The pre-consolidation names `set_instance_state` / `recompute_layout`
-still dispatch as compat aliases.)
+No per-panel setup — they work against any registered instance. The model
+has no layout tool: the `layout` tool and its compat aliases were removed
+2026-08-14 ahead of the four-slot rework (see docs/slots.md).
 
 ---
 

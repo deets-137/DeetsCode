@@ -429,9 +429,9 @@ async def fetch_context_length(model: str) -> int:
     return 131072
 
 
-# Project-scoped reference docs (markdown under `manual/`) are accessed
-# exclusively via the `list_manual` and `load_manual` tools in tools/core.py.
-# History: there was also a `knowledge_packs` chip UI + a system-prompt
+# Project-scoped reference docs (markdown under `manual/`) have no model-facing
+# surface: the `list_manual` / `load_manual` tools were retired 2026-08-14 and
+# the docs are read by hand. History: there was also a `knowledge_packs` chip UI + a system-prompt
 # manifest path with a global `packs/` fallback. All retired — usage settled
 # on project-scoped manuals reached through the tool surface. If you want a
 # manual doc always in scope for a mode, mention it in prompts/<mode>.md.
@@ -583,13 +583,6 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
         state["file_tree"] = tree_text
     prompt_template = load_prompt_template(selected_prompt)
     system_prompt = prompt_template.replace("{project_dir}", str(project_dir)).replace("{file_tree}", tree_text)
-    # Live layout descriptor (Stage 3): rebuilt every turn so the model sees
-    # the bento as it is *now* (pins, floors, runtime states), not a boot
-    # snapshot. Rides in every mode because the layout tools are core tools.
-    try:
-        system_prompt += "\n\n" + _panel_loader.layout_descriptor()
-    except Exception:
-        pass  # a broken layout file must not take the chat loop down
     loop_messages = [{"role": "system", "content": system_prompt}] + messages
     # Mode-gated tool pack. Each turn reloads because the mode can switch
     # between turns via /mode — cheap enough, keeps the schema in sync.
@@ -744,34 +737,6 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
             # only the bare no-argument read leaves the file untouched.
             if name == "update_task" and (args.get("clear") or "content" in args):
                 await ws.send_json({"type": "task_updated"})
-
-            # Layout side effects live here (not in tools/core.py) so the
-            # tool functions stay sync and every connected client — not just
-            # the chat WS — sees the frames. The model-facing tool is the
-            # consolidated `layout` (action enum); the per-name checks below
-            # it keep pre-consolidation aliases working.
-            _layout_action = (args.get("action") or "").strip() if name == "layout" else ""
-
-            # Runtime state overlay → tileflow_state frame.
-            if name == "set_instance_state" or _layout_action == "state":
-                inst_id = (args.get("instance") or "").strip()
-                st = (args.get("state") or "").strip()
-                if inst_id and st in _TILEFLOW_STATES:
-                    await broadcast_tileflow_state(inst_id, st)
-
-            # Recompute → nudge clients to re-run their flow pass.
-            if name == "recompute_layout" or _layout_action == "recompute":
-                await _broadcast_panel_frame({"type": "tileflow_recompute"})
-
-            # Layout-sheet mutations write the file inside tools/core.py; on
-            # success, every client re-syncs from /api/layout. Errors
-            # (validator rejections) broadcast nothing.
-            _mutated = (
-                name in _LAYOUT_MUTATING_TOOLS
-                or _layout_action in {"pin", "unpin", "floor", "preset_apply"}
-            )
-            if _mutated and isinstance(result, str) and result.startswith("OK"):
-                await broadcast_layout_updated()
 
             focus = build_focus_block(project_dir)
             directive = focus if focus else "<system>\nACTION: continue the user's original task. if complete, emit final reply and stop.\n</system>"
@@ -1318,19 +1283,12 @@ async def unpin_instance(instance_id: str):
 
 _TILEFLOW_STATES = {"dormant", "idle", "active", "focused"}
 
-# Tools (tools/core.py) whose success means the persisted layout sheet
-# changed — the dispatch site broadcasts `layout_updated` after them.
-_LAYOUT_MUTATING_TOOLS = {
-    "pin_instance", "unpin_instance", "set_instance_floor", "apply_layout_preset",
-}
-
 
 @app.post("/api/tileflow/state/{instance_id}")
 async def set_tileflow_state(instance_id: str, req: Request):
     """Push a runtime state overlay for one instance to all connected
-    clients. Transient — not persisted to `panel_layout.json`. Used by the
-    `set_instance_state` model tool, panel internals, and ad-hoc testing
-    via curl."""
+    clients. Transient — not persisted to `panel_layout.json`. Used by
+    panel internals and ad-hoc testing via curl."""
     try:
         body = await req.json()
     except Exception:

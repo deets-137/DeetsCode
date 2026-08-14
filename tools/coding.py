@@ -169,18 +169,6 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "list_context_files",
-            "description": "List all files you have already read in this session. Check this before reading a file to avoid re-reading something already in context.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "required": [],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
             "name": "run_command",
             "description": "Run a shell command in the project directory. Use this to run tests, execute scripts, and verify your own work.",
             "parameters": {
@@ -379,11 +367,6 @@ def execute_tool(
                 return f"No symbols found in {rel} (detected lang: {lang})"
             header = f"{len(symbols)} symbols in {rel} ({lang}):"
             return header + "\n" + "\n".join(symbols)
-
-        if name == "list_context_files":
-            if not read_files:
-                return "No files read yet this session."
-            return "\n".join(read_files)
 
         if name == "run_command":
             if "command" not in args:

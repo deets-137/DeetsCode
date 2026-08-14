@@ -1557,13 +1557,10 @@ input:checked + .toggle-slider:before {
   min-height: 0;
   align-self: stretch;
   transition: background var(--dur-theme) ease, box-shadow var(--dur-theme) ease,
-              border-color var(--dur-theme) ease, transform var(--dur-fast) var(--ease-ui);
+              border-color var(--dur-theme) ease;
 }
 
-/* Cards lift on touch (skin-owned: press slides off its ink on both axes,
-   ocean buoys up, vanilla stays put). Bento tiles only — the chat column
-   is furniture, not a card. */
-.region-kind-bento > .panel-instance:hover { transform: var(--hover-lift); }
+/* Tiles are deliberately inert under the cursor — no hover lift. */
 
 .panel-header {
   position: relative; /* anchor for .panel-pill-menu */

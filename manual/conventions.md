@@ -73,8 +73,7 @@ verbatim — those echoes route to the thinking stream, never visible chat
 
 ## Prompt + manual pattern
 
-System prompt = `prompts/<mode>.md` + file tree + a live `<layout>` bento
-descriptor (rebuilt every turn — see `panels/loader.py:layout_descriptor`).
+System prompt = `prompts/<mode>.md` + file tree.
 Manual bodies are NOT inlined — the model calls `load_manual(name, section?)`
 to pull them in as tool output only when needed.
 

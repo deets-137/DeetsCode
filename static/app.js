@@ -218,10 +218,9 @@ function esc(s) {
   return s.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
 }
 
-// (Knowledge-packs UI removed — project manual docs under manual/ are
-// now reached only via the `list_manual` / `load_manual` model tools in
-// tools/core.py. The chip UI, the `set_packs` WS message, and the
-// system-prompt manifest are gone; the global packs/ slot retired too.)
+// (Knowledge-packs UI removed. The chip UI, the `set_packs` WS message, and
+// the system-prompt manifest are gone; the global packs/ slot retired too.
+// The manual tools that replaced them were themselves retired 2026-08-14.)
 
 function setTitleFromPath(path) {
   if (!path) return;
@@ -1318,8 +1317,6 @@ function renderToolArgs(name, args) {
       if (!content) return `<span class="tool-args" style="opacity:0.4">(read)</span>`;
       return `<pre class="tool-args tool-args-task">${escapeHtml(content)}</pre>`;
     }
-    case "list_context_files":
-      return "";
     default: {
       const keys = Object.keys(args);
       if (keys.length === 0) return "";
