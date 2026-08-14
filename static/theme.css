@@ -1,5 +1,17 @@
 /* Tier 2: themes - harness color roles only.
-   These are hand translations of DeetsMusic themes into the harness token set. */
+   These are hand translations of DeetsMusic themes into the harness token set.
+
+   Color roles (the vocabulary the UI may reference):
+   --canvas --surface --surface-input --surface-hover --accent-1 --accent-2
+   --text --text-input --subtext --title --divider --accent --border
+   --panel-border --panel-outer --panel-input --ink-2 --error
+   --placeholder-text --glass-highlight --glass-shadow --focus-glow
+   --go --stop --pause --traffic-glyph --scrollbar --scrollbar-hover
+   Each theme block also declares color-scheme so native controls match.
+
+   Parsing contract: /api/themes regex-scans [data-theme="x"] blocks — keep
+   blocks flat (no nested rules, no "}" inside comments in a block) and keep
+   the canvas/accent-1/accent-2/text roles for the picker swatches. */
 
 [data-theme] {
   --surface-hover: color-mix(in srgb, var(--surface), var(--text) 8%);
@@ -8,6 +20,22 @@
   --scrollbar-hover: color-mix(in srgb, var(--text) 55%, transparent);
   --accent: var(--divider);
   --placeholder-text: var(--subtext);
+  /* DeetsMusic-vocabulary roles, derived; a theme block may override. */
+  --title: var(--divider);
+  --panel-border: var(--border);
+  /* Second-plate fallback: a theme that never names --ink-2 still prints
+     Press's offset in its own "go" accent (DeetsSolutions doctrine). */
+  --ink-2: var(--go);
+  /* Error/danger text. Shared default; a theme block may override it
+     (blended toward the theme's text so it never clashes with the canvas). */
+  --error: color-mix(in srgb, var(--paint-brick-red) 82%, var(--text));
+
+  /* Traffic lights (function-named, not color-named — a theme block may
+     override to shade them into its palette). Glyph ink sits on the light. */
+  --go: var(--paint-traffic-go);
+  --pause: var(--paint-traffic-pause);
+  --stop: var(--paint-traffic-stop);
+  --traffic-glyph: rgba(0, 0, 0, 0.55);
 
   /* Legacy chat-era names still used by a few panels. */
   --canvas-blob-1: var(--accent-1);
@@ -20,8 +48,9 @@
   --panel-response: var(--panel-input);
 }
 
-[data-theme="fairy"] {
+[data-theme="lilac"] {
   color-scheme: light;
+  --ink-2: var(--stop);   /* pink/magenta plate over washed-out mint */
   --canvas: var(--paint-dewy-lilac);
   --accent-1: var(--paint-fae-mint);
   --accent-2: var(--paint-purple-cactus-flower);
@@ -38,8 +67,9 @@
   --focus-glow: 0 0 0 1px rgba(67, 48, 107, 0.20), 0 0 24px 2px rgba(166, 58, 121, 0.35);
 }
 
-[data-theme="glade"] {
+[data-theme="green"] {
   color-scheme: light;
+  --ink-2: var(--stop);   /* magenta plate over fern */
   --canvas: var(--paint-dewy-chartreuse);
   --accent-1: var(--paint-fern);
   --accent-2: var(--paint-foxglove);
@@ -58,6 +88,7 @@
 
 [data-theme="sepia"] {
   color-scheme: light;
+  --ink-2: var(--stop);   /* terracotta — the classic riso red on parchment */
   --canvas: var(--paint-parchment);
   --accent-1: var(--paint-olive-leaf);
   --accent-2: var(--paint-terracotta);
@@ -76,6 +107,9 @@
 
 [data-theme="moonlight"] {
   color-scheme: dark;
+  /* accents are all near-white; mix the silver toward canvas so the plate
+     reads as a tone, not a headlight */
+  --ink-2: color-mix(in srgb, var(--pause) 55%, var(--canvas));
   --canvas: var(--paint-deep-slate);
   --accent-1: var(--paint-moonlight-white);
   --accent-2: var(--paint-moonlight-gray);
@@ -92,8 +126,10 @@
   --focus-glow: 0 0 0 1px rgba(199, 211, 227, 0.22), 0 0 26px 2px rgba(154, 163, 175, 0.35);
 }
 
-[data-theme="hornet"] {
+[data-theme="black-yellow"] {
   color-scheme: dark;
+  --ink-2: var(--go);                       /* hi-vis signature, straight */
+  --traffic-glyph: rgba(0, 0, 0, 0.70);     /* darker sigils on hi-vis fills */
   --canvas: var(--paint-pitch);
   --accent-1: var(--paint-hazard);
   --accent-2: var(--paint-straw);
@@ -110,8 +146,10 @@
   --focus-glow: 0 0 0 1px rgba(255, 212, 0, 0.35), 0 0 28px 2px rgba(255, 212, 0, 0.45);
 }
 
-[data-theme="viper"] {
+[data-theme="black-red"] {
   color-scheme: dark;
+  --ink-2: var(--go);                       /* hi-vis signature, straight */
+  --traffic-glyph: rgba(0, 0, 0, 0.70);     /* darker sigils on hi-vis fills */
   --canvas: var(--paint-pitch);
   --accent-1: var(--paint-siren);
   --accent-2: var(--paint-ember);

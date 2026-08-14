@@ -29,7 +29,7 @@
       "panel": "chat",
       "region": "left",
       "anchored": true,
-      "grow": false
+      "grow": true
     },
     {
       "instance": "tool_log",
@@ -46,22 +46,8 @@
       "grow": false
     },
     {
-      "instance": "settings",
-      "panel": "settings",
-      "region": "bento",
-      "anchored": true,
-      "grow": false
-    },
-    {
       "instance": "slash_commands",
       "panel": "slash_commands",
-      "region": "bento",
-      "anchored": false,
-      "grow": false
-    },
-    {
-      "instance": "in_context_files",
-      "panel": "in_context_files",
       "region": "bento",
       "anchored": false,
       "grow": false
@@ -110,13 +96,6 @@
       "grow": false
     },
     {
-      "instance": "blog_ops",
-      "panel": "blog_ops",
-      "region": "bento",
-      "anchored": false,
-      "grow": false
-    },
-    {
       "instance": "bot_ops",
       "panel": "bot_ops",
       "region": "bento",
@@ -124,18 +103,7 @@
       "grow": false
     }
   ],
-  "mode_overrides": {
-    "blog": {
-      "instances": {
-        "files": {
-          "hidden": true
-        },
-        "bot_ops": {
-          "hidden": true
-        }
-      }
-    }
-  },
+  "mode_overrides": {},
   "grid": {
     "cols": 12,
     "row_height_px": 120,

@@ -12,6 +12,7 @@
   --fs-ui: 11px;
   --fs-small: 10px;
   --fs-tiny: 9px;
+  --fs-title: 20px;   /* the app title (DeetsCode menu trigger) */
   --fw-title: 700;
 
   /* shape */
@@ -40,8 +41,18 @@
   /* motion */
   --dur-theme: 0.4s;
   --dur-fast: 0.15s;
+  --dur-med: 0.25s;
   --ease-ui: cubic-bezier(0.2, 0.8, 0.2, 1);
   --hover-lift: none;
+
+  /* icon sizes */
+  --icon-sm: 14px;
+  --icon-md: 18px;
+  --icon-lg: 24px;
+
+  /* focus ring (one knob everywhere; --focus-glow adds the themed halo) */
+  --focus-ring-w: 2px;
+  --focus-ring-off: 2px;
 
   /* storm layer */
   --storm-display: none;
@@ -56,10 +67,37 @@
   /* scrollbar */
   --scrollbar-w: 8px;
   --scrollbar-radius: 999px;
+
+  /* titlebar (Tauri frameless chrome; inert in a browser tab) */
+  --titlebar-h: 40px;
+  --traffic-size: 13px;
+  --traffic-gap: 8px;
+
+  /* spacing scale (DeetsMusic ladder) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+
+  /* menu material (the DeetsCode title menu + its flyouts). Opaque by
+     default — menus carry dense text; a skin may frost via the backdrop. */
+  --menu-surface: var(--surface);
+  --menu-backdrop: none;
+  --menu-min-w: 220px;
+  --shadow-menu: var(--shadow-panel);
+
+  /* ocean layer (rolling swell behind content) — an inline-SVG layer
+     injected into <body> by app.js that a skin opts into. Geometry lives
+     in app.js; ink fades with distance via these roles. */
+  --ocean-display: none;
+  --ocean-ink-1: var(--border);
+  --ocean-ink-2: var(--border);
+  --ocean-ink-3: var(--border);
 }
 
 [data-skin="vanilla"] {
-  --font-title: Georgia, "Times New Roman", serif;
+  --font-title: "Liberation Serif", Georgia, "Times New Roman", serif;
   --font-body: "Segoe UI", Arial, sans-serif;
   --panel-fill: var(--canvas);
   --panel-inset-fill: color-mix(in srgb, var(--surface) 58%, var(--canvas));
@@ -70,30 +108,52 @@
   --radius-control: 6px;
 }
 
-[data-skin="desk"] {
-  --font-title: "Comic Sans MS", "Segoe UI", cursive;
-  --font-body: "Segoe UI", Arial, sans-serif;
-  --fs-chat: 14px;
-  --fs-text: 13.5px;
-  --fw-title: 700;
+/* press — a risograph print shop (was "desk"). Ink on stock, not light on
+   glass: NO blur anywhere. Where other skins cast a shadow, Press prints a
+   SECOND PLATE slightly out of register — a hard offset block of --ink-2,
+   the theme-owned spot color. Hover slides the sheet off its ink on BOTH
+   axes, widening the misregistration. */
+[data-skin="press"] {
+  --font-title: "Anton", Impact, "Segoe UI", sans-serif;
+  --font-body: "IBM Plex Mono", Consolas, monospace;
+  --font-mono: "IBM Plex Mono", Consolas, monospace;
+  --fs-chat: 13.5px;
+  --fs-text: 13px;   /* mono runs wide — one notch down */
+  --fs-title: 22px;  /* condensed caps take the extra size well */
+  --fw-title: 400;   /* Anton ships one weight */
   --panel-fill: var(--surface);
   --panel-inset-fill: color-mix(in srgb, var(--surface) 76%, var(--canvas));
-  --shadow-panel: 0 1px 2px rgba(0, 0, 0, 0.18), 0 10px 24px rgba(0, 0, 0, 0.12);
-  --radius-panel: 6px;
-  --radius-card: 6px;
-  --radius-nested: 5px;
-  --radius-inner: 4px;
-  --radius-control: 7px;
-  --canvas-bg: radial-gradient(circle, var(--border) 1.6px, transparent 1.9px);
-  --canvas-bg-size: 24px 24px;
-  --hover-lift: translateY(-1px);
+  --shadow-panel: 4px 4px 0 var(--ink-2);
+  /* menus print too — same plate, one step further off register */
+  --menu-surface: var(--surface);
+  --shadow-menu: 5px 5px 0 var(--ink-2);
+  --radius-panel: 0;
+  --radius-card: 0;
+  --radius-nested: 0;
+  --radius-inner: 0;
+  --radius-control: 0;
+  --scrollbar-radius: 0;
+  /* stock — a halftone screen in the theme's stronger hairline; at 7px it
+     reads as paper tooth, not a pattern you're meant to look at */
+  --canvas-bg: radial-gradient(circle, var(--panel-border) 1.1px, transparent 1.4px);
+  --canvas-bg-size: 7px 7px;
+  /* motion — a press stroke, not a settle */
+  --dur-fast: 0.1s;
+  --dur-med: 0.16s;
+  --hover-lift: translate(-1px, -1px);
 }
 
+/* ocean — deep/abyssal. Engraved Roman caps over a serene serif body, on a
+   surface of gently rolling waves: an injected SVG layer (three seamless
+   wave-train patterns, geometry in app.js, motion below) replaced the old
+   radial-gradient scallops, whose arcs crossed at tile corners and littered
+   the canvas with chevron artifacts (DeetsSolutions e369254/7619c15). */
 [data-skin="ocean"] {
-  --font-title: Georgia, "Times New Roman", serif;
-  --font-body: Georgia, "Times New Roman", serif;
+  --font-title: "Cinzel", Georgia, "Times New Roman", serif;
+  --font-body: "Spectral", Georgia, "Times New Roman", serif;
   --fs-chat: 14.5px;
   --fs-ui: 11.5px;
+  --fs-title: 18px;  /* engraved caps read large; size down */
   --fw-title: 600;
   --panel-fill: color-mix(in srgb, var(--surface), black 18%);
   --panel-inset-fill: color-mix(in srgb, var(--surface), black 10%);
@@ -102,18 +162,20 @@
   --radius-card: 12px;
   --radius-nested: 10px;
   --radius-inner: 8px;
-  --radius-control: 999px;
-  --canvas-bg:
-    radial-gradient(circle at 50% 158%, var(--canvas) 70%, var(--border) 70%, var(--border) 72%, transparent 72%),
-    radial-gradient(circle at 50% 150%, var(--canvas) 70%, var(--border) 70%, var(--border) 72%, transparent 72%),
-    radial-gradient(circle at 50% 142%, var(--canvas) 70%, var(--border) 70%, var(--border) 72%, transparent 72%);
-  --canvas-bg-size: 48px 30px, 64px 38px, 80px 46px;
-  --canvas-anim: wave-roll 16s linear infinite;
+  /* the rolling swell — atmospheric perspective: front crest full --border,
+     middle/back fade toward --canvas so far waves recede into haze */
+  --ocean-display: block;
+  --ocean-ink-1: var(--border);
+  --ocean-ink-2: color-mix(in srgb, var(--border) 70%, var(--canvas));
+  --ocean-ink-3: color-mix(in srgb, var(--border) 45%, var(--canvas));
+  /* micro-motion — cards float on the surface; a touch buoys them up */
+  --hover-lift: translateY(-1px);
 }
 
 [data-skin="glass"] {
   --font-title: var(--font-body);
   --font-body: "Segoe UI", Arial, sans-serif;
+  --fs-title: 19px;
   --fw-title: 600;
   --panel-fill: color-mix(in srgb, var(--surface) 55%, transparent);
   --panel-inset-fill: color-mix(in srgb, var(--surface) 65%, transparent);
@@ -140,15 +202,19 @@
   --canvas-bg-repeat: no-repeat;
   --canvas-anim: aurora-drift 60s ease-in-out infinite;
   --hover-lift: translateY(-1px);
+  /* menus frost denser than panels — dense text buys opacity (DeetsMusic) */
+  --menu-surface: color-mix(in srgb, var(--surface) 80%, transparent);
+  --menu-backdrop: blur(16px) saturate(1.4);
 }
 
-[data-skin="cyberstorm"] {
-  --font-title: "Segoe UI", system-ui, sans-serif;
-  --font-body: "Segoe UI", system-ui, sans-serif;
-  --fs-chat: 14px;
-  --fs-text: 13.5px;
-  --fs-body: 12.5px;
-  --fs-ui: 11.5px;
+[data-skin="retro-future"] {
+  --font-title: "Orbitron", "Segoe UI", system-ui, sans-serif;
+  --font-body: "Rajdhani", "Segoe UI", system-ui, sans-serif;
+  --fs-chat: 15px;    /* Rajdhani is condensed — one notch up across */
+  --fs-text: 14px;
+  --fs-body: 13px;
+  --fs-ui: 12px;
+  --fs-title: 17px;   /* Orbitron runs wide */
   --fw-title: 700;
   --panel-fill: color-mix(in srgb, var(--canvas) 86%, transparent);
   --panel-inset-fill: color-mix(in srgb, var(--surface) 62%, transparent);
@@ -172,8 +238,15 @@
   --hover-lift: translateY(-1px);
 }
 
-@keyframes wave-roll {
-  to { background-position: 96px 0, -128px 0, 80px 0; }
+/* Ocean's swell — roll owns the horizontal drift (linear, on the rects),
+   bob the rise-and-fall (ease-in-out alternate ≈ a sine, on the wrapping
+   <g>s) — separate elements, so the two transforms compose. Per-layer
+   distances come from --roll-dist / --bob-amp set in style.css. */
+@keyframes ocean-roll {
+  to { transform: translateX(var(--roll-dist, 0px)); }
+}
+@keyframes ocean-bob {
+  to { transform: translateY(var(--bob-amp, 0px)); }
 }
 
 @keyframes aurora-drift {

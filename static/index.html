@@ -1,10 +1,36 @@
 <!DOCTYPE html>
-<html lang="en" data-theme="fairy" data-skin="glass">
+<html lang="en" data-theme="lilac" data-skin="press">
 <head>
   <meta charset="UTF-8" />
-  <title>Harness</title>
-  <!-- Token tiers, in cascade order: palette (raw paints) → theme (color
-       roles) → skin (type/shape/material) → app rules. -->
+  <title>DeetsCode</title>
+  <script>
+    // Pre-paint theme/skin resolution (DeetsMusic pattern): apply the saved
+    // data-theme/data-skin BEFORE the stylesheets load so a dark-mode launch
+    // never flashes the light default. Retired-id maps mirror
+    // LEGACY_THEME_NAMES + loadSkin's paper→desk in app.js — keep in sync.
+    (function () {
+      var RT = { 1: "lilac", 2: "moonlight", 3: "green", 4: "black-yellow",
+                 5: "moonlight", 6: "green", 7: "black-red", 8: "sepia",
+                 blush: "lilac", fairy: "lilac", graphite: "moonlight",
+                 solar: "green", glade: "green", midnight: "moonlight",
+                 grove: "green", hornet: "black-yellow", abyss: "black-red",
+                 viper: "black-red" };
+      var RS = { paper: "press", desk: "press", cyberstorm: "retro-future" };
+      var dark = false;
+      try { dark = matchMedia("(prefers-color-scheme: dark)").matches; } catch (e) {}
+      /* Defaults follow the OS onto the curated pairs:
+         Press × Lilac (light) or Retro-Future × Black & Red (dark). */
+      [["harness-theme", "data-theme", RT, dark ? "black-red" : "lilac"],
+       ["harness-skin",  "data-skin",  RS, dark ? "retro-future" : "press"]].forEach(function (a) {
+        var saved = null;
+        try { saved = localStorage.getItem(a[0]); } catch (e) {}
+        document.documentElement.setAttribute(a[1], saved ? (a[2][saved] || saved) : a[3]);
+      });
+    })();
+  </script>
+  <!-- Token tiers, in cascade order: fonts (@font-face) → palette (raw
+       paints) → theme (color roles) → skin (type/shape/material) → app rules. -->
+  <link rel="stylesheet" href="fonts.css" />
   <link rel="stylesheet" href="palette.css" />
   <link rel="stylesheet" href="theme.css" />
   <link rel="stylesheet" href="skin.css" />
@@ -27,6 +53,117 @@
 </head>
 <body>
 
+  <!-- App chrome (DeetsMusic pattern): always visible — the DeetsCode title
+       is the settings-menu trigger in browser AND native. The traffic lights
+       and drag region only act inside the Tauri shell (app.js adds .is-tauri).
+       Interactive children deliberately do NOT carry data-tauri-drag-region. -->
+  <header class="titlebar" id="titlebar">
+    <div class="settings" id="app-menu-root">
+      <button class="app-title" id="app-menu-trigger" type="button"
+              aria-haspopup="true" aria-expanded="false">DeetsCode</button>
+
+      <div class="menu" id="app-menu" role="menu" hidden>
+        <div class="menu__row" data-row="theme">
+          <span class="menu__label">Theme</span>
+          <span class="menu__chev" aria-hidden="true">›</span>
+          <div class="flyout" role="menu" aria-label="Theme">
+            <div class="theme-picker" id="theme-picker"></div>
+          </div>
+        </div>
+
+        <div class="menu__row" data-row="skin">
+          <span class="menu__label">Skin</span>
+          <span class="menu__chev" aria-hidden="true">›</span>
+          <div class="flyout" role="menu" aria-label="Skin">
+            <div class="theme-picker" id="skin-picker"></div>
+          </div>
+        </div>
+
+        <!-- Model/Mode: flyout radios like Theme/Skin. The hidden <select>s
+             stay the source of truth — app.js mirrors their options into the
+             flyout (_mirrorSelectFlyout) and clicks dispatch `change`, so all
+             existing population/wiring keeps working untouched. -->
+        <div class="menu__row" data-row="model">
+          <span class="menu__label">Model</span>
+          <span class="menu__value" id="model-current">…</span>
+          <span class="menu__chev" aria-hidden="true">›</span>
+          <div class="flyout" role="menu" aria-label="Model">
+            <div class="theme-picker" id="model-picker"></div>
+          </div>
+          <select id="model-select" hidden>
+            <option value="" disabled selected>loading...</option>
+          </select>
+        </div>
+
+        <div class="menu__row" data-row="mode" title="Active harness mode (prompt + tool pack)">
+          <span class="menu__label">Mode</span>
+          <span class="menu__value" id="mode-current">…</span>
+          <span class="menu__chev" aria-hidden="true">›</span>
+          <div class="flyout" role="menu" aria-label="Mode">
+            <div class="theme-picker" id="mode-picker"></div>
+          </div>
+          <select id="prompt-select" hidden>
+            <option value="" disabled selected>loading...</option>
+          </select>
+        </div>
+
+        <button class="menu__row menu__row--toggle" id="keep-history-row" type="button"
+                role="menuitemcheckbox" aria-checked="false" data-row="keep-history"
+                title="Keep scrollback across turns (off = fresh panel per turn)">
+          <span class="menu__label">Keep history</span>
+          <span class="menu__dot" aria-hidden="true"></span>
+        </button>
+        <input type="checkbox" id="keep-history-toggle" hidden>
+
+        <button class="menu__row menu__row--toggle" id="auto-apply-row" type="button"
+                role="menuitemcheckbox" aria-checked="false" data-row="auto-apply">
+          <span class="menu__label">Auto apply</span>
+          <span class="menu__dot" aria-hidden="true"></span>
+        </button>
+        <input type="checkbox" id="auto-apply-toggle" hidden>
+
+        <div class="menu__row menu__row--control" data-row="temp">
+          <span class="menu__label">Temp</span>
+          <input type="range" id="temp-slider" class="temp-range-h" min="0" max="100" value="65">
+          <span class="temp-value" id="temp-value">0.65</span>
+        </div>
+
+        <div class="menu__row" data-row="context">
+          <span class="menu__label">Context <span id="ctx-pct">0%</span></span>
+          <span class="menu__chev" aria-hidden="true">›</span>
+          <div class="flyout flyout--wide" role="menu" aria-label="Context">
+            <div class="ctx-bar-track"><div class="ctx-bar-fill" id="ctx-bar"></div></div>
+            <div class="ctx-tokens" id="ctx-tokens">0 / 131072</div>
+            <!-- Mirrors the in_context_files panel view while the menu is
+                 open (app.js polls /panels/in_context_files/view). -->
+            <div id="ctx-files-flyout"><span class="task-empty">no files read this turn</span></div>
+          </div>
+        </div>
+
+        <div class="menu__row" data-row="file-click">
+          <span class="menu__label">File click</span>
+          <span class="menu__chev" aria-hidden="true">›</span>
+          <div class="flyout flyout--wide" role="menu" aria-label="File click action">
+            <textarea id="file-click-template" class="config-textarea settings-textarea"
+                      placeholder="Template for clicking a file. Use {path} for the file path."></textarea>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="drag-region" data-tauri-drag-region></div>
+    <div class="lights">
+      <button class="light light--max" id="tl-max" type="button" aria-label="Maximize">
+        <svg class="sigil" viewBox="0 0 10 10" aria-hidden="true"><path d="M5 1.6V8.4M1.6 5H8.4" /></svg>
+      </button>
+      <button class="light light--min" id="tl-min" type="button" aria-label="Minimize">
+        <svg class="sigil" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.6 5H8.4" /></svg>
+      </button>
+      <button class="light light--close" id="tl-close" type="button" aria-label="Close">
+        <svg class="sigil" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.3 2.3L7.7 7.7M7.7 2.3L2.3 7.7" /></svg>
+      </button>
+    </div>
+  </header>
+
   <svg class="storm" aria-hidden="true" viewBox="0 0 100 100" preserveAspectRatio="none">
     <path class="storm__bolt storm__bolt--1" pathLength="1"></path>
     <path class="storm__bolt storm__bolt--2" pathLength="1"></path>
@@ -38,8 +175,10 @@
        panels/chat/ and docs/panels.md. -->
   <div class="canvas" id="region-grid"></div>
 
-  <script src="https://cdn.jsdelivr.net/npm/marked@14.1.3/marked.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <!-- Vendored (was jsdelivr CDN) so the UI works offline inside the Tauri
+       webview. Pinned: marked@14.1.3, dompurify@3.1.6. -->
+  <script src="vendor/marked.min.js"></script>
+  <script src="vendor/purify.min.js"></script>
   <!-- tileflow-engine.js publishes window.harness.tileflow.* (score, flowPass,
        setWeights). Must load before panel-shell.js so the shell's boot path
        can call into it. -->

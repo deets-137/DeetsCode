@@ -55,8 +55,8 @@ start here if you don't know which doc to read.
 | Make your panel bubble when something happens | [panels.md § Recipe: a panel that bubbles itself](panels.md#recipe-a-panel-that-bubbles-itself) |
 | Understand why a panel is sized the way it is | [tileflow.md § Sizing](tileflow.md#sizing) and `harness.tileflow.dump()` |
 | Tune the scoring weights | [tileflow.md § Tunable weights](tileflow.md#tunable-weights) |
-| Pin a panel to a specific bento cell | [panels.md § Layout file](panels.md#layout-file-layoutpanel_layoutjson) — or just ask the model (`pin_instance` tool) |
-| Rearrange the bento from chat | the Stage 3 layout tools in `tools/core.py` (`get_layout`, `pin_instance`, `set_instance_floor`, presets) — see [tileflow.md § Stage 3](tileflow.md#stage-3--model-driven-layout--user-floors--core-landed-2026-07-06--tools-descriptor-floors-live-re-sync-drag-to-pin-ui-still-open) |
+| Pin a panel to a specific bento cell | [panels.md § Layout file](panels.md#layout-file-layoutpanel_layoutjson) — or just ask the model (`layout` tool, action `pin`) |
+| Rearrange the bento from chat | the consolidated `layout` tool in `tools/core.py` (actions: get, panels, state, pin, unpin, floor, recompute, presets) — see [tileflow.md § Stage 3](tileflow.md#stage-3--model-driven-layout--user-floors--core-landed-2026-07-06--tools-descriptor-floors-live-re-sync-drag-to-pin-ui-still-open) |
 | Build a multi-panel app with shared state | [apps.md](apps.md), starting from `apps/hello/` |
 | Ship an app update without losing saves | [apps.md § Endpoints](apps.md#endpoints) — `POST /api/apps/<name>/update` |
 | Debug a panel that's misbehaving | [diagnostics.md § DOM-level](diagnostics.md#1-dom-level--visible-without-any-console) then [§ Browser console](diagnostics.md#2-browser-console--windowharness-debug-surface) |

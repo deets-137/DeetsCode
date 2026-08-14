@@ -16,14 +16,48 @@ Call sites that currently go through `paths.py`: `core/storage.py` (DB_PATH), `s
 
 Per-tool board/image extraction lives in `bot_cogs/bot_media.py`. To surface images or links from a new game's tool results, add an extractor function and register it under the tool names in `EXTRACTORS`. No bot changes needed.
 
-## Chess identity
+## Modes
 
-Chess uses display names end-to-end — no Discord user ids. The envelope is `{"name": ..., "text": ...}`; chess state has `{white, black, fen, result}` where white/black are name strings or the literal `"computer"`.
+**Modes:** DeetsCode (coding) is the only live mode. The chess/dnd/blog
+packs, prompts, and the blog_ops panel were deleted in Aug 2026 pending
+redesign (git history has their last state). The Discord bot and
+`bot_cogs/` remain in-tree but are dormant until game modes return;
+`tools/blog_service.py` and server.py's blog WS handlers likewise remain
+as inert plumbing for a future blog mode.
+
+## Native shell (Tauri)
+
+The harness runs as a frameless Windows app: `npm run tauri dev` from the
+repo root (Tauri's `beforeDevCommand` spawns `python server.py`, waits for
+`http://127.0.0.1:8000`, then opens the WebView2 window). Shell code lives in
+`src-tauri/`; it is a bare Tauri v2 builder — no custom commands. The custom
+titlebar in `static/index.html` is window chrome, not a panel: always visible
+(it hosts the DeetsCode menu), while the traffic lights + drag region only
+act when app.js detects `window.__TAURI__` and adds `html.is-tauri`. The
+browser tab at `http://127.0.0.1:8000` remains fully supported.
+
+**Settings live in the DeetsCode title menu** (top-left, DeetsMusic dropdown
+pattern) — theme/skin flyouts (each item rendered in its own theme/skin via
+its data-theme/data-skin attribute), model/mode selects, keep-history/
+auto-apply dot-toggle rows, temp, and a Context flyout that mirrors the
+`in_context_files` panel view while open. The old `panels/settings/` panel
+was deleted; the menu markup in index.html carries the same element ids,
+which app.js's re-callable initializers populate. `panels/in_context_files/`
+remains on disk as the server-side renderer for the Context flyout but has
+no layout instance.
+
+**Dev livereload**: a startup watcher in server.py broadcasts `dev_reload`
+over the panel WS when anything under `static/`, `panels/`, or `apps/`
+changes; app.js reloads the page (skipped mid-run). Edits to server.py
+itself still need an app restart. Known gap: if the Tauri window dies
+abnormally, the spawned `python server.py` can be orphaned holding port
+8000 — kill it before relaunching.
 
 ## UI tokens (theme × skin)
 
-Styling is three token tiers on `<html>` (ported from DeetsMusic):
-`static/palette.css` (raw paints) → `static/theme.css` (color roles per
+Styling is token tiers on `<html>` (ported from DeetsMusic):
+`static/fonts.css` (bundled @font-face, SIL OFL — see static/fonts/NOTICE.txt)
+→ `static/palette.css` (raw paints) → `static/theme.css` (color roles per
 `data-theme`) → `static/skin.css` (type/shape/material per `data-skin`).
 Rules reference tokens, never raw hexes/px/font names; a skin never names a
 color (point slots at theme roles or `color-mix()` them). The `[data-skin]`
@@ -31,9 +65,12 @@ base block in skin.css is the authoritative skin-token list; theme.css's
 header comment lists the color roles. Legacy var names (`--response-text`,
 `--glass-border`, …) are aliased in theme.css's shared `[data-theme]` block —
 don't remove them while panels still use them. `/api/themes` + `/api/skins`
-parse these files for the settings pickers, so a new `[data-theme="x"]` /
-`[data-skin="x"]` block is self-registering. See docs/panels.md § Looking
-native.
+parse these files for the theme/skin pickers, so a new `[data-theme="x"]` /
+`[data-skin="x"]` block is self-registering — but keep theme blocks flat
+(the parser regex can't see past a nested rule). `static/index.html` carries
+a pre-paint script mirroring app.js's `LEGACY_THEME_NAMES` — keep the two
+maps in sync. `static/swatch.html` (served at `/swatch.html`) previews every
+role × theme against the live sheets. See docs/panels.md § Looking native.
 
 ## Panels
 
@@ -45,7 +82,7 @@ Boot-race detail worth knowing: app.js owns the WebSocket singleton and still ro
 
 ### Layout & mode visibility
 
-`layout/panel_layout.json` is **the** UI layout — Claude can edit it directly to rearrange the dev UI without touching panel code. `mode_overrides` hides regions/instances per harness mode (e.g. `blog` mode hides the file tree).
+`layout/panel_layout.json` is **the** UI layout — Claude can edit it directly to rearrange the dev UI without touching panel code. `mode_overrides` hides regions/instances per harness mode (empty today — DeetsCode is the only mode; the schema stays for future modes).
 
 Per-instance show/hide that depends on JS state lives in **two parallel tables** for now: `panel-shell.js`'s `INSTANCE_MODE_RULES` applies at hoist time (synchronous, reads `localStorage.harness-mode`, prevents flash on first paint), and `app.js`'s `_PANEL_HIDE_RULES` re-applies on mode change. Keep them in sync. Consolidating into one source of truth is on the cleanup list.
 

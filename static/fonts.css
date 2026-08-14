@@ -1,0 +1,99 @@
+/* ============================================================
+   FONTS — bundled @font-face faces (ported from DeetsMusic)
+   ------------------------------------------------------------
+   All SIL OFL 1.1; see fonts/NOTICE.txt. Bundled so the native
+   (Tauri) shell renders the intended faces offline.
+   Each pairs with a [data-skin] in skin.css:
+     vanilla    → Liberation Serif titles.
+     press      → Anton (poster grotesque title) + IBM Plex Mono
+                  (spec-sheet body).
+     ocean      → Cinzel (engraved caps title) + Spectral (serif body).
+     retro-future → Orbitron (machined title) + Rajdhani (condensed body).
+   ============================================================ */
+
+@font-face {
+  font-family: "Liberation Serif";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/LiberationSerif-Regular.ttf") format("truetype");
+}
+
+@font-face {
+  font-family: "Liberation Serif";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/LiberationSerif-Bold.ttf") format("truetype");
+}
+
+/* desk — Anton (title). One weight only; --fw-title is 400 there. */
+@font-face {
+  font-family: "Anton";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/Anton-Regular.woff2") format("woff2");
+}
+
+/* desk — IBM Plex Mono (body). SemiBold, not Bold, is bound to 700: at
+   mono widths the bold face blocks up, and 600 already reads as emphasis. */
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/IBMPlexMono-Regular.woff2") format("woff2");
+}
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/IBMPlexMono-SemiBold.woff2") format("woff2");
+}
+
+/* ocean — Cinzel (engraved caps title) */
+@font-face {
+  font-family: "Cinzel";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("./fonts/Cinzel-SemiBold.woff2") format("woff2");
+}
+
+/* ocean — Spectral (body) */
+@font-face {
+  font-family: "Spectral";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("./fonts/Spectral-Regular.woff2") format("woff2");
+}
+
+/* retro-future — Orbitron (machined sci-fi title) */
+@font-face {
+  font-family: "Orbitron";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/Orbitron-Bold.woff2") format("woff2");
+}
+
+/* retro-future — Rajdhani (condensed squared body; Medium is the body face —
+   Rajdhani's 400 runs thin at list sizes, so 500 is the closest match the
+   browser resolves for body text) */
+@font-face {
+  font-family: "Rajdhani";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("./fonts/Rajdhani-Medium.woff2") format("woff2");
+}
+@font-face {
+  font-family: "Rajdhani";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("./fonts/Rajdhani-Bold.woff2") format("woff2");
+}

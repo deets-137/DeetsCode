@@ -40,10 +40,11 @@ def view() -> str:
 <script>
 (function () {{
   if (!window.harness) return;
-  // Tileflow: focused while there are queued writes, idle otherwise.
-  // Re-evaluated on every render — view() is re-fetched on each event below.
-  if (window.harness.setState) {{
-    window.harness.setState('pending_writes', {count} > 0 ? 'focused' : 'idle');
+  // Tileflow: queued writes are an approval gate → wake to focused; an
+  // empty queue returns the panel to the tray. signalContent (not setState)
+  // so an explicit user minimize wins over the re-render loop.
+  if (window.harness.signalContent) {{
+    window.harness.signalContent('pending_writes', {count} > 0, {{ wake: 'focused' }});
   }}
   if (!window.harness.subscribe) return;
   const refresh = () => window.harness.refreshNow('pending_writes');

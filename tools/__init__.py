@@ -1,8 +1,12 @@
 """
 Tool packs, gated by prompt mode.
 
-`core` is always loaded (read_file, write_file, search, run_command, roll_dice,
-etc — things any agent wants). Mode-specific packs add game tools on top.
+`core` is always loaded (read_file, list_dir, manual access, update_task,
+register_path, the `layout` workspace tool). Game modes additionally get
+core's GAME_TOOLS (roll_dice); mode packs add their own tools on top
+(tools/coding.py for DeetsCode, tools/dnd.py for dnd, …). Keep decks small:
+every definition rides in every request and dilutes a small model's
+tool-selection attention.
 
 Usage from server.py:
     from tools import load_tools
@@ -23,6 +27,7 @@ from typing import Callable
 
 from .core import (
     TOOL_DEFINITIONS as CORE_TOOLS,
+    GAME_TOOLS,
     pending_writes,
     read_files,
     clear_pending_writes,
@@ -30,14 +35,16 @@ from .core import (
 )
 
 # Mode name (matches prompts/<mode>.md) → module name under tools/.
+# DeetsCode is the only live mode (2026-08: blog/chess/dnd packs were
+# deleted pending redesign — see git history for their last state).
 _MODE_PACKS: dict[str, str] = {
     "DeetsCode": "coding",
     "default":   "coding",  # backcompat alias for pre-rename sessions
-    "chess":     "chess",
-    "blog":      "blog",
-    "dnd":       "dnd",
-    # "mafia": "mafia",  # future
 }
+
+# Modes whose decks include core's GAME_TOOLS (roll_dice). None today;
+# repopulate when a game mode returns.
+_GAME_MODES: set[str] = set()
 
 
 def load_tools(mode: str) -> tuple[list[dict], Callable]:
@@ -52,10 +59,21 @@ def load_tools(mode: str) -> tuple[list[dict], Callable]:
     from . import core as _core_mod
 
     defs: list[dict] = list(CORE_TOOLS)
+    if mode in _GAME_MODES:
+        defs.extend(GAME_TOOLS)
     # dispatch[name] = module with execute_tool(name, args, session_id, project_dir, user_name=None)
+    # GAME_TOOLS handlers always dispatch (compat for old sessions) even when
+    # their defs aren't in the mode's deck; same for the pre-consolidation
+    # layout tool names, which core keeps as aliases for the `layout` tool.
     dispatch: dict[str, object] = {
-        t["function"]["name"]: _core_mod for t in CORE_TOOLS
+        t["function"]["name"]: _core_mod for t in (*CORE_TOOLS, *GAME_TOOLS)
     }
+    for legacy in (
+        "get_layout", "get_panels", "pin_instance", "unpin_instance",
+        "set_instance_floor", "apply_layout_preset", "save_layout_preset",
+        "set_instance_state", "recompute_layout",
+    ):
+        dispatch[legacy] = _core_mod
 
     pack_name = _MODE_PACKS.get(mode)
     if pack_name:
@@ -78,7 +96,13 @@ def load_tools(mode: str) -> tuple[list[dict], Callable]:
     ) -> str:
         mod = dispatch.get(name)
         if mod is None:
-            return f"Unknown tool: {name}"
+            # Name the real tools in the error: a small local model that
+            # hallucinated a tool name (edit_tasks, clear_tasks, …) gets
+            # what it needs to self-correct on the next loop iteration.
+            # List the mode's actual deck (defs), not the dispatch map —
+            # the latter carries compat aliases we don't want re-taught.
+            deck = ", ".join(sorted(t["function"]["name"] for t in defs))
+            return f"Unknown tool: {name}. Available tools: {deck}"
         return mod.execute_tool(name, args, session_id, project_dir, user_name=user_name)
 
     return defs, execute_tool

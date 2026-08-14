@@ -21,7 +21,7 @@
   },
   "anchored": false,
   "tileflow": {
-    "default_state": "idle",
+    "default_state": "dormant",
     "bubble_on_focused": true,
     "icon": "✎"
   }

@@ -23,6 +23,7 @@
   "multi_instance": true,
   "tileflow": {
     "icon": "▶",
+    "default_state": "dormant",
     "bubble_on_active": true
   }
 }

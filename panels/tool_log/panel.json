@@ -20,5 +20,5 @@
     "growable": false
   },
   "anchored": false,
-  "tileflow": { "icon": "🛠" }
+  "tileflow": { "icon": "🛠", "default_state": "dormant" }
 }

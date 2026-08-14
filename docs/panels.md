@@ -212,6 +212,24 @@ State sources, in priority order:
 3. Manifest `default_state` on first render.
 4. Per-instance `score_overrides.force_state` (a hard override).
 
+**Default-dormant convention (2026-07-06).** Most panels ship
+`default_state: "dormant"` and *earn* their bento slot by having content:
+a cold boot shows chat + files + clock, everything else waits in the tray.
+The wake/sleep loop runs through `harness.signalContent` (see the API
+table) — app.js's WS handlers signal on behalf of the built-in content
+panels (tool_log, pending_writes, in_context_files, task_list), and a
+panel's own script can do the same. Keep `idle` as the default only for
+ambient panels that are useful with no content (clock, files).
+
+**Caveat for client-push panels.** A dormant panel has no DOM (the tray
+icon replaces it), and its inline script isn't running. Two consequences:
+wake signals must come from code that's always alive (app.js handlers —
+a trayed panel can't wake itself), and any content pushed into the panel's
+DOM needs a JS-side buffer that re-renders on mount, or it's lost on every
+tray round-trip. Server-rendered tier-3 panels get this for free (their
+`view()` re-hydrates from server state); see `_toolLogBuffer` +
+`_flushToolLogBuffer` in app.js for the client-push pattern.
+
 ### Recipe: a panel that bubbles itself
 
 This is what makes the bento feel alive. Your panel's inline script
@@ -258,14 +276,16 @@ POST /api/tileflow/state/<instance_id>   body: {"state": "focused"}
 DELETE /api/tileflow/state/<instance_id> // clears to idle
 ```
 
-The local model gets the same affordance via two tools:
+The local model gets the same affordance via the consolidated `layout`
+tool (`tools/core.py`):
 
-- `set_instance_state(instance, state)` — bubble a panel.
-- `recompute_layout()` — force a fresh flow pass (e.g. after a burst
+- `{"action": "state", "instance": "...", "state": "focused"}` — bubble a panel.
+- `{"action": "recompute"}` — force a fresh flow pass (e.g. after a burst
   of state changes, to refresh recency decay).
 
-These are defined in `tools/core.py` and don't require any setup per
-panel — they just work against any registered instance.
+No per-panel setup — they just work against any registered instance.
+(The pre-consolidation names `set_instance_state` / `recompute_layout`
+still dispatch as compat aliases.)
 
 ---
 
@@ -307,6 +327,7 @@ for the source of truth):
 |------|---------|
 | `harness.setState(instanceId, state)` | Set state for an instance. Triggers a coalesced flow pass on the next frame (falls back to `setTimeout` in hidden tabs where rAF is suspended). No-op if state unchanged. |
 | `harness.getState(instanceId)` | Read the current state. |
+| `harness.signalContent(instanceId, hasContent, opts?)` | **Prefer this over raw `setState` for content-driven panels.** `true` wakes a dormant panel into the bento (`active`, or `opts.wake` — e.g. `"focused"` for approval gates like pending_writes). If the *user* minimized the panel, it badges the tray icon instead of overriding them. `false` returns auto-woken panels to the tray and clears the badge; a state the user picked by hand is left alone. Idempotent — safe to call on every refresh. |
 | `harness.setSpan(instanceId, {cols, rows} \| null)` | Panel-controlled span override past the class table (e.g. match a video's aspect). `null` releases it. |
 | `harness.gridConfig()` | Live grid metrics: `{cols, rowPx, gapPx, colPx, bentoWidthPx}`. |
 | `harness.recomputeLayout()` | Force a fresh flow pass without changing state. |
@@ -413,7 +434,11 @@ def view() -> str:
 
 The pill's minimize button (−) calls `harness.setState(<instance>, "dormant")`
 for free, so any panel that opts into `tray_when_dormant` gets a
-working "send to tray" affordance with zero code.
+working "send to tray" affordance with zero code. Minimizing (or picking a
+state from the ⚙ menu) also records the choice as *user-sticky*: content
+signals respect it — `harness.signalContent(id, true)` puts a badge dot on
+the tray icon instead of re-opening the panel. Clicking the tray icon
+reopens the panel, clears the badge, and releases the stickiness.
 
 ---
 
@@ -594,20 +619,31 @@ theme × any skin):
 - **Theme** (`static/theme.css`) — color roles per `[data-theme="name"]`.
   Use these for anything colored: `--canvas`, `--surface`,
   `--surface-input`, `--surface-hover`, `--text`, `--text-input`,
-  `--subtext`, `--border`, `--divider`, `--accent`, `--focus-glow`,
-  `--scrollbar`. (Legacy names — `--response-text`, `--textbox-bg`,
-  `--glass-border`, … — are aliased to these and still work.)
+  `--subtext`, `--title`, `--border`, `--panel-border`, `--divider`,
+  `--accent`, `--ink-2`, `--error`, `--focus-glow`, `--scrollbar`,
+  `--scrollbar-hover`, and the traffic lights `--go` / `--stop` /
+  `--pause` / `--traffic-glyph` (function-named, never color-named).
+  (Legacy names — `--response-text`, `--textbox-bg`, `--glass-border`,
+  … — are aliased to these and still work.)
 - **Skin** (`static/skin.css`) — everything non-color per
   `[data-skin="name"]`: `--font-body`, `--font-mono`, the `--fs-*` type
-  scale, the `--radius-*` ladder, `--panel-fill` / `--panel-inset-fill`
-  / `--panel-backdrop` / `--shadow-panel` materials. The `[data-skin]`
-  base block is the authoritative token list (the "glass" skin); a skin
-  never names a color — it points a slot at a theme role or
-  `color-mix()`es one.
+  scale, the `--radius-*` ladder, the `--space-1..5` spacing ladder
+  (4/8/12/16/24px), `--icon-sm/-md/-lg`, `--panel-fill` /
+  `--panel-inset-fill` / `--panel-backdrop` / `--shadow-panel` /
+  `--menu-surface` / `--menu-backdrop` materials, motion
+  (`--dur-fast/-med/-theme`, `--ease-ui`, `--hover-lift`), the focus
+  ring (`--focus-ring-w`, `--focus-ring-off`), scrollbar geometry, and
+  the titlebar chrome (`--titlebar-h`, `--traffic-*`). The `[data-skin]`
+  base block is the authoritative token list; a skin never names a
+  color — it points a slot at a theme role or `color-mix()`es one, and
+  effects only one skin wants get a no-op base token so others never
+  inherit them by accident.
 
-`/api/themes` and `/api/skins` parse those files for the settings-panel
-pickers, so adding a `[data-theme="x"]` or `[data-skin="x"]` block is
-all it takes to ship a new one.
+`/api/themes` and `/api/skins` parse those files for the theme/skin
+pickers (now flyouts in the DeetsCode title menu), so adding a
+`[data-theme="x"]` or `[data-skin="x"]` block is all it takes to ship a
+new one. Keep theme blocks flat — the parser regex can't see past a
+nested rule.
 
 Direct CSS works fine — but theme/skin toggles only follow custom
 properties.
@@ -706,7 +742,6 @@ Working examples in the repo:
 - [`panels/pending_writes/`](../panels/pending_writes/) — tier 3, WS-subscribing + `setState` to `focused` while writes are pending.
 - [`panels/youtube/`](../panels/youtube/) — multi-instance-capable tier 1. Drives a `YT.Player` (IFrame API, nocookie host): playback events map to tileflow states (PLAYING→focused, PAUSED→active, ENDED→idle); restored videos are cued, not auto-bubbled. Uses `harness.setSpan` to claim an aspect-ratio-matched cell.
 - [`panels/web/`](../panels/web/) — tier 1, freeform URL browser.
-- [`panels/settings/`](../panels/settings/) — tier 3, anchored, larger preferred footprint.
 - [`panels/chat/`](../panels/chat/) — tier 1, anchored to the `left` region. Demonstrates the "panel mounts after app.js boots" race: app.js buffers chat-bound writes in `_chatBootBuffer` and the view's inline script drains them via `window._flushChatBootBuffer`.
 - [`apps/hello/`](../apps/hello/) — the reference *app*: two tier-3 panels sharing state via `harness_ctx`, an `actions` endpoint, and an `app_event` subscription. Start here for anything app-shaped.
 

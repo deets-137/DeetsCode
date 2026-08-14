@@ -207,8 +207,16 @@
       }
       // Min/preferred from manifest land on the outer instance — they
       // describe the panel's natural footprint including chrome.
+      // A `grow: true` layout instance (stack regions only — the bento
+      // sizes by grid span) fills its region's leftover space instead of
+      // capping at preferred height.
       if (minH) wrap.style.minHeight = `${minH}px`;
-      if (prefH) content.style.maxHeight = `${prefH}px`;
+      if (inst.grow) {
+        wrap.style.flex = "1 1 auto";
+        wrap.style.minHeight = minH ? `${minH}px` : "0";
+      } else if (prefH) {
+        content.style.maxHeight = `${prefH}px`;
+      }
       wrap.appendChild(content);
       // Fire and forget — the panel will replace its own `display: loading…`
       // markup once the fetch lands. Errors render inline.
@@ -344,6 +352,9 @@
   const _instanceStates = {};       // {instance: state}
   const _lastStateChangeAt = {};    // {instance: ms timestamp — drives recency decay}
   const _spanOverrides = {};        // {instance: {cols, rows}} — panel-set, beats class table
+  const _userSticky = {};           // {instance: state} — explicit user pick (pill/minimize);
+                                    //   content signals must not override it
+  const _contentBadges = {};        // {instance: true} — trayed panel has content waiting
   const _instances = {};            // {instance: layoutInstanceObj}
   const _manifests = {};            // {panel-name: manifest} — populated at boot
   let _trayRegionEl = null;
@@ -459,6 +470,9 @@
     minimizeBtn.textContent = "−";
     minimizeBtn.addEventListener("click", (e) => {
       e.stopPropagation();
+      // Explicit user intent: content signals may badge the tray icon but
+      // must not pull the panel back out until the user reopens it.
+      _userSticky[instanceId] = "dormant";
       harness.setState(instanceId, "dormant");
     });
 
@@ -501,6 +515,7 @@
       b.addEventListener("click", (ev) => {
         ev.stopPropagation();
         closePillMenu();
+        _userSticky[instanceId] = st;
         harness.logInteraction(instanceId, "custom", { act: "pill-state", to: st });
         harness.setState(instanceId, st);
       });
@@ -530,19 +545,28 @@
       btn.title = `${btn.title} (${manifest.app})`;
     }
     btn.textContent = cfg.icon;
-    btn.style.cssText = [
-      "width:36px","height:36px","border-radius:8px",
-      "border:1px solid var(--glass-border,#444)",
-      "background:var(--panel-outer,rgba(255,255,255,0.04))",
-      "color:var(--response-text,#ddd)",
-      "font-size:18px","line-height:1","cursor:pointer",
-      "display:flex","align-items:center","justify-content:center",
-      "padding:0","backdrop-filter:blur(12px)",
-    ].join(";");
+    // Styling lives in style.css (.tray-icon) so themes/skins apply — no
+    // inline paints here. Badge dot = "content arrived while you kept me
+    // trayed"; survives node rebuilds via _contentBadges.
+    if (_contentBadges[inst.instance]) btn.classList.add("has-badge");
     btn.addEventListener("click", () => {
+      // Reopening clears the user's minimize pin and any waiting badge.
+      delete _userSticky[inst.instance];
+      _setTrayBadge(inst.instance, false);
       harness.setState(inst.instance, "idle");
     });
     return btn;
+  }
+
+  // Toggle the content badge on a trayed instance's icon (and remember it
+  // for rebuilds — tray icons are rebuilt on every bin migration).
+  function _setTrayBadge(instanceId, on) {
+    if (!!_contentBadges[instanceId] === !!on) return;
+    if (on) _contentBadges[instanceId] = true;
+    else delete _contentBadges[instanceId];
+    const node = document.querySelector(`.tray-icon[data-instance="${instanceId}"]`);
+    if (node) node.classList.toggle("has-badge", !!on);
+    harness.logInteraction(instanceId, "custom", { act: "tray-badge", on: !!on });
   }
 
   // ── FLIP runner ─────────────────────────────────────────────────────────
@@ -826,6 +850,43 @@
     return _instanceStates[instanceId] || null;
   };
 
+  // ── harness.signalContent — content-aware wake/sleep ────────────────────
+  // The bridge between "this panel has something to show" and tileflow
+  // state. Panels (or app.js's WS handlers on their behalf) call this
+  // instead of setState so user intent is respected:
+  //
+  //   signalContent(id, true)  — dormant panel wakes into the bento
+  //     (`active`, or the `wake` option e.g. "focused" for approval gates).
+  //     EXCEPT when the user explicitly minimized it: then the tray icon
+  //     gets a badge dot and the panel stays put until the user reopens it.
+  //   signalContent(id, false) — panel emptied. Auto-woken panels return to
+  //     dormant; a state the user picked by hand is left alone. Badges clear.
+  //
+  // Idempotent and cheap — WS handlers can call it on every refresh.
+  harness.signalContent = function (instanceId, hasContent, opts) {
+    const inst = _instances[instanceId];
+    if (!inst || !inst.panel) return;
+    const cur = _instanceStates[instanceId] || null;
+    if (hasContent) {
+      if (_userSticky[instanceId] === "dormant") {
+        // User pinned it shut — badge, don't bubble.
+        if (cur === "dormant") _setTrayBadge(instanceId, true);
+        return;
+      }
+      if (cur === "dormant" || cur === null) {
+        harness.setState(instanceId, (opts && opts.wake) || "active");
+      }
+    } else {
+      _setTrayBadge(instanceId, false);
+      // Only auto-sleep panels the system is driving. A hand-picked state
+      // (pill menu, tray-icon reopen → sticky cleared counts as system)
+      // stays until the user changes it.
+      if (cur && cur !== "dormant" && _userSticky[instanceId] === undefined) {
+        harness.setState(instanceId, "dormant");
+      }
+    }
+  };
+
   // ── harness.logInteraction — emit a system_log event ────────────────────
   // Called by the shell's auto-instrument (click / state / bin) and by
   // panel scripts that want to record a finer-grained signal (e.g. video
@@ -924,13 +985,10 @@
   // Defined here so panel-shell can hide-by-default at render time, before
   // app.js's applyModeVisibility runs (which previously caused blog_ops to
   // flash visible in non-blog modes during boot).
-  const INSTANCE_MODE_RULES = {
-    blog_ops:         { showOnlyIn: ["blog"] },
-    bot_ops:          { hideIn:     ["blog"] },
-    in_context_files: { hideIn:     ["blog"] },
-    task_list:        { hideIn:     ["blog"] },
-    files:            { hideIn:     ["blog"] },
-  };
+  // Empty since the blog mode was deleted (2026-08); repopulate when a mode
+  // needs per-instance visibility again. Keep in sync with app.js's
+  // _PANEL_HIDE_RULES.
+  const INSTANCE_MODE_RULES = {};
 
   function shouldHideForMode(instance, mode) {
     const r = INSTANCE_MODE_RULES[instance];

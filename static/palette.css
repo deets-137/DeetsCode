@@ -2,7 +2,10 @@
    Themes map harness roles onto these; UI rules never use paints directly. */
 
 :root {
-  /* fairy */
+  /* shared signals */
+  --paint-brick-red: #C0392B;
+
+  /* lilac (was fairy) */
   --paint-dewy-lilac: #E0DCF0;
   --paint-twilight-plum: #43306B;
   --paint-violet-slate: #6A6385;
@@ -13,7 +16,7 @@
   --paint-purple-cactus-flower: #A63A79;
   --paint-lemon-chrome: #F6C700;
 
-  /* glade */
+  /* green (was glade) */
   --paint-dewy-chartreuse: #E9F0C0;
   --paint-forest: #1E4D2B;
   --paint-moss: #54664B;
@@ -45,7 +48,7 @@
   --paint-slate-surface: #232F40;
   --paint-slate-surface-tint: #2E3C50;
 
-  /* hornet */
+  /* black-yellow (was hornet) */
   --paint-pitch: #0F0F0F;
   --paint-onyx: #1A1A1A;
   --paint-onyx-tint: #242424;
@@ -54,9 +57,14 @@
   --paint-straw: #D8C97A;
   --paint-paper-warm: #ECE6CF;
 
-  /* viper */
+  /* black-red (was viper) */
   --paint-siren: #FF2B2B;
   --paint-blood: #C01020;
   --paint-ember: #D8837A;
   --paint-ash-white: #EFE2DE;
+
+  /* shared: traffic-light crayons (titlebar chrome) */
+  --paint-traffic-go: #6FBF73;
+  --paint-traffic-pause: #E8C35A;
+  --paint-traffic-stop: #E2574C;
 }

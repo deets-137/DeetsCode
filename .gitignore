@@ -48,3 +48,9 @@ Thumbs.db
 # App runtime state (preserved across bundle updates, never committed)
 apps/*/state/
 apps/*.bak/
+
+# Tauri shell
+node_modules/
+src-tauri/target/
+src-tauri/gen/
+package-lock.json

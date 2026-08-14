@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="lilac" data-skin="press">
+<head>
+  <meta charset="UTF-8" />
+  <title>DeetsCode — tokens</title>
+  <script>
+    // Same pre-paint resolution as index.html (kept minimal — no retired-id
+    // migration here; this is a dev preview page).
+    (function () {
+      var dark = false;
+      try { dark = matchMedia("(prefers-color-scheme: dark)").matches; } catch (e) {}
+      [["harness-theme", "data-theme", dark ? "black-red" : "lilac"],
+       ["harness-skin",  "data-skin",  dark ? "retro-future" : "press"]].forEach(function (a) {
+        var saved = null;
+        try { saved = localStorage.getItem(a[0]); } catch (e) {}
+        document.documentElement.setAttribute(a[1], saved || a[2]);
+      });
+    })();
+  </script>
+  <!-- The REAL token sheets — this page has no colors of its own. -->
+  <link rel="stylesheet" href="fonts.css" />
+  <link rel="stylesheet" href="palette.css" />
+  <link rel="stylesheet" href="theme.css" />
+  <link rel="stylesheet" href="skin.css" />
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: var(--font-body);
+      font-size: var(--fs-text);
+      color: var(--text);
+      background: var(--canvas);
+      background-image: var(--canvas-bg);
+      background-size: var(--canvas-bg-size);
+      padding: var(--space-5);
+      min-height: 100vh;
+    }
+    h1 { font-family: var(--font-title); font-weight: var(--fw-title); color: var(--title); margin-bottom: var(--space-2); }
+    p.note { color: var(--subtext); margin-bottom: var(--space-4); }
+    .controls { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-bottom: var(--space-5); }
+    .controls button {
+      font-family: var(--font-body); font-size: var(--fs-ui); color: var(--text);
+      background: var(--surface); border: 1px solid var(--border);
+      border-radius: var(--radius-control); padding: var(--space-1) var(--space-3);
+      cursor: pointer;
+    }
+    .controls button:hover { background: var(--surface-hover); }
+    .controls button[aria-pressed="true"] { outline: var(--focus-ring-w) solid var(--title); }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: var(--space-4); }
+    .card {
+      /* --surface directly (not --panel-fill): a var() reference resolves in
+         the CARD's data-theme scope, while --panel-fill inherits the value
+         already resolved on <html> — the whole point is per-card theming. */
+      background: var(--surface);
+      color: var(--text);   /* re-resolves in the card's theme scope too */
+      -webkit-backdrop-filter: var(--panel-backdrop);
+      backdrop-filter: var(--panel-backdrop);
+      border: 1px solid var(--panel-border);
+      border-radius: var(--radius-panel);
+      box-shadow: var(--shadow-panel);
+      padding: var(--space-4);
+    }
+    .card h2 { font-family: var(--font-title); font-weight: var(--fw-title); color: var(--title); font-size: var(--fs-chat); margin-bottom: var(--space-2); }
+    .roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: var(--space-2); }
+    .role { display: flex; align-items: center; gap: var(--space-2); font-size: var(--fs-small); color: var(--subtext); font-family: var(--font-mono); }
+    .role .chip { width: var(--icon-lg); height: var(--icon-lg); border-radius: var(--radius-inner); border: 1px solid var(--border); flex: 0 0 auto; }
+    .sample { margin-top: var(--space-3); }
+    .sample .inset {
+      background: var(--panel-inset-fill); border: 1px solid var(--border);
+      border-radius: var(--radius-nested); padding: var(--space-3); margin-top: var(--space-2);
+    }
+    .sample .inset code { font-family: var(--font-mono); font-size: var(--fs-body); }
+    .lights { display: flex; gap: var(--traffic-gap); margin-top: var(--space-3); }
+    .light { width: var(--traffic-size); height: var(--traffic-size); border-radius: 50%; }
+  </style>
+</head>
+<body>
+  <h1>DeetsCode tokens</h1>
+  <p class="note">Live preview against the real palette/theme/skin sheets. Pick any theme × skin; each theme card renders in its own theme via a scoped data-theme.</p>
+
+  <div class="controls" id="theme-controls"></div>
+  <div class="controls" id="skin-controls"></div>
+
+  <div class="grid" id="theme-grid"></div>
+
+  <script>
+    const THEMES = ["lilac", "green", "sepia", "moonlight", "black-yellow", "black-red"];
+    const SKINS = ["vanilla", "press", "ocean", "glass", "retro-future"];
+    const ROLES = ["--canvas", "--surface", "--surface-hover", "--accent-1", "--accent-2",
+                   "--text", "--subtext", "--title", "--divider", "--border", "--error",
+                   "--go", "--pause", "--stop"];
+
+    const html = document.documentElement;
+
+    function buildControls(hostId, ids, attr) {
+      const host = document.getElementById(hostId);
+      for (const id of ids) {
+        const b = document.createElement("button");
+        b.textContent = id;
+        b.setAttribute("aria-pressed", html.getAttribute(attr) === id);
+        b.addEventListener("click", () => {
+          html.setAttribute(attr, id);
+          host.querySelectorAll("button").forEach(x => x.setAttribute("aria-pressed", x === b));
+        });
+        host.appendChild(b);
+      }
+    }
+    buildControls("theme-controls", THEMES, "data-theme");
+    buildControls("skin-controls", SKINS, "data-skin");
+
+    const grid = document.getElementById("theme-grid");
+    for (const theme of THEMES) {
+      const card = document.createElement("div");
+      card.className = "card";
+      card.dataset.theme = theme;   /* the card renders in ITS theme */
+      card.innerHTML = `
+        <h2>${theme}</h2>
+        <div class="roles">${ROLES.map(r =>
+          `<div class="role"><span class="chip" style="background: var(${r})"></span>${r.slice(2)}</div>`).join("")}
+        </div>
+        <div class="sample">
+          <span>Body text — <em>the quick brown fox</em>. <span style="color: var(--subtext)">Subtext.</span></span>
+          <div class="inset"><code>panel-inset-fill / font-mono sample</code></div>
+          <div class="lights">
+            <span class="light" style="background: var(--go)"></span>
+            <span class="light" style="background: var(--pause)"></span>
+            <span class="light" style="background: var(--stop)"></span>
+          </div>
+        </div>`;
+      grid.appendChild(card);
+    }
+  </script>
+</body>
+</html>

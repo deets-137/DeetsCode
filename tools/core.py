@@ -1,9 +1,12 @@
 """
 Core tool pack — loaded in every mode.
 
-Kept intentionally tiny: 4 tools that any agent (coding, chess, dnd, mafia)
-might legitimately want. The rest of the coding-agent toolkit lives in
-tools/coding.py and only loads for the DeetsCode mode.
+Kept deliberately small: the tool deck is the model's attention budget, so
+every definition here rides in every request. TOOL_DEFINITIONS is the
+always-on set (file reading, manual, task checklist, paths, and the single
+consolidated `layout` tool). GAME_TOOLS (roll_dice) only load for game modes
+— see tools/__init__.py. The coding toolkit lives in tools/coding.py and
+only loads for the DeetsCode mode.
 
 Shared state (pending_writes, read_files) lives here even though most of its
 consumers are in coding.py, because server.py imports it via `tools` and we
@@ -39,9 +42,9 @@ TOOL_DEFINITIONS = [
         "function": {
             "name": "read_file",
             "description": (
-                "Read the contents of a file in the project. Available in every "
-                "mode as an escape hatch — game modes use it rarely (e.g. inspect "
-                "a saved game JSON); coding uses it constantly."
+                "Read a file in the project. Returns line-numbered content. "
+                "For large files, pass start_line/end_line to read just the "
+                "range you need."
             ),
             "parameters": {
                 "type": "object",
@@ -65,24 +68,6 @@ TOOL_DEFINITIONS = [
                     "path": {"type": "string", "description": "Path relative to project root. Use '.' for the root."},
                 },
                 "required": ["path"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "roll_dice",
-            "description": "Roll dice. Use this for any probabilistic outcome — it's instant and cannot be hallucinated. Returns individual rolls, the total, and the expression for narration.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "sides":     {"type": "integer", "description": "Number of sides on each die (e.g. 20 for d20, 6 for d6). Must be >= 2."},
-                    "count":     {"type": "integer", "description": "How many dice to roll. Default 1."},
-                    "modifier":  {"type": "integer", "description": "Flat modifier to add to the total (e.g. +3 for a Strength bonus). Default 0."},
-                    "advantage": {"type": "string", "enum": ["none", "advantage", "disadvantage"], "description": "For a single die: roll twice and keep higher (advantage) or lower (disadvantage). Ignored when count > 1."},
-                    "label":     {"type": "string", "description": "Optional short label for narration (e.g. 'attack', 'persuasion', 'damage')."},
-                },
-                "required": ["sides"],
             },
         },
     },
@@ -137,163 +122,47 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "recompute_layout",
+            "name": "layout",
             "description": (
-                "Trigger a fresh tileflow pass on the bento — recomputes "
-                "scores, re-ranks panels, applies new ordering. Use after a "
-                "burst of `set_instance_state` calls if the arrangement "
-                "looks stale, or to refresh recency decay (panels that were "
-                "active a while ago will demote)."
-            ),
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "set_instance_state",
-            "description": (
-                "Push a runtime state overlay onto a panel instance — the live "
-                "bento rearranges in front of the user. Use sparingly to bubble "
-                "something relevant ('I'm about to talk about your YouTube video, "
-                "let's surface it') or to tuck something away ('done with the "
-                "task list, demote it'). Transient: not persisted to the layout "
-                "file. States: 'dormant' (demote to tray icon), 'idle' (small "
-                "tile), 'active' (medium tile — passive interest), 'focused' "
-                "(hero — full attention). The arrangement responds immediately "
-                "via the FLIP runner; peers glide to accommodate."
+                "Inspect and command the live workspace (bento) layout — one tool, "
+                "selected by `action`:\n"
+                "- 'get': read the live layout (grid, regions, every instance with "
+                "its state, pin, floors). Call this first before changing anything.\n"
+                "- 'panels': list installed panels (name, title, sizes, default state).\n"
+                "- 'state': set a runtime state on an instance — 'dormant' (tray "
+                "icon), 'idle' (small), 'active' (medium, passive interest), "
+                "'focused' (hero, full attention). Transient; the UI rearranges "
+                "live. Use to surface what you're discussing or tuck away what's done.\n"
+                "- 'pin': pin an instance at col,row spanning cols×rows (persisted; "
+                "1-indexed, (1,1) is top-left). Pins are floors — a promoted panel "
+                "can grow past them. Validation errors come back verbatim; fix and retry.\n"
+                "- 'unpin': return an instance to score-ordered auto-flow.\n"
+                "- 'floor': set persistent floors (locked_size, locked_floor, "
+                "never_dormant; clear=true drops all floors).\n"
+                "- 'recompute': force a fresh flow pass (refreshes recency decay).\n"
+                "- 'preset_save' / 'preset_apply': capture or apply a named layout sheet.\n"
+                "Use instance ids from the layout (e.g. 'youtube_a', 'tool_log'), "
+                "NOT panel names. Grid is 12 columns: spans across one row sum to "
+                "12 (12, 6+6, 6+3+3, 3+3+3+3). Size classes: small=3 cols, "
+                "medium=6, large=6×2 rows, hero=12×2."
             ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "instance": {"type": "string", "description": "Instance id from layout/panel_layout.json (e.g. 'youtube_a', 'tool_log', 'settings'). NOT the panel name."},
-                    "state":    {"type": "string", "enum": ["dormant", "idle", "active", "focused"], "description": "Target state."},
+                    "action":        {"type": "string", "enum": ["get", "panels", "state", "pin", "unpin", "floor", "recompute", "preset_apply", "preset_save"], "description": "Which layout operation to perform."},
+                    "instance":      {"type": "string", "description": "Instance id from the layout. Required for state/pin/unpin/floor."},
+                    "state":         {"type": "string", "enum": ["dormant", "idle", "active", "focused"], "description": "Target state (action 'state')."},
+                    "col":           {"type": "integer", "description": "Pin start column, 1-indexed (action 'pin')."},
+                    "row":           {"type": "integer", "description": "Pin start row, 1-indexed (action 'pin')."},
+                    "cols":          {"type": "integer", "description": "Pin column span, default 1. Spans across a row must fit 12 columns (action 'pin')."},
+                    "rows":          {"type": "integer", "description": "Pin row span, default 1 (action 'pin')."},
+                    "locked_size":   {"type": "string", "enum": ["icon", "small", "medium", "large", "hero"], "description": "Size class the instance never shrinks below (action 'floor')."},
+                    "locked_floor":  {"type": "string", "enum": ["dormant", "idle", "active", "focused"], "description": "State the instance never drops below (action 'floor')."},
+                    "never_dormant": {"type": "boolean", "description": "If true, dormant requests clamp to idle (action 'floor')."},
+                    "clear":         {"type": "boolean", "description": "Drop all floors on the instance (action 'floor')."},
+                    "name":          {"type": "string", "description": "Preset name, filename without .json (actions 'preset_save' / 'preset_apply')."},
                 },
-                "required": ["instance", "state"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_layout",
-            "description": (
-                "Read the live bento layout: grid dims, regions, and every panel "
-                "instance with its current tileflow state, pin, and floors. Call "
-                "this before proposing any layout change. Size classes: small=3 "
-                "cols, medium=6 cols, large=6 cols x 2 rows, hero=12 cols x 2 rows. "
-                "Pins are floors, not absolutes — a focused panel can still grow "
-                "past its pinned span."
-            ),
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "get_panels",
-            "description": (
-                "List installed panels: name, title, tier, multi_instance, min/"
-                "preferred pixel sizes, and default tileflow state. Answers 'is "
-                "there a clock panel?' and 'how small can it go?'. Instance ids "
-                "in the layout map to these panels via their `panel` field."
-            ),
-            "parameters": {"type": "object", "properties": {}, "required": []},
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "pin_instance",
-            "description": (
-                "Pin a panel instance to a bento grid rectangle (persisted in the "
-                "layout file; the UI rearranges live). 1-indexed CSS Grid coords; "
-                "(1,1) is top-left. The pin is a floor: state promotion can grow "
-                "the panel past it, never shrink it. Validation errors (collision, "
-                "out of bounds) come back verbatim — fix the coords and retry."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "instance": {"type": "string", "description": "Instance id from the layout (NOT the panel name)."},
-                    "col":  {"type": "integer", "description": "Start column, 1-indexed."},
-                    "row":  {"type": "integer", "description": "Start row, 1-indexed."},
-                    "cols": {"type": "integer", "description": "Column span. Default 1. Valid rows sum to 12: 12, 6+6, 6+3+3, 3+3+3+3."},
-                    "rows": {"type": "integer", "description": "Row span. Default 1."},
-                },
-                "required": ["instance", "col", "row"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "unpin_instance",
-            "description": "Remove a panel instance's bento pin; it returns to score-ordered auto-flow.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "instance": {"type": "string", "description": "Instance id from the layout."},
-                },
-                "required": ["instance"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "set_instance_floor",
-            "description": (
-                "Set persistent floors on a panel instance (the 'settings stays "
-                "medium even when dormant' knob). locked_size lower-bounds the "
-                "size class and keeps the panel out of the tray; locked_floor "
-                "lower-bounds the runtime state; never_dormant clamps dormant to "
-                "idle. Omitted fields are left unchanged; pass clear=true to drop "
-                "all floors."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "instance":      {"type": "string", "description": "Instance id from the layout."},
-                    "locked_size":   {"type": "string", "enum": ["icon", "small", "medium", "large", "hero"], "description": "Size class the instance never shrinks below."},
-                    "locked_floor":  {"type": "string", "enum": ["dormant", "idle", "active", "focused"], "description": "State the instance never drops below."},
-                    "never_dormant": {"type": "boolean", "description": "If true, dormant requests clamp to idle."},
-                    "clear":         {"type": "boolean", "description": "Drop all floors on this instance."},
-                },
-                "required": ["instance"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "apply_layout_preset",
-            "description": (
-                "Replace the whole layout sheet with a named preset from "
-                "layout/presets/<name>.json. The preset passes the same pin "
-                "validator as any other layout write. Use save_layout_preset "
-                "first to capture the current arrangement under a name."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Preset name (filename without .json)."},
-                },
-                "required": ["name"],
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "save_layout_preset",
-            "description": "Save the current layout sheet as a named preset under layout/presets/ for later apply_layout_preset calls.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "name": {"type": "string", "description": "Preset name (filename without .json). Overwrites an existing preset of the same name."},
-                },
-                "required": ["name"],
+                "required": ["action"],
             },
         },
     },
@@ -301,13 +170,40 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "update_task",
-            "description": "Create or update the task checklist (task.md). Use markdown checkboxes: - [ ] todo, - [/] in-progress, - [x] done. If content is empty, returns the current checklist without modifying it.",
+            "description": "Create, update, or clear the task checklist (task.md). Use markdown checkboxes: - [ ] todo, - [/] in-progress, - [x] done. To clear/delete the checklist (task finished or abandoned), pass clear: true (or an empty content string — both clear). Omit all arguments to read the current checklist.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "content": {"type": "string", "description": "Full markdown content for task.md. Use - [ ] for todo, - [/] for in-progress, - [x] for done. Leave empty to read the current checklist."},
+                    "content": {"type": "string", "description": "Full markdown content for task.md. Use - [ ] for todo, - [/] for in-progress, - [x] for done. An empty string clears the checklist."},
+                    "clear": {"type": "boolean", "description": "Set true to delete task.md entirely (clears the task list). Takes precedence over content."},
                 },
                 "required": [],
+            },
+        },
+    },
+]
+
+
+# Game-mode-only core tools (dnd, chess, mafia…). Defined here because the
+# handlers share this module's execute_tool, but kept out of TOOL_DEFINITIONS
+# so coding/blog decks don't carry dice they'll never roll — see
+# tools/__init__.py's _GAME_MODES gate.
+GAME_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "roll_dice",
+            "description": "Roll dice. Use this for any probabilistic outcome — it's instant and cannot be hallucinated. Returns individual rolls, the total, and the expression for narration.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "sides":     {"type": "integer", "description": "Number of sides on each die (e.g. 20 for d20, 6 for d6). Must be >= 2."},
+                    "count":     {"type": "integer", "description": "How many dice to roll. Default 1."},
+                    "modifier":  {"type": "integer", "description": "Flat modifier to add to the total (e.g. +3 for a Strength bonus). Default 0."},
+                    "advantage": {"type": "string", "enum": ["none", "advantage", "disadvantage"], "description": "For a single die: roll twice and keep higher (advantage) or lower (disadvantage). Ignored when count > 1."},
+                    "label":     {"type": "string", "description": "Optional short label for narration (e.g. 'attack', 'persuasion', 'damage')."},
+                },
+                "required": ["sides"],
             },
         },
     },
@@ -368,7 +264,18 @@ def _write_paths_file(new_text: str) -> Optional[str]:
     return None
 
 
-def _register_path(args: dict) -> str:
+def _register_path(args: dict, project_dir: Path) -> str:
+    # This tool edits the HARNESS's paths.py — it only makes sense when the
+    # active project IS the harness. Guard against silently mutating the
+    # harness registry while working in some other repo.
+    harness_root = _PATHS_FILE.parent.resolve()
+    if project_dir.resolve() != harness_root:
+        return (
+            f"Error: register_path edits the harness's own paths.py, but the "
+            f"active project is {project_dir}. It is only available when the "
+            f"project is the harness root ({harness_root})."
+        )
+
     name = (args.get("name") or "").strip()
     value = (args.get("value") or "").strip()
     kind = (args.get("kind") or "").strip()
@@ -424,17 +331,46 @@ def _register_path(args: dict) -> str:
     return f"Added `{name}` to paths.py → {new_line}"
 
 
-# ── Stage 3 layout tools ─────────────────────────────────────────────────────
+# ── Layout tools ─────────────────────────────────────────────────────────────
 # Thin wrappers over panels/loader.py. Mutations write the layout file
 # directly; server.py's tool-dispatch site broadcasts `layout_updated` to
 # connected clients after any of these returns "OK: ..." (same pattern as
-# set_instance_state). Validator errors return verbatim so the model can
+# the state overlay). Validator errors return verbatim so the model can
 # self-correct on the next call.
+#
+# The model-facing surface is the single `layout` tool (action enum) — the
+# per-name entry points below survive as compat aliases so old sessions and
+# scripts keep working.
 
 _LAYOUT_TOOLS = {
     "get_layout", "get_panels", "pin_instance", "unpin_instance",
     "set_instance_floor", "apply_layout_preset", "save_layout_preset",
 }
+
+# `layout` tool action → legacy handler name.
+_LAYOUT_ACTIONS = {
+    "get":          "get_layout",
+    "panels":       "get_panels",
+    "pin":          "pin_instance",
+    "unpin":        "unpin_instance",
+    "floor":        "set_instance_floor",
+    "preset_apply": "apply_layout_preset",
+    "preset_save":  "save_layout_preset",
+}
+
+
+def _state_overlay(args: dict) -> str:
+    """Validate a runtime state push. The WS broadcast happens in server.py's
+    dispatch site so this stays sync; the confirmation string is enough for
+    the model's tool loop."""
+    inst = (args.get("instance") or "").strip()
+    st = (args.get("state") or "").strip()
+    valid = {"dormant", "idle", "active", "focused"}
+    if not inst:
+        return "Error: 'instance' is required"
+    if st not in valid:
+        return f"Error: 'state' must be one of {sorted(valid)}"
+    return f"OK: requested state '{st}' for instance '{inst}' (bento updating live)."
 
 
 def _layout_tool(name: str, args: dict) -> str:
@@ -556,8 +492,12 @@ def execute_tool(
 ) -> str:
     """Unified signature matching game packs. Core tools ignore session_id/user_name."""
     try:
+        # Models sometimes send explicit nulls ("path": null) — coerce string
+        # args up front so handlers see "" instead of crashing on None.strip().
+        args = {k: ("" if v is None else v) for k, v in (args or {}).items()}
+
         if name == "read_file":
-            if "path" not in args:
+            if not args.get("path"):
                 return "Error: Missing required argument 'path'"
             path = (project_dir / args["path"]).resolve()
             if not path.is_relative_to(project_dir.resolve()):
@@ -598,7 +538,7 @@ def execute_tool(
             return content
 
         if name == "list_dir":
-            if "path" not in args:
+            if not args.get("path"):
                 return "Error: Missing required argument 'path'"
             path = (project_dir / args["path"]).resolve()
             if not path.is_relative_to(project_dir.resolve()):
@@ -665,7 +605,7 @@ def execute_tool(
             return "Available manual docs:\n" + "\n".join(lines) if lines else "No manual docs available."
 
         if name == "load_manual":
-            pname = args.get("name", "").strip()
+            pname = (args.get("name") or "").strip()
             if not pname:
                 return "Error: 'name' is required"
             path = _find_manual(pname, project_dir)
@@ -682,35 +622,50 @@ def execute_tool(
             return f"Error: section '{section}' not found in '{pname}'. Available: {avail}"
 
         if name == "register_path":
-            return _register_path(args)
+            return _register_path(args, project_dir)
 
+        if name == "layout":
+            action = (args.get("action") or "").strip()
+            if action in _LAYOUT_ACTIONS:
+                return _layout_tool(_LAYOUT_ACTIONS[action], args)
+            if action == "state":
+                return _state_overlay(args)
+            if action == "recompute":
+                # server.py's dispatch site sees action=recompute and
+                # broadcasts the tileflow_recompute frame.
+                return "OK: layout recomputation broadcast queued."
+            return (
+                f"Error: unknown layout action '{action}'. Valid actions: "
+                f"get, panels, state, pin, unpin, floor, recompute, "
+                f"preset_apply, preset_save"
+            )
+
+        # Compat aliases: pre-consolidation tool names still dispatch (old
+        # sessions, curl scripts). The model-facing deck only ships `layout`.
         if name in _LAYOUT_TOOLS:
             return _layout_tool(name, args)
-
         if name == "recompute_layout":
-            # Server.py picks up the tool-name in the dispatch site and
-            # broadcasts a synthetic frame the client reacts to. Returning
-            # a confirmation keeps the tool sync.
             return "OK: layout recomputation broadcast queued."
-
         if name == "set_instance_state":
-            inst = (args.get("instance") or "").strip()
-            st = (args.get("state") or "").strip()
-            valid = {"dormant", "idle", "active", "focused"}
-            if not inst:
-                return "Error: 'instance' is required"
-            if st not in valid:
-                return f"Error: 'state' must be one of {sorted(valid)}"
-            # Side effect (WS broadcast) is handled in server.py at the tool
-            # dispatch site so this function stays sync. Returning the
-            # confirmation is enough for the model's tool-call loop.
-            return f"OK: requested state '{st}' for instance '{inst}' (bento updating live)."
+            return _state_overlay(args)
 
         if name == "update_task":
             from paths import TASK_FILENAME
             task_path = project_dir / TASK_FILENAME
-            content = args.get("content", "").strip()
+            content = (args.get("content") or "").strip()
+            # Clear paths: explicit `clear: true`, OR content passed but
+            # empty. Small local models reach for `content: ""` when asked
+            # to clear — honor the intent instead of bouncing them to the
+            # read branch. Read = calling with no content key at all.
+            if args.get("clear") or ("content" in args and not content):
+                task_path.unlink(missing_ok=True)
+                return "task.md cleared."
             if content:
+                # Small-model JSON double-escaping guard: content arriving
+                # with literal \n sequences and no real newlines is an
+                # escaping artifact, not intent — normalize it.
+                if "\\n" in content and "\n" not in content:
+                    content = content.replace("\\n", "\n")
                 task_path.write_text(content, encoding="utf-8")
                 return f"task.md updated:\n{content}"
             if task_path.is_file():

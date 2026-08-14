@@ -125,6 +125,7 @@ async function fetchModels() {
       opt.disabled = true;
       select.appendChild(opt);
     }
+    _mirrorSelectFlyout("model-select", "model-picker", "model-current");
   } catch (e) {
     console.error("Failed to fetch models:", e);
   }
@@ -144,14 +145,27 @@ function bindModelSelect() {
 window.bindModelSelect = bindModelSelect;
 document.addEventListener("DOMContentLoaded", bindModelSelect);
 
+// ── Content signals ───────────────────────────────
+// Bridge WS-driven content into tileflow: panels that default to the tray
+// wake when they have something to show and return when they empty. The
+// shell owns the policy (user-minimize wins, badges, etc.) — see
+// harness.signalContent in panel-shell.js. Null-tolerant for boot races.
+function signalPanel(instance, hasContent, opts) {
+  if (window.harness && window.harness.signalContent) {
+    window.harness.signalContent(instance, hasContent, opts);
+  }
+}
+
 // ── Task Panel ────────────────────────────────────
 async function refreshTaskPanel() {
   try {
     const res = await fetch("/api/task");
     const data = await res.json();
+    const hasTask = !!(data.content && data.content.trim() !== "");
+    signalPanel("task_list", hasTask);
     const inner = document.getElementById("task-inner");
     if (!inner) return;
-    if (!data.content || data.content.trim() === "") {
+    if (!hasTask) {
       inner.innerHTML = '<span class="task-empty">no task.md found</span>';
       return;
     }
@@ -212,7 +226,7 @@ function esc(s) {
 function setTitleFromPath(path) {
   if (!path) return;
   const base = String(path).replace(/[\\/]+$/, "").split(/[\\/]/).pop() || path;
-  document.title = `Harness — ${base}`;
+  document.title = `DeetsCode — ${base}`;
 }
 
 function renderNodes(nodes, container, parentPath = "") {
@@ -275,16 +289,30 @@ function requestRead(path) {
 // DeetsMusic token system): data-theme picks color roles (theme.css),
 // data-skin picks type/shape/material (skin.css). Any theme × any skin.
 
-// Pre-port themes were numbered; map saved numeric ids to their new names.
+// Retired ids → successor (both eras: the numbered pre-port ids AND the
+// 2026-08 rename to DeetsSolutions' "named for what they are" ids:
+// fairy→lilac, glade→green, hornet→black-yellow, viper→black-red).
+// Mirrored by the pre-paint script in index.html (RT/RS maps) — keep in sync.
 const LEGACY_THEME_NAMES = {
-  1: "fairy", 2: "moonlight", 3: "glade", 4: "hornet",
-  5: "moonlight", 6: "glade", 7: "viper", 8: "sepia",
-  blush: "fairy",
+  1: "lilac", 2: "moonlight", 3: "green", 4: "black-yellow",
+  5: "moonlight", 6: "green", 7: "black-red", 8: "sepia",
+  blush: "lilac",
+  fairy: "lilac",
   graphite: "moonlight",
-  solar: "glade",
+  solar: "green",
+  glade: "green",
   midnight: "moonlight",
-  grove: "glade",
-  abyss: "viper",
+  grove: "green",
+  hornet: "black-yellow",
+  abyss: "black-red",
+  viper: "black-red",
+};
+
+// Retired skin ids → successor (paper/desk→press, cyberstorm→retro-future).
+const LEGACY_SKIN_NAMES = {
+  paper: "press",
+  desk: "press",
+  cyberstorm: "retro-future",
 };
 
 function setTheme(id) {
@@ -308,12 +336,145 @@ function setSkin(id) {
 
 function loadSkin() {
   let saved = localStorage.getItem("harness-skin");
-  if (saved === "paper") {
-    saved = "desk";
+  if (saved && LEGACY_SKIN_NAMES[saved]) {
+    saved = LEGACY_SKIN_NAMES[saved];
     localStorage.setItem("harness-skin", saved);
   }
   if (saved) document.documentElement.dataset.skin = saved;
 }
+
+// ── App chrome: Tauri lights + DeetsCode title menu ────────────
+// The titlebar is always visible (it hosts the settings menu). The traffic
+// lights + drag region only act inside the Tauri webview (window.__TAURI__
+// injected via withGlobalTauri) — in a browser tab they stay hidden.
+// Ocean layer — three seamless wave-train patterns injected into <body>,
+// inert (display:none) unless the skin opts in via --ocean-display (ocean).
+// Each pattern tile is ONE full sine period (Q + T reflection), so the
+// curve's value AND tangent match at the tile edge — no seam, no crossings.
+// Each train is an opaque --canvas fill below a hairline crest, so a nearer
+// swell occludes the ones behind it. Ink/motion live in CSS (skin tokens).
+function buildOcean() {
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  svg.setAttribute("class", "ocean");
+  svg.setAttribute("aria-hidden", "true");
+  const defs = document.createElementNS(NS, "defs");
+  svg.appendChild(defs);
+  // [tile width, tile height, crest baseline, amplitude], farthest first
+  // so the nearest train paints last (on top).
+  const SWELLS = { 3: [80, 46, 26, 4], 2: [64, 38, 22, 5], 1: [48, 30, 17, 6] };
+  for (const n of [3, 2, 1]) {
+    const [W, H, c, a] = SWELLS[n];
+    const crest = `M0 ${c} Q${W / 4} ${c - a} ${W / 2} ${c} T${W} ${c}`;
+    const pat = document.createElementNS(NS, "pattern");
+    pat.setAttribute("id", `ocean-swell-${n}`);
+    pat.setAttribute("width", W);
+    pat.setAttribute("height", H);
+    pat.setAttribute("patternUnits", "userSpaceOnUse");
+    const fill = document.createElementNS(NS, "path");
+    fill.setAttribute("class", "ocean__fill");
+    fill.setAttribute("d", `${crest} L${W} ${H} L0 ${H} Z`);
+    pat.appendChild(fill);
+    const line = document.createElementNS(NS, "path");
+    line.setAttribute("class", `ocean__crest ocean__crest--${n}`);
+    line.setAttribute("d", crest);
+    pat.appendChild(line);
+    defs.appendChild(pat);
+    // bob (g) and roll (rect) are separate elements so their transform
+    // animations compose instead of overwriting each other.
+    const g = document.createElementNS(NS, "g");
+    g.setAttribute("class", `ocean__bob ocean__bob--${n}`);
+    const rect = document.createElementNS(NS, "rect");
+    rect.setAttribute("class", `ocean__roll ocean__roll--${n}`);
+    rect.setAttribute("fill", `url(#ocean-swell-${n})`);
+    g.appendChild(rect);
+    svg.appendChild(g);
+  }
+  return svg;
+}
+
+(function initAppChrome() {
+  const boot = () => {
+    if (!document.body.querySelector(":scope > .ocean")) {
+      document.body.insertBefore(buildOcean(), document.body.firstChild);
+    }
+
+    if (window.__TAURI__) {
+      document.documentElement.classList.add("is-tauri");
+      const win = window.__TAURI__.window.getCurrentWindow();
+      document.getElementById("tl-min")?.addEventListener("click", () => win.minimize());
+      document.getElementById("tl-max")?.addEventListener("click", () => win.toggleMaximize());
+      document.getElementById("tl-close")?.addEventListener("click", () => win.close());
+    }
+
+    // DeetsCode title menu (DeetsMusic dropdown pattern: click toggles,
+    // click-outside / Escape dismiss; flyouts open on row hover via CSS).
+    const root = document.getElementById("app-menu-root");
+    const trigger = document.getElementById("app-menu-trigger");
+    const menu = document.getElementById("app-menu");
+    if (root && trigger && menu) {
+      // Context flyout mirrors the in_context_files panel view (server-
+      // rendered from tools.read_files) every 3s while the menu is open.
+      const ctxFly = document.getElementById("ctx-files-flyout");
+      let ctxTimer = null;
+      const pullCtx = async () => {
+        if (!ctxFly) return;
+        try {
+          const r = await fetch("/panels/in_context_files/view?instance=menu");
+          if (r.ok) ctxFly.innerHTML = (await r.text()).replace(/<script[\s\S]*?<\/script>/gi, "");
+        } catch (e) { /* server hiccup — keep last render */ }
+      };
+      const close = () => {
+        menu.hidden = true;
+        trigger.setAttribute("aria-expanded", "false");
+        if (ctxTimer) { clearInterval(ctxTimer); ctxTimer = null; }
+      };
+      const open = () => {
+        menu.hidden = false;
+        trigger.setAttribute("aria-expanded", "true");
+        pullCtx();
+        if (!ctxTimer) ctxTimer = setInterval(pullCtx, 3000);
+      };
+      trigger.addEventListener("click", (e) => {
+        e.stopPropagation();
+        menu.hidden ? open() : close();
+      });
+      document.addEventListener("click", (e) => {
+        if (!menu.hidden && !root.contains(e.target)) close();
+      });
+      document.addEventListener("keydown", (e) => { if (e.key === "Escape") close(); });
+
+      // The settings panel's inline script used to kick these after its
+      // fragment landed; the menu markup is static so kick them here.
+      // All are re-callable and no-op when their IDs are absent.
+      if (window.fetchModels) fetchModels();
+      if (window.loadPromptModes) loadPromptModes();
+      if (window.fetchThemes) fetchThemes();
+      if (window.fetchSkins) fetchSkins();
+      if (window.bindSettingsControls) bindSettingsControls();
+      if (window.bindModelSelect) bindModelSelect();
+
+      // DeetsMusic toggle rows: the ROW is the control (dot in the right
+      // gutter shows state); the hidden checkbox keeps bindSettingsControls'
+      // change-listener wiring intact.
+      for (const [rowId, boxId] of [["keep-history-row", "keep-history-toggle"],
+                                    ["auto-apply-row", "auto-apply-toggle"]]) {
+        const row = document.getElementById(rowId);
+        const box = document.getElementById(boxId);
+        if (!row || !box) continue;
+        const sync = () => row.setAttribute("aria-checked", box.checked ? "true" : "false");
+        row.addEventListener("click", () => {
+          box.checked = !box.checked;
+          box.dispatchEvent(new Event("change"));
+          sync();
+        });
+        sync();
+      }
+    }
+  };
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot);
+  else boot();
+})();
 
 async function fetchThemes() {
   try {
@@ -323,27 +484,59 @@ async function fetchThemes() {
     if (!picker || !data.themes || data.themes.length === 0) return;
     picker.innerHTML = "";
     for (const theme of data.themes) {
-      const opt = document.createElement("div");
-      opt.className = "theme-option";
-      opt.onclick = () => setTheme(theme.id);
-      const row = document.createElement("div");
-      row.className = "swatch-row";
-      for (const color of theme.swatches) {
-        const s = document.createElement("span");
-        s.className = "swatch";
-        s.style.background = color;
-        row.appendChild(s);
-      }
-      opt.appendChild(row);
-      const name = document.createElement("span");
-      name.className = "theme-name";
-      name.textContent = theme.id;
-      opt.appendChild(name);
-      picker.appendChild(opt);
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "flyout__item";
+      b.setAttribute("role", "menuitemradio");
+      // The item carries its own data-theme, so --canvas / --title / --border
+      // resolve to THAT theme — the button is a taste of what it selects
+      // (DeetsMusic flyout pattern). Selection is the dot in the right gutter.
+      b.dataset.theme = theme.id;
+      b.textContent = theme.id;
+      b.onclick = () => { setTheme(theme.id); _syncPickerDots(); };
+      picker.appendChild(b);
     }
+    _syncPickerDots();
   } catch (e) {
     console.error("Failed to fetch themes:", e);
   }
+}
+
+// Mirror a hidden <select> into a DeetsMusic-style flyout: one menuitemradio
+// per option, dot on the selected one, and a row value chip showing the
+// current choice. The select stays the source of truth — clicking an item
+// sets select.value and fires `change`, so existing wiring is untouched.
+function _mirrorSelectFlyout(selectId, pickerId, valueId) {
+  const sel = document.getElementById(selectId);
+  const picker = document.getElementById(pickerId);
+  if (!sel || !picker) return;
+  picker.innerHTML = "";
+  for (const opt of sel.options) {
+    if (opt.disabled) continue;
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "flyout__item flyout__item--plain";
+    b.setAttribute("role", "menuitemradio");
+    b.textContent = opt.textContent;
+    b.setAttribute("aria-checked", opt.value === sel.value ? "true" : "false");
+    b.onclick = () => {
+      sel.value = opt.value;
+      sel.dispatchEvent(new Event("change"));
+      _mirrorSelectFlyout(selectId, pickerId, valueId);
+    };
+    picker.appendChild(b);
+  }
+  const val = document.getElementById(valueId);
+  if (val) val.textContent = sel.value || "—";
+}
+
+// Reflect the active theme/skin as aria-checked dots in both flyouts.
+function _syncPickerDots() {
+  const html = document.documentElement;
+  document.querySelectorAll("#theme-picker .flyout__item").forEach((b) =>
+    b.setAttribute("aria-checked", b.dataset.theme === html.dataset.theme ? "true" : "false"));
+  document.querySelectorAll("#skin-picker .flyout__item").forEach((b) =>
+    b.setAttribute("aria-checked", b.dataset.skin === html.dataset.skin ? "true" : "false"));
 }
 
 async function fetchSkins() {
@@ -354,15 +547,18 @@ async function fetchSkins() {
     if (!picker || !data.skins || data.skins.length === 0) return;
     picker.innerHTML = "";
     for (const skin of data.skins) {
-      const opt = document.createElement("div");
-      opt.className = "theme-option";
-      opt.onclick = () => setSkin(skin.id);
-      const name = document.createElement("span");
-      name.className = "theme-name";
-      name.textContent = skin.id;
-      opt.appendChild(name);
-      picker.appendChild(opt);
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "flyout__item";
+      b.setAttribute("role", "menuitemradio");
+      // data-skin on the item resolves --font-title etc. to THAT skin, so
+      // each label renders in its own title face (DeetsSolutions pattern).
+      b.dataset.skin = skin.id;
+      b.textContent = skin.id;
+      b.onclick = () => { setSkin(skin.id); _syncPickerDots(); };
+      picker.appendChild(b);
     }
+    _syncPickerDots();
   } catch (e) {
     console.error("Failed to fetch skins:", e);
   }
@@ -604,14 +800,16 @@ function connect() {
     }
 
     switch (msg.type) {
+      // No dividers between thinking/text within a turn — the thinking
+      // block is its own visual separator, and per-transition hrs stacked
+      // into line spam around multi-bout reasoning (think → tool → think).
+      // The turn boundary divider lives in "done".
       case "thinking":
-        if (lastMsgType && lastMsgType !== "thinking") addDivider();
         appendResponse(msg.content, "thinking");
         lastMsgType = "thinking";
         break;
 
       case "text":
-        if (lastMsgType && lastMsgType !== "text") addDivider();
         appendResponse(msg.content);
         lastMsgType = "text";
         break;
@@ -644,6 +842,11 @@ function connect() {
         hidePendingWrites();
         break;
 
+      case "dev_reload":
+        // Server-side file watcher saw a frontend source change. Don't yank
+        // the page out from under an in-flight run — skip while busy.
+        if (!busy) location.reload();
+        break;
       case "reset_complete":
         clearResponse();
         clearContextFiles();
@@ -688,6 +891,7 @@ function connect() {
 
       case "done":
         addDivider();
+        lastMsgType = null;
         busy = false;
         setInputEnabled(true);
         break;
@@ -908,6 +1112,18 @@ function renderMarkdown(text) {
   return DOMPurify.sanitize(marked.parse(text, { breaks: true, gfm: true }));
 }
 
+// The currently-streaming thinking block: consecutive thinking chunks group
+// into one collapsible <details>. Open while streaming; folds shut the
+// moment any other content type arrives, so reasoning stays reviewable
+// without shouting over the answer.
+let currentThinkingBlock = null;
+
+function collapseThinkingBlock() {
+  if (!currentThinkingBlock) return;
+  currentThinkingBlock.open = false;
+  currentThinkingBlock = null;
+}
+
 function appendResponse(text, type = "normal") {
   hideThinking();
   const box = document.getElementById("response-text");
@@ -917,6 +1133,8 @@ function appendResponse(text, type = "normal") {
     _chatBootBuffer.push({ text, type });
     return;
   }
+
+  if (type !== "thinking") collapseThinkingBlock();
 
   if (type === "normal") {
     if (!currentAssistantMsg) {
@@ -932,14 +1150,29 @@ function appendResponse(text, type = "normal") {
   }
 
   currentAssistantMsg = null;
+
+  if (type === "thinking") {
+    if (!currentThinkingBlock) {
+      currentThinkingBlock = document.createElement("details");
+      currentThinkingBlock.className = "thinking-block";
+      currentThinkingBlock.open = true;
+      const summary = document.createElement("summary");
+      summary.textContent = "thinking";
+      const body = document.createElement("div");
+      body.className = "thinking-body";
+      currentThinkingBlock.appendChild(summary);
+      currentThinkingBlock.appendChild(body);
+      box.appendChild(currentThinkingBlock);
+    }
+    currentThinkingBlock.querySelector(".thinking-body")
+      .appendChild(document.createTextNode(text));
+    box.parentElement.scrollTop = box.parentElement.scrollHeight;
+    return;
+  }
+
   const span = document.createElement("span");
   span.textContent = text;
-  if (type === "thinking") { span.style.opacity = "0.35"; span.style.fontStyle = "italic"; }
-  else if (type === "tool")  span.style.opacity = "0.55";
-  else if (type === "user")  span.style.fontWeight = "bold";
-  else if (type === "info")  span.style.opacity = "0.6";
-  else if (type === "error") span.style.color = "#c0392b";
-  else if (type === "compact") { span.style.opacity = "0.7"; span.style.fontStyle = "italic"; }
+  span.className = `msg-${type}`;
   box.appendChild(span);
   box.parentElement.scrollTop = box.parentElement.scrollHeight;
 }
@@ -948,6 +1181,7 @@ function addDivider() {
   const box = document.getElementById("response-text");
   if (!box || !box.hasChildNodes()) return;
   currentAssistantMsg = null;
+  collapseThinkingBlock();
   const hr = document.createElement("hr");
   hr.className = "response-divider";
   box.appendChild(hr);
@@ -955,6 +1189,7 @@ function addDivider() {
 
 function clearResponse() {
   currentAssistantMsg = null;
+  currentThinkingBlock = null;
   const box = document.getElementById("response-text");
   if (!box) return;
   box.innerHTML = "";
@@ -982,6 +1217,8 @@ function setInputEnabled(enabled) {
 // ── Pending writes panel ──────────────────────────
 function showPendingWrites(writes) {
   const files = Object.keys(writes);
+  // Approval gate: queued writes demand attention, so wake to focused.
+  signalPanel("pending_writes", files.length > 0, { wake: "focused" });
   const inner = document.getElementById("pending-panel-inner");
   const count = document.getElementById("pending-count");
   if (!inner || !count) return;
@@ -1002,6 +1239,7 @@ const contextFiles = new Set();
 function addContextFile(path) {
   if (contextFiles.has(path)) return;
   contextFiles.add(path);
+  signalPanel("in_context_files", true);
   // Trigger the panel to refresh from server-side tools.read_files. Direct DOM
   // poke retained for backward compat with anyone querying #context-files
   // before the new panel hydrates.
@@ -1025,6 +1263,7 @@ function updateContextBar(total, max) {
 
 function clearContextFiles() {
   contextFiles.clear();
+  signalPanel("in_context_files", false);
   const el = document.getElementById("context-files");
   if (el) el.innerHTML = "";
 }
@@ -1093,35 +1332,73 @@ function renderToolArgs(name, args) {
   }
 }
 
-function addToolEntry(name, args) {
-  const inner = document.getElementById("tool-panel-inner");
-  if (!inner) return;
+// tool_log is client-push-only (no server-side hydration), so the panel's
+// DOM is rebuilt empty on every tray round-trip. This buffer is the
+// session-long source of truth: every entry lands here, and the panel view
+// re-renders the whole log from it on mount (_flushToolLogBuffer). Capped
+// so a marathon session can't grow it unbounded.
+const _toolLogBuffer = [];
+const _TOOL_LOG_MAX = 200;
 
+function _renderToolEntry(name, args) {
   const entry = document.createElement("div");
   entry.className = "tool-entry";
   entry.innerHTML = `
     <span class="tool-name">${escapeHtml(name)}</span>
     ${renderToolArgs(name, args)}
   `;
-  inner.appendChild(entry);
-  inner.scrollTop = inner.scrollHeight;
-  currentToolEntry = entry;
+  return entry;
 }
 
-function updateToolResult(content) {
-  if (!currentToolEntry) return;
+function _renderToolResult(content) {
   const result = document.createElement("span");
   result.className = "tool-result";
   if (typeof content === "string" && content.startsWith("Error")) {
     result.classList.add("error");
   }
   result.textContent = content.slice(0, 400) + (content.length > 400 ? "…" : "");
-  currentToolEntry.appendChild(result);
+  return result;
+}
+
+function addToolEntry(name, args) {
+  signalPanel("tool_log", true);
+  _toolLogBuffer.push({ name, args, result: undefined });
+  if (_toolLogBuffer.length > _TOOL_LOG_MAX) _toolLogBuffer.shift();
+  const inner = document.getElementById("tool-panel-inner");
+  if (!inner) return;  // trayed — the mount flush will render it
+  const entry = _renderToolEntry(name, args);
+  inner.appendChild(entry);
+  inner.scrollTop = inner.scrollHeight;
+  currentToolEntry = entry;
+}
+
+function updateToolResult(content) {
+  // The buffer record is canonical (it's what a remount re-renders from).
+  const last = _toolLogBuffer[_toolLogBuffer.length - 1];
+  if (last && last.result === undefined) last.result = content;
+  if (!currentToolEntry) return;  // trayed — flush renders result with entry
+  currentToolEntry.appendChild(_renderToolResult(content));
   const inner = document.getElementById("tool-panel-inner");
   if (inner) inner.scrollTop = 999999;
 }
 
+// Called by the tool_log view's inline script on mount: re-render the whole
+// session log into the fresh (empty) container.
+window._flushToolLogBuffer = function () {
+  const inner = document.getElementById("tool-panel-inner");
+  if (!inner || !_toolLogBuffer.length) return;
+  for (const { name, args, result } of _toolLogBuffer) {
+    const entry = _renderToolEntry(name, args);
+    if (result !== undefined) entry.appendChild(_renderToolResult(result));
+    inner.appendChild(entry);
+    currentToolEntry = entry;
+  }
+  inner.scrollTop = inner.scrollHeight;
+};
+
 function clearToolPanel() {
+  signalPanel("tool_log", false);
+  _toolLogBuffer.length = 0;
   const inner = document.getElementById("tool-panel-inner");
   if (inner) inner.innerHTML = "";
   const wrap = document.getElementById("tool-panel");
@@ -1214,13 +1491,10 @@ function isBlogMode() { return currentMode === "blog"; }
 // summoned) and settings (model + mode picker).
 // Per-instance mode-visibility. Looks up by [data-instance="..."] which
 // every panel-shell instance wrapper sets.
-const _PANEL_HIDE_RULES = [
-  { instance: "blog_ops",         showOnlyIn: ["blog"] },
-  { instance: "bot_ops",          hideIn:     ["blog"] },
-  { instance: "in_context_files", hideIn:     ["blog"] },
-  { instance: "task_list",        hideIn:     ["blog"] },
-  { instance: "files",            hideIn:     ["blog"] },
-];
+// Empty since the blog mode was deleted (2026-08); repopulate when a mode
+// needs per-instance visibility again. Keep in sync with panel-shell.js's
+// INSTANCE_MODE_RULES.
+const _PANEL_HIDE_RULES = [];
 
 function applyModeVisibility() {
   for (const r of _PANEL_HIDE_RULES) {
@@ -1255,6 +1529,7 @@ async function loadPromptModes() {
     const saved = localStorage.getItem("harness-mode") || "DeetsCode";
     if (prompts.includes(saved)) sel.value = saved;
     currentMode = sel.value;
+    _mirrorSelectFlyout("prompt-select", "mode-picker", "mode-current");
     applyModeVisibility();
     // Sync the persisted mode to the server. The server defaults to DeetsCode
     // on each new WS connection; without this, a sticky "blog" choice in

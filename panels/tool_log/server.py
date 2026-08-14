@@ -19,10 +19,14 @@ def view() -> str:
 <div class="tool-panel-inner" id="tool-panel-inner"></div>
 <script>
 (function () {
+  // Entries can arrive before this panel mounts (it defaults to the tray
+  // and is woken by app.js's signalPanel on the first tool_call). Drain
+  // whatever app.js buffered in the gap.
+  if (window._flushToolLogBuffer) window._flushToolLogBuffer();
   if (!window.harness || !window.harness.subscribe) return;
   // Tileflow: active while a tool call is in flight, idle once the
-  // turn ends. Stage 1 has no visual effect for active — wiring is
-  // ahead of stage 2 size-class spans.
+  // turn ends. Wake/sleep (dormant ↔ bento) is owned by app.js via
+  // harness.signalContent — these only pulse a mounted panel.
   window.harness.subscribe('tool_log', 'tool_call', () => {
     if (window.harness.setState) window.harness.setState('tool_log', 'active');
   });

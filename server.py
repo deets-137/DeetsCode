@@ -307,6 +307,37 @@ _EVENT_SKIP_TYPES = {"ctx_length", "hello_ack"}
 app = FastAPI()
 client = AsyncOpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
 
+
+@app.on_event("startup")
+async def _start_dev_reload_watcher() -> None:
+    """Dev livereload. `tauri dev` only watches src-tauri/ (Rust); the web
+    frontend has no HMR and index.html's cache-buster only fires on a manual
+    reload — so watch the frontend sources here and broadcast `dev_reload`,
+    which app.js answers with location.reload() (skipped mid-run)."""
+    def _snap() -> dict:
+        state: dict[str, float] = {}
+        for root in (Path("static"), Path("panels"), Path("apps")):
+            if not root.is_dir():
+                continue
+            for p in root.rglob("*"):
+                if p.suffix in {".css", ".js", ".html", ".py", ".json"} and "__pycache__" not in p.parts:
+                    try:
+                        state[str(p)] = p.stat().st_mtime
+                    except OSError:
+                        pass
+        return state
+
+    async def _watch() -> None:
+        prev = _snap()
+        while True:
+            await asyncio.sleep(1.0)
+            cur = _snap()
+            if cur != prev:
+                prev = cur
+                await _broadcast_panel_frame({"type": "dev_reload"})
+
+    asyncio.create_task(_watch())
+
 project_dir: Path = Path(".").resolve()
 auto_apply_enabled: bool = False
 
@@ -460,6 +491,11 @@ def build_focus_block(root: Path) -> str:
     )
 
 
+# System-prompt budget for the file tree (chars). ~8k ≈ a couple thousand
+# tokens — plenty for orientation; anything deeper belongs to list_dir.
+MAX_FILE_TREE_CHARS = 8_000
+
+
 def build_file_tree(root: Path, indent: int = 0, max_depth: int = 4) -> str:
     if indent >= max_depth:
         return ""
@@ -536,6 +572,14 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
     tree_text = state.get("file_tree")
     if not tree_text:
         tree_text = build_file_tree(project_dir)
+        # Budget the tree: on a big project an uncapped listing can swamp the
+        # system prompt (and a small model's attention) before the rules even
+        # start. Cut at a line boundary and say how to see more.
+        if len(tree_text) > MAX_FILE_TREE_CHARS:
+            tree_text = (
+                tree_text[:MAX_FILE_TREE_CHARS].rsplit("\n", 1)[0]
+                + "\n… [file tree truncated — use list_dir to explore deeper]"
+            )
         state["file_tree"] = tree_text
     prompt_template = load_prompt_template(selected_prompt)
     system_prompt = prompt_template.replace("{project_dir}", str(project_dir)).replace("{file_tree}", tree_text)
@@ -695,27 +739,38 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
             await ws.send_json({"type": "tool_result", "name": name, "content": result})
 
             # Auto-refresh the task panel in the UI when update_task writes
-            if name == "update_task" and args.get("content", "").strip():
+            # or clears (the clear path is what sends the panel to the tray).
+            # Any call carrying a content key mutates (empty content = clear);
+            # only the bare no-argument read leaves the file untouched.
+            if name == "update_task" and (args.get("clear") or "content" in args):
                 await ws.send_json({"type": "task_updated"})
 
-            # `set_instance_state` runs side-effect-free in tools/core.py
-            # (just validates + formats a confirmation string). The actual
-            # WS broadcast happens here so the tool can stay sync and so
-            # every connected client — not just the chat WS — sees it.
-            if name == "set_instance_state":
+            # Layout side effects live here (not in tools/core.py) so the
+            # tool functions stay sync and every connected client — not just
+            # the chat WS — sees the frames. The model-facing tool is the
+            # consolidated `layout` (action enum); the per-name checks below
+            # it keep pre-consolidation aliases working.
+            _layout_action = (args.get("action") or "").strip() if name == "layout" else ""
+
+            # Runtime state overlay → tileflow_state frame.
+            if name == "set_instance_state" or _layout_action == "state":
                 inst_id = (args.get("instance") or "").strip()
                 st = (args.get("state") or "").strip()
                 if inst_id and st in _TILEFLOW_STATES:
                     await broadcast_tileflow_state(inst_id, st)
 
-            # `recompute_layout` nudges the client to re-run its flow pass.
-            if name == "recompute_layout":
+            # Recompute → nudge clients to re-run their flow pass.
+            if name == "recompute_layout" or _layout_action == "recompute":
                 await _broadcast_panel_frame({"type": "tileflow_recompute"})
 
-            # Layout-mutating Stage 3 tools write the layout file inside
-            # tools/core.py; on success, every client re-syncs from
-            # /api/layout. Errors (validator rejections) broadcast nothing.
-            if name in _LAYOUT_MUTATING_TOOLS and isinstance(result, str) and result.startswith("OK"):
+            # Layout-sheet mutations write the file inside tools/core.py; on
+            # success, every client re-syncs from /api/layout. Errors
+            # (validator rejections) broadcast nothing.
+            _mutated = (
+                name in _LAYOUT_MUTATING_TOOLS
+                or _layout_action in {"pin", "unpin", "floor", "preset_apply"}
+            )
+            if _mutated and isinstance(result, str) and result.startswith("OK"):
                 await broadcast_layout_updated()
 
             focus = build_focus_block(project_dir)

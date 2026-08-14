@@ -140,11 +140,11 @@ Defaults if `tileflow` block is absent:
 
 ```jsonc
 {
-  "blog": {
+  "some_mode": {
     "tileflow": {
       "instances": {
-        "bot_ops":  { "force_state": "dormant" },
-        "blog_ops": { "force_state": "focused" }
+        "bot_ops":   { "force_state": "dormant" },
+        "task_list": { "force_state": "focused" }
       }
     }
   }
@@ -448,38 +448,43 @@ introduces *user floors*: pins the user (or model) commits become the
 floor for runtime rules — settings stays `medium` even if `dormant`
 fires, because the floor said so.
 
-#### Tools exposed to the local model  *(built 2026-07-06 — all in `tools/core.py`, plus `save_layout_preset` beyond this list; `set_instance_floor` writes the `tileflow` floors block rather than the individual args below)*
+#### Tools exposed to the local model  *(built 2026-07-06; consolidated 2026-07-06 into one `layout` tool)*
 
-Wired through the harness tool layer (alongside the existing read/write
-tools), so they're available in any conversation. Same naming scheme:
-verb-first, snake_case, JSON return.
+**Current surface: a single `layout` tool in `tools/core.py`, selected by
+an `action` enum** — `get`, `panels`, `state`, `pin`, `unpin`, `floor`,
+`recompute`, `preset_apply`, `preset_save`. One name in the deck instead of
+nine keeps a small model's tool-selection attention sharp; the enum gives it
+the full menu inside one schema. The pre-consolidation names below still
+dispatch as compat aliases (old sessions, curl scripts) but no longer ship
+in the model's tool list. Semantics per action are unchanged:
 
-- `get_layout()` → full layout sheet (regions, instances, pins,
+- `get` (was `get_layout()`) → full layout sheet (regions, instances, pins,
   per-instance tileflow blocks). What you'd get from `GET /api/layout`,
   but condensed for context: only the fields a model needs to reason
   about placement (no `mode_overrides`, no manifest mirrors). Includes each instance's *current* tileflow state
   (dormant/idle/active/focused) and resolved size class so the model
   has the runtime picture, not just the persisted floor.
-- `get_panels()` → registry of installed panels with their declared
-  `display.min`, default size class, and one-line `title`. Lets the
+- `panels` (was `get_panels()`) → registry of installed panels with their
+  declared `display.min`, default size class, and one-line `title`. Lets the
   model answer "is there a clock panel?" and "how small can it go?".
-- `pin_instance(instance, col, row, cols, rows)` → calls
+- `pin` (was `pin_instance(instance, col, row, cols, rows)`) → calls
   `POST /api/layout/instances/:id/pin`. Validator errors propagate
   back to the model verbatim ("collides with X", "your span is too
   narrow") so it can self-correct on the next turn.
-- `unpin_instance(instance)` → `DELETE /api/layout/instances/:id/pin`.
-- `set_instance_state(instance, state)` → server-side mirror of the
-  client's `harness.setState`; broadcast over WS so the bento updates
+- `unpin` (was `unpin_instance(instance)`) → `DELETE /api/layout/instances/:id/pin`.
+- `state` (was `set_instance_state(instance, state)`) → server-side mirror of
+  the client's `harness.setState`; broadcast over WS so the bento updates
   live in front of the user. Lets the model say "focus the YouTube
   panel for ten seconds" without needing the client to do anything.
-- `set_instance_floor(instance, locked_size?, locked_floor?, never_dormant?)`
+- `floor` (was `set_instance_floor(instance, locked_size?, locked_floor?, never_dormant?)`)
   → writes per-instance `tileflow` block. The "I want settings to stay
   medium" knob.
-- `apply_layout_preset(name)` → optional convenience: looks up a
-  named preset under `layout/presets/<name>.json` and applies it as a
-  bulk `PUT /api/layout`. Use case: the model says "I'll save this as
+- `preset_apply` (was `apply_layout_preset(name)`) → optional convenience:
+  looks up a named preset under `layout/presets/<name>.json` and applies it
+  as a bulk `PUT /api/layout`. Use case: the model says "I'll save this as
   `coding-mode`" and now the user can ask for that arrangement again
   later. Presets are just layout sheets; same validator gates them.
+  (`preset_save` captures the current sheet; `recompute` forces a flow pass.)
 
 The toolset is intentionally narrow — no "render this panel" or
 "create a new instance" actions in stage 3. Layout is a closed
@@ -682,9 +687,33 @@ one read for orientation. Update as items land.
    satisfy `display.min.height` (`rowsCeilForMin`, MAX_ROWS=4). Settings
    renders 384px tall; the floor generalizes to any panel.
 
+6. ~~**Content-aware flow: default-dormant + `signalContent`**~~ *(landed
+   2026-07-06)* — most panels now ship `default_state: dormant` and earn
+   their bento slot by having content; cold boot is chat + files + clock.
+   New shell API `harness.signalContent(id, hasContent, {wake})` owns the
+   wake/sleep loop (app.js WS handlers signal for the built-in content
+   panels). User-minimize is *sticky*: content badges the tray icon
+   (`.has-badge` dot) instead of re-opening; the tray-icon click clears
+   both. tool_log re-renders from a session-long JS buffer on mount
+   (client-push panels lose DOM in the tray — see panels.md caveat).
+   Chat `grow: true` now fills the left region (shell honors the layout
+   `grow` flag in stack regions). Tray icons are styled from style.css
+   tokens (was inline cssText), and the tray scrolls when tall.
+
+7. ~~**Tool-deck slim-down for small local models**~~ *(landed 2026-07-06)*
+   — the nine layout/tileflow tools collapsed into one `layout` tool with an
+   `action` enum (get/panels/state/pin/unpin/floor/recompute/preset_apply/
+   preset_save); legacy names remain as dispatch-only compat aliases.
+   `roll_dice` now ships only in game modes (`_GAME_MODES` in
+   tools/__init__.py). DeetsCode deck: 24 → 15 tools. Also: register_path
+   guarded to the harness root, null string args coerced, file tree capped
+   at 8k chars in the system prompt, and the DeetsCode prompt examples
+   rewritten as real JSON tool calls (the old pseudo-call notation with
+   inline `\n` was teaching models to write literal backslash-n).
+
 Lower-priority / can wait:
-- Auto-demote ("idle for N minutes → dormant") — Stage 4+ concern.
-- Tray scroll/wrap if it gets too tall — wait until it bites.
+- Auto-demote by *time* ("idle for N minutes → dormant") — emptiness-based
+  demote landed with signalContent; the timer variant is Stage 4+, if ever.
 - Drag-to-pin UI (Stage 3) — model-driven layout via tool calls is
   the primary interaction; manual fallback isn't urgent.
 - FLIP-on-resize for the breakpoint crossing — CSS Grid handles it
@@ -696,12 +725,12 @@ Lower-priority / can wait:
 
 Things we haven't decided. Append answers here as we resolve them.
 
-- **What demotes a panel to dormant automatically?** Stage 1 only honors
-  explicit declarations. Auto-demote ("idle for 5 minutes") is a stage
-  4+ concern, if at all.
-- **Does the tray have a size cap?** What if 12 panels go dormant and
-  we have 40px × 12 = 480px of tray? Probably fine vertically — but
-  worth deciding whether the tray scrolls or wraps.
+- ~~**What demotes a panel to dormant automatically?**~~ Resolved
+  2026-07-06: *emptiness*, not time. `harness.signalContent(id, false)`
+  returns auto-woken panels to the tray; time-based demote remains
+  unbuilt (and may never be needed).
+- ~~**Does the tray have a size cap?**~~ Resolved 2026-07-06: the tray
+  region scrolls (`overflow-y: auto`, thin scrollbar) — no wrap, no cap.
 - **Multi-instance in tray.** Two `youtube_a`/`youtube_b` both dormant —
   do they show distinct icons or merge? Probably distinct (per-instance
   identity matters); icon could append a small numeric badge if needed.
@@ -803,13 +832,9 @@ focus) but snap for boot, mode-switch, and any state change marked
 
 ### Recommended order on resume
 
-1. Stage 1 polish: margins + minimize/restore fade. Standalone commit.
-2. Stage 2 step 1: schema v2 in `loader.py` + `panel_layout.json`
-   migration to a single `bento` region.
-3. Stage 2 step 2: CSS Grid bento + pin → grid-column/row rendering.
-4. Stage 2 step 3: FLIP runner. Size-class transitions ride on it
-   immediately; minimize/restore fade gets upgraded to fade + glide
-   (others fill the gap) as a free side-effect.
+*(All four steps landed as of 2026-07-06 — schema v2, the CSS Grid bento,
+and the FLIP runner are live. Kept for the design rationale above;
+current priorities live in the build docket.)*
 
 ---
 
