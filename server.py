@@ -665,7 +665,9 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
                 continue
 
             raw_extra = getattr(delta, "model_extra", None) or {}
-            reasoning_chunk = raw_extra.get("reasoning") or ""
+            # llama-server streams thoughts as `reasoning_content` (its default
+            # --reasoning-format); `reasoning` was Ollama's name for the same.
+            reasoning_chunk = raw_extra.get("reasoning_content") or raw_extra.get("reasoning") or ""
             if reasoning_chunk:
                 reasoning_buf += reasoning_chunk
                 await ws.send_json({"type": "thinking", "content": reasoning_chunk})

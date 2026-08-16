@@ -8,15 +8,10 @@
   }
 </style>
 
-<div class="chat-input-panel" style="display:flex;gap:6px;">
-  <input id="dir-input" type="text" placeholder="Project path..." style="
-    flex:1; background:var(--textbox-bg); border:none; border-radius:6px;
-    padding:6px 10px; font-family:monospace; font-size:12px; color:var(--textbox-text); outline:none;
-  "/>
-  <button onclick="setDir()" style="
-    background:var(--textbox-bg); border:none; border-radius:6px;
-    padding:6px 10px; font-family:monospace; font-size:12px; cursor:pointer; color:var(--textbox-text);
-  ">set</button>
+<!-- Project-path row: config, not content — quiet until hovered/focused. -->
+<div class="chat-dir-row">
+  <input id="dir-input" class="chat-dir-input" type="text" placeholder="Project path..."/>
+  <button class="chat-dir-btn" onclick="setDir()">set</button>
 </div>
 
 <div class="chat-input-panel chat-composer">

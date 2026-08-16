@@ -130,6 +130,43 @@ body::after {
    only chat-specific layout tweak (overflow:hidden on .panel-content to
    defer scrolling to .response-box) lives inline in panels/chat/view.html. */
 
+/* ── Project-path row ────────────────────────────── */
+/* Session config, not conversation — it fades back until pointed at, so the
+   composer and transcript own the column's visual weight. */
+.chat-dir-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0 var(--space-1);
+  opacity: 0.55;
+  transition: opacity var(--dur-fast) ease;
+}
+.chat-dir-row:hover, .chat-dir-row:focus-within { opacity: 1; }
+.chat-dir-input {
+  flex: 1;
+  background: transparent;
+  border: none;
+  border-bottom: 1px solid var(--divider);
+  padding: 4px 2px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+  color: var(--subtext);
+  outline: none;
+  transition: border-color var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.chat-dir-input:focus { border-bottom-color: var(--accent); color: var(--text); }
+.chat-dir-btn {
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
+  font-family: var(--font-mono);
+  font-size: var(--fs-ui);
+  color: var(--subtext);
+  cursor: pointer;
+}
+.chat-dir-btn:hover { color: var(--accent); }
+
 /* ── Chat input panel (nested rounded rect) ──────── */
 .chat-input-panel {
   background: var(--panel-inset-fill);
@@ -159,7 +196,7 @@ body::after {
   line-height: 1.5;
 }
 
-.chat-textbox::placeholder { color: #999; } /* TODO(theme): semantic color, needs a role (--placeholder-text differs per theme) */
+.chat-textbox::placeholder { color: color-mix(in srgb, var(--text) 40%, transparent); }
 
 .chat-actions {
   display: flex;
@@ -182,6 +219,12 @@ body::after {
 
 .chat-action-btn:hover:not(:disabled) { opacity: 1; }
 .chat-action-btn:disabled { cursor: not-allowed; opacity: 0.35; }
+/* A live run is the one moment `stop` matters — let it glow while armed. */
+#stop-btn:not(:disabled) {
+  color: var(--error);
+  opacity: 0.9;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--error) 35%, transparent) inset;
+}
 
 /* ── Response panel (nested rounded rect) ────────── */
 .response-panel {
@@ -995,11 +1038,13 @@ input:checked + .toggle-slider:before {
    (msg-error used to hardcode a hex). */
 .msg-user {
   display: block;
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text);
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
   border-left: 2px solid var(--accent);
-  padding-left: 10px;
-  margin: var(--space-1) 0;
+  border-radius: 0 var(--radius-inner) var(--radius-inner) 0;
+  padding: 6px 10px;
+  margin: var(--space-3) 0 var(--space-2);
 }
 .msg-info    { opacity: 0.6; }
 .msg-tool    { opacity: 0.55; }
@@ -1012,7 +1057,9 @@ input:checked + .toggle-slider:before {
 .thinking-block {
   margin: var(--space-2) 0;
   border-left: 2px solid var(--divider);
-  padding-left: 10px;
+  border-radius: 0 var(--radius-inner) var(--radius-inner) 0;
+  background: color-mix(in srgb, var(--text) 4%, transparent);
+  padding: 6px 10px;
 }
 .thinking-block summary {
   cursor: pointer;
@@ -1036,10 +1083,10 @@ input:checked + .toggle-slider:before {
 .thinking-block summary:hover { opacity: 0.8; }
 .thinking-block .thinking-body {
   font-size: 0.92em;
-  font-style: italic;
-  opacity: 0.45;
+  opacity: 0.55;
   white-space: pre-wrap;
-  margin-top: 2px;
+  margin-top: var(--space-1);
+  line-height: 1.55;
 }
 
 /* ── Assistant markdown ──────────────────────────── */

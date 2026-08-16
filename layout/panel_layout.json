@@ -4,7 +4,7 @@
     "nw": "activity",
     "ne": "files",
     "sw": "task_list",
-    "se": "web"
+    "se": "bot_ops"
   },
   "anchored": [
     "chat"
