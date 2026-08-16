@@ -20,6 +20,15 @@ from typing import Optional
 pending_writes: dict[str, str] = {}
 read_files: list[str] = []
 
+# Images produced by view_photo during the current tool call, as OpenAI
+# content parts ({"type": "image_url", ...}). server.py drains this right
+# after execute_tool() returns and attaches the parts to the tool-result
+# message, because a tool can only hand back a str. Gemma 4's chat template
+# accepts image parts inside a tool result (verified 2026-08-16 — the model
+# described a photo delivered this way), which is what makes the round trip
+# work without touching the chat message pipeline.
+pending_images: list[dict] = []
+
 
 def clear_pending_writes():
     pending_writes.clear()
@@ -29,8 +38,20 @@ def clear_read_files():
     read_files.clear()
 
 
+def clear_pending_images():
+    pending_images.clear()
+
+
 # Constants shared with coding.py — kept here so there's one source of truth.
 MAX_READ_CHARS = 100_000
+
+# view_photo downscales before encoding. 896 px on the long edge is what the
+# vision tower wants (224 px tiles) and keeps a 33 MP camera JPEG from
+# becoming a 20 MB base64 blob. Raising this does not buy detail — the image
+# token budget, not the pixel count, is what limits what the model sees.
+PHOTO_MAX_EDGE = 896
+PHOTO_JPEG_QUALITY = 88
+PHOTO_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 
 
 TOOL_DEFINITIONS = [
@@ -80,6 +101,27 @@ TOOL_DEFINITIONS = [
                     "clear": {"type": "boolean", "description": "Set true to delete task.md entirely (clears the task list). Takes precedence over content."},
                 },
                 "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "view_photo",
+            "description": (
+                "Look at an image file. Use this whenever the user refers to a "
+                "photo, picture, screenshot, or image and you need to see it to "
+                "answer. The image is returned to you directly — describe what "
+                "you actually see, never guess from the filename. Accepts a "
+                "path relative to the project or an absolute path anywhere on "
+                "disk (photo libraries usually live outside the project)."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string", "description": "Path to the image file. Relative to the project, or absolute."},
+                },
+                "required": ["path"],
             },
         },
     },
@@ -141,6 +183,61 @@ def execute_tool(
             else:
                 read_files.append(rel)
             return content
+
+        if name == "view_photo":
+            if not args.get("path"):
+                return "Error: Missing required argument 'path'"
+            raw = str(args["path"]).strip().strip('"').strip("'")
+            candidate = Path(raw).expanduser()
+            # Absolute paths are allowed on purpose: photo libraries live
+            # outside the project (this one is on the Desktop), so the
+            # project sandbox that read_file enforces would make the tool
+            # useless. This stays defensible because view_photo is read-only
+            # and refuses anything that isn't a decodable image.
+            path = candidate if candidate.is_absolute() else (project_dir / raw)
+            try:
+                path = path.resolve()
+            except OSError as e:
+                return f"Error: bad path: {e}"
+            if not path.exists() or not path.is_file():
+                return f"Error: file not found: {raw}"
+            if path.suffix.lower() not in PHOTO_SUFFIXES:
+                return (
+                    f"Error: '{path.suffix}' is not a viewable image. "
+                    f"Supported: {', '.join(sorted(PHOTO_SUFFIXES))}. "
+                    f"Camera raw (.arw/.cr2/.nef) is not supported yet — "
+                    f"look for a matching JPG beside it."
+                )
+            try:
+                from PIL import Image, ImageOps
+            except ImportError:
+                return "Error: Pillow is not installed — run: pip install Pillow"
+            import base64
+            import io
+            try:
+                with Image.open(path) as im:
+                    # exif_transpose before anything else: a portrait frame
+                    # off this camera carries orientation 8, and an
+                    # un-rotated image makes the model describe a sideways
+                    # scene with total confidence.
+                    im = ImageOps.exif_transpose(im)
+                    original = im.size
+                    im.thumbnail((PHOTO_MAX_EDGE, PHOTO_MAX_EDGE))
+                    buf = io.BytesIO()
+                    im.convert("RGB").save(buf, "JPEG", quality=PHOTO_JPEG_QUALITY)
+            except Exception as e:
+                return f"Error: could not read image '{path.name}': {e}"
+            data = buf.getvalue()
+            pending_images.append({
+                "type": "image_url",
+                "image_url": {"url": "data:image/jpeg;base64," + base64.b64encode(data).decode()},
+            })
+            return (
+                f"[image attached: {path.name} — {original[0]}x{original[1]} "
+                f"original, sent at {im.size[0]}x{im.size[1]}]\n"
+                f"Full path: {path}\n"
+                f"The image follows this text. Describe what you see in it."
+            )
 
         if name == "list_dir":
             if not args.get("path"):

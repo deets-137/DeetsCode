@@ -27,8 +27,10 @@ from .core import (
     TOOL_DEFINITIONS as CORE_TOOLS,
     pending_writes,
     read_files,
+    pending_images,
     clear_pending_writes,
     clear_read_files,
+    clear_pending_images,
 )
 
 # Mode name (matches prompts/<mode>.md) → module name under tools/.

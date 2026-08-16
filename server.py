@@ -270,7 +270,8 @@ elif MODEL not in _installed:
     else:
         print(f"[preflight] WARNING: llama-server has no models — drop GGUFs in its "
               f"--models-dir, or download one with `llama-server -hf <org/repo:quant>`")
-from tools import clear_pending_writes, clear_read_files, load_tools, pending_writes
+from tools import (clear_pending_images, clear_pending_writes, clear_read_files,
+                   load_tools, pending_images, pending_writes)
 from core import storage
 import paths
 
@@ -827,7 +828,13 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
                 args = {}
 
             await ws.send_json({"type": "tool_call", "name": name, "args": args})
+            clear_pending_images()
             result = execute_tool(name, args, session_id or "unknown", project_dir, user_name=user_name)
+            # view_photo can only return a str, so it parks the encoded image
+            # here and we attach it to the tool-result message below. Drained
+            # immediately: a stale part would follow the wrong tool call.
+            images = list(pending_images)
+            clear_pending_images()
             await ws.send_json({"type": "tool_result", "name": name, "content": result})
 
             # Auto-refresh the task panel in the UI when update_task writes
@@ -839,12 +846,25 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
 
             focus = build_focus_block(project_dir)
             directive = focus if focus else "<system>\nACTION: continue the user's original task. if complete, emit final reply and stop.\n</system>"
+            def _tool_content(text: str):
+                """Plain str normally; content parts when a tool attached images.
+
+                Gemma 4's template walks a tool result's parts and emits an
+                <|image|> marker for each image part, so this is the supported
+                shape — no change to the user-message pipeline is needed. A
+                model without vision never calls view_photo, so it never sees
+                the list form."""
+                if not images:
+                    return text
+                return [{"type": "text", "text": text}, *images]
+
             tool_msg_history = {
                 "role": "tool",
                 "tool_call_id": tc["id"],
-                "content": f"<tool_result>\n{result}\n</tool_result>",
+                "content": _tool_content(f"<tool_result>\n{result}\n</tool_result>"),
             }
-            loop_messages.append({**tool_msg_history, "content": f"<tool_result>\n{result}\n</tool_result>\n\n{directive}"})
+            loop_messages.append({**tool_msg_history,
+                                  "content": _tool_content(f"<tool_result>\n{result}\n</tool_result>\n\n{directive}")})
             messages.append(tool_msg_history)
 
         if pending_writes and auto_apply_enabled:
