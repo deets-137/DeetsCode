@@ -19,10 +19,17 @@ from __future__ import annotations
 
 import atexit
 import json
+import platform
 import shutil
 import subprocess
+import time
 import urllib.parse
 import urllib.request
+
+# Last completed turn's llama-server timings, stashed by server.py's stream
+# loop from the final chunk's `timings` object (+ "model" and "ts" keys).
+# Read by the llm_ops panel. Empty until the first turn finishes.
+last_turn_timings: dict = {}
 
 
 def root_url(base_url: str) -> str:
@@ -80,6 +87,76 @@ def context_length(base_url: str, model: str) -> int | None:
 
 def is_up(base_url: str) -> bool:
     return _get_json(root_url(base_url) + "/health", timeout=2) is not None
+
+
+def _post_json(url: str, payload: dict, timeout: float = 30) -> dict | None:
+    try:
+        req = urllib.request.Request(
+            url, data=json.dumps(payload).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read())
+    except Exception:
+        return None
+
+
+def load_model(base_url: str, model: str) -> bool:
+    """Router-mode load. Slow (tens of seconds for a big model) — call it
+    off-loop. Loading also happens implicitly when a request names a model."""
+    r = _post_json(root_url(base_url) + "/models/load", {"model": model}, timeout=300)
+    return bool(r and r.get("success"))
+
+
+def unload_model(base_url: str, model: str) -> bool:
+    r = _post_json(root_url(base_url) + "/models/unload", {"model": model}, timeout=30)
+    return bool(r and r.get("success"))
+
+
+# ── GPU / RAM sampling (Windows) ─────────────────────────────────────────────
+# Perf counters via a PowerShell one-shot. ~1-2 s per sample, so results are
+# cached; callers go through asyncio.to_thread (subprocess = blocking).
+
+_MEM_CACHE: dict = {"ts": 0.0, "data": None}
+_MEM_TTL = 5.0
+
+_MEM_PS = (
+    "$s=(Get-Counter '\\GPU Process Memory(*)\\Dedicated Usage',"
+    "'\\GPU Process Memory(*)\\Shared Usage' -ErrorAction SilentlyContinue).CounterSamples;"
+    "$a=((Get-Counter '\\GPU Adapter Memory(*)\\Dedicated Usage' -ErrorAction SilentlyContinue"
+    ").CounterSamples | Where-Object {$_.CookedValue -gt 0} | Measure-Object CookedValue -Sum).Sum;"
+    "$procs=@(Get-Process llama-server -ErrorAction SilentlyContinue | ForEach-Object {"
+    "$p=$_.Id; $tag=('pid_'+$p+'_');"
+    "[pscustomobject]@{pid=$p;"
+    "vram=[long](($s | Where-Object {$_.Path -like '*dedicated*' -and $_.InstanceName -like ('*'+$tag+'*')} | Measure-Object CookedValue -Sum).Sum);"
+    "shared=[long](($s | Where-Object {$_.Path -like '*shared*' -and $_.InstanceName -like ('*'+$tag+'*')} | Measure-Object CookedValue -Sum).Sum);"
+    "ram=[long]$_.WorkingSet64} });"
+    "@{adapter_total=[long]$a; procs=$procs} | ConvertTo-Json -Compress"
+)
+
+
+def memory_snapshot() -> dict | None:
+    """{'adapter_total': bytes, 'procs': [{'pid','vram','shared','ram'}]} for
+    every llama-server process, or None off-Windows / on failure. `shared` is
+    GPU-visible system RAM — the spillover number. Cached for a few seconds;
+    blocking (~1-2 s on a cache miss) so call via asyncio.to_thread."""
+    if platform.system() != "Windows":
+        return None
+    now = time.time()
+    if _MEM_CACHE["data"] is not None and now - _MEM_CACHE["ts"] < _MEM_TTL:
+        return _MEM_CACHE["data"]
+    try:
+        out = subprocess.run(
+            ["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _MEM_PS],
+            capture_output=True, text=True, timeout=15,
+        ).stdout.strip()
+        data = json.loads(out) if out else None
+        if data is not None and isinstance(data.get("procs"), dict):
+            data["procs"] = [data["procs"]]  # ConvertTo-Json unwraps 1-elem arrays
+    except Exception:
+        data = None
+    _MEM_CACHE.update(ts=now, data=data)
+    return data
 
 
 _spawned: subprocess.Popen | None = None

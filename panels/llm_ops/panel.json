@@ -1,0 +1,21 @@
+{
+  "schema": 1,
+  "name": "llm_ops",
+  "title": "LLM ops",
+  "tier": 3,
+  "author": "deets",
+  "handler": "server:view",
+  "actions": ["load_model", "unload_model"],
+  "permissions": { "network": ["http://localhost:8080"], "reads": [], "writes": [] },
+  "display": {
+    "shape": "square",
+    "preferred": { "width": 420, "height": 320 },
+    "min":       { "width": 260, "height": 160 },
+    "max":       { "width": null, "height": null },
+    "scroll": "internal",
+    "growable": false
+  },
+  "anchored": false,
+  "icon": "🧠",
+  "pool": true
+}

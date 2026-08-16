@@ -139,6 +139,52 @@ def strip_hidden(text: str) -> str:
 strip_think = strip_hidden
 
 
+def _parse_text_tool_call(text: str, names: set[str]) -> tuple[str, str] | None:
+    """Recognize a tool call emitted as plain text.
+
+    Models whose GGUF chat template can't express tools (bare ChatML — the
+    Ollama-imported lfm2.5 blob is the canonical case) never receive tool
+    schemas, but the mode prompt teaches the JSON call shape, so they emit
+    the call as content. Two shapes are recognized:
+
+        {"name": "read_file", "arguments": {"path": "x"}}          (whole message)
+        <|tool_call_start|>[read_file(path="x")]<|tool_call_end|>  (LFM2 family)
+
+    Returns (name, arguments_json) or None. Deliberately strict: the JSON
+    form must be the *entire* message (fenced ok) — an object quoted
+    mid-prose must never hijack the turn.
+    """
+    import ast
+    t = text.strip()
+    m = re.search(r"<\|tool_call_start\|>\s*\[?(.*?)\]?\s*<\|tool_call_end\|>", t, re.DOTALL)
+    if m:
+        try:
+            call = ast.parse(m.group(1).strip(), mode="eval").body
+            if (isinstance(call, ast.Call) and isinstance(call.func, ast.Name)
+                    and call.func.id in names and not call.args):
+                kwargs = {k.arg: ast.literal_eval(k.value) for k in call.keywords if k.arg}
+                return call.func.id, json.dumps(kwargs)
+        except (SyntaxError, ValueError):
+            pass
+        return None
+    fence = re.fullmatch(r"```(?:json)?\s*(\{.*\})\s*```", t, re.DOTALL)
+    if fence:
+        t = fence.group(1)
+    if not (t.startswith("{") and t.endswith("}")):
+        return None
+    try:
+        obj = json.loads(t)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    name = obj.get("name")
+    args = obj.get("arguments", obj.get("parameters"))
+    if name in names and isinstance(args, dict):
+        return name, json.dumps(args)
+    return None
+
+
 def load_prompt_template(name: str = "DeetsCode") -> str:
     # Backcompat: sessions saved before the coding-mode rename have
     # prompt="default". Transparently redirect to DeetsCode.
@@ -660,6 +706,14 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
         async for chunk in stream:
             if chunk.usage:
                 state["usage_tokens"] = chunk.usage.total_tokens
+            # llama-server attaches a `timings` object to the final chunk;
+            # stash it for the llm_ops panel's tok/s readout.
+            _chunk_extra = getattr(chunk, "model_extra", None) or {}
+            if _chunk_extra.get("timings"):
+                import time as _time
+                llm_backend.last_turn_timings = {
+                    **_chunk_extra["timings"], "model": current_model, "ts": _time.time(),
+                }
             delta = chunk.choices[0].delta if chunk.choices else None
             if delta is None:
                 continue
@@ -698,6 +752,18 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
             await ws.send_json({"type": "thinking", "content": tail_thinking})
         if tail_visible:
             await ws.send_json({"type": "text", "content": tail_visible})
+        if not tool_calls_buf:
+            # Fallback for models whose chat template can't express tools
+            # (e.g. a GGUF with a bare-ChatML template): they never receive
+            # schemas, but the mode prompt teaches the JSON call shape, so
+            # they emit the call as plain text. Recognize it and execute.
+            _rescued = _parse_text_tool_call(
+                strip_think(content_buf), {t["function"]["name"] for t in tool_defs}
+            )
+            if _rescued is not None:
+                _rname, _rargs = _rescued
+                tool_calls_buf[0] = {"id": "", "name": _rname, "arguments": _rargs}
+                await ws.send_json({"type": "info", "content": f"(recovered tool call from text: {_rname})"})
         if not tool_calls_buf:
             stripped = strip_think(content_buf)
             # Rescue path: Qwen3 sometimes forgets to close </think>, which

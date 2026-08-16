@@ -3,7 +3,7 @@
   "slots": {
     "nw": "activity",
     "ne": "files",
-    "sw": "task_list",
+    "sw": "llm_ops",
     "se": "bot_ops"
   },
   "anchored": [
