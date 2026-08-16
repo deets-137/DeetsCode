@@ -112,7 +112,7 @@ connected tab re-syncs live (no reload).
 
 | Method | URL | Purpose |
 |---|---|---|
-| GET | `/api/ollama/ps` | Loaded Ollama models + GPU/CPU split. What the titlebar status strip polls; useful on its own for "did the model spill out of VRAM". |
+| GET | `/api/llm/status` | llama-server's model roster with load states (`loaded`/`loading`/`unloaded`). What the titlebar status strip polls; useful on its own for "which model is actually resident". |
 
 ### Interaction log (system_log)
 
@@ -131,7 +131,7 @@ for the meta shape per kind.
 |---|---|---|
 | GET | `/api/prompts` | Available system-prompt modes (`prompts/*.md` filenames). |
 | GET | `/api/task` | Current `task.md` content (the model's plan checklist). |
-| GET | `/models` | Installed Ollama models (queries the local Ollama API). |
+| GET | `/models` | Models llama-server can serve, loaded or not (queries its router `/models` listing). |
 | GET | `/tree` | File-tree JSON for the current project dir. |
 | GET / DELETE | `/pending` | Pending writes the model has queued for approval. |
 | GET | `/api/events` | Recorded WS frames for a session (replay surface). |

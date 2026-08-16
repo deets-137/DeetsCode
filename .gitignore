@@ -57,3 +57,6 @@ node_modules/
 src-tauri/target/
 src-tauri/gen/
 package-lock.json
+
+# Local llama-server presets (machine-specific paths; llama-server.example.ini is the tracked template)
+llama-server.ini

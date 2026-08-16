@@ -50,21 +50,20 @@ remains on disk as the server-side renderer for the Context flyout *and* for
 the Files tile's "In context" tab; it sets `"pool": false` so it is never
 offered a slot of its own.
 
-**The titlebar right side is a status strip** — the clock and Ollama's
-GPU/CPU split (`GET /api/ollama/ps`, parsed in `core/ollama.py`). Both used
-to be bento tiles; neither was ever worth one.
+**The titlebar right side is a status strip** — the clock and llama-server's
+loaded-model state (`GET /api/llm/status`, backed by `core/llama_server.py`).
+Both used to be bento tiles; neither was ever worth one.
 
-> **Gotcha, paid for once:** `core/ollama.py` shells out to `ollama ps`, and
-> the endpoint polls on a timer. Two rules hold it together. (1) It runs via
-> `asyncio.to_thread` — a blocking subprocess called inline from an `async def`
-> freezes the whole event loop, and because uvicorn only logs on response
-> completion, the symptom is every panel rendering blank with *nothing* in the
-> log. (2) It captures to a temp file, not a pipe: with no daemon running,
-> `ollama ps` auto-starts one, the daemon inherits the pipe's write handle and
-> never closes it, so subprocess's reader threads never see EOF — and
-> `subprocess.run`'s `timeout=` does **not** cover that final thread join, so
-> it hangs forever. Don't "simplify" either back to a plain `capture_output`
-> call.
+> **Gotcha, paid for once (Ollama era, lesson survives):** anything blocking
+> called inline from an `async def` endpoint freezes the whole event loop, and
+> because uvicorn only logs on response completion, the symptom is every panel
+> rendering blank with *nothing* in the log. That's why `/api/llm/status` and
+> `fetch_context_length` wrap their blocking urllib helpers in
+> `asyncio.to_thread`. (The other half of the old gotcha — `ollama ps`
+> auto-starting a daemon that inherits a pipe handle and hangs `subprocess.run`
+> past its own timeout — died with `core/ollama.py`; the war story is in git
+> history on that file. Related survivor: an autostarted `llama-server`'s
+> stdout goes to `.harness/llama-server.log`, never a pipe nobody reads.)
 
 **Dev livereload**: a startup watcher in server.py broadcasts `dev_reload`
 over the panel WS when anything under `static/` or `panels/`

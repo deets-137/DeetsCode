@@ -505,7 +505,7 @@ any that set `"pool": false`.
 | GET    | `/api/layout`                                | Resolved slot sheet + `pool` + `warnings` |
 | PUT    | `/api/layout`                                | Replace the slot sheet (four distinct pool panels, else 400; broadcasts `layout_updated`) |
 | POST   | `/api/panels/<name>/summon`                  | Ask every client to give this panel a slot (broadcasts `panel_summon`) |
-| GET    | `/api/ollama/ps`                             | Loaded Ollama models + GPU/CPU split — feeds the titlebar status strip |
+| GET    | `/api/llm/status`                            | llama-server model roster + load states — feeds the titlebar status strip |
 | GET    | `/panels/<name>/view?instance=<name>`        | Tier-1/3 rendered HTML body |
 | POST   | `/panels/<name>/action/<fn>`                 | Invoke a whitelisted tier-3 action (manifest `actions`); called as `fn(body=<parsed JSON>)` |
 | GET    | `/panels/<name>/static/<file>`               | Panel-local static asset |

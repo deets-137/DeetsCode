@@ -9,9 +9,9 @@ from pathlib import Path
 from typing import Optional
 
 # ── Hidden blocks ────────────────────────────────────────────────────────────
-# Reasoning tags, by model family. Ollama's OpenAI-compat endpoint exposes some
-# models' reasoning through the `reasoning` delta field, but many emit it inline
-# in content instead, and each family picked its own tag. Listing them all is
+# Reasoning tags, by model family. Some OpenAI-compat backends expose reasoning
+# through the `reasoning` delta field, but many models emit it inline in
+# content instead, and each family picked its own tag. Listing them all is
 # free: a tag a model never emits simply never matches. Add new families here —
 # this is the only place tag names are written down.
 REASONING_TAGS = [
@@ -158,67 +158,72 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from openai import AsyncOpenAI
 
-def _list_ollama_models(base_url: str) -> list[str] | None:
-    """Query Ollama for installed model names. Returns None if Ollama is
-    unreachable (so callers can distinguish 'not running' from 'running but
-    empty'). Uses stdlib urllib to avoid pulling in httpx this early."""
-    import json as _json
-    import urllib.request
-    tags_url = base_url.replace("/v1", "") + "/api/tags"
-    try:
-        with urllib.request.urlopen(tags_url, timeout=2) as r:
-            data = _json.loads(r.read())
-        return [m["name"] for m in data.get("models", [])]
-    except Exception:
-        return None
-
+from core import llama_server as llm_backend
 
 _config_path = Path(__file__).parent / "config.py"
 if not _config_path.exists():
     _example = _config_path.with_name("config.example.py")
-    # Read example to learn the default OLLAMA_BASE_URL, then try to pick a
-    # real installed model so a fresh device works without manual edits.
+    # Read example to learn the default LLM_BASE_URL, then try to pick a real
+    # available model so a fresh device works without manual edits.
     example_src = _example.read_text(encoding="utf-8")
-    example_url = "http://localhost:11434/v1"
+    example_url = "http://localhost:8080/v1"
     for line in example_src.splitlines():
-        if line.startswith("OLLAMA_BASE_URL"):
+        if line.startswith("LLM_BASE_URL"):
             example_url = line.split("=", 1)[1].strip().strip('"').strip("'")
             break
-    installed = _list_ollama_models(example_url)
+    installed = llm_backend.model_names(example_url)
     if installed:
         picked = installed[0]
         new_src = re.sub(r'MODEL\s*=\s*"[^"]*"', f'MODEL = "{picked}"', example_src, count=1)
         _config_path.write_text(new_src, encoding="utf-8")
-        print(f"[setup] created config.py with MODEL=\"{picked}\" (auto-picked from Ollama)")
+        print(f"[setup] created config.py with MODEL=\"{picked}\" (auto-picked from llama-server)")
     else:
         shutil.copyfile(_example, _config_path)
-        print(f"[setup] created config.py from {_example.name} — Ollama not reachable, edit MODEL by hand")
+        print(f"[setup] created config.py from {_example.name} — llama-server not reachable, edit MODEL by hand")
 
-from config import HOST, MODEL, OLLAMA_BASE_URL, PORT, TEMPERATURE
+import config as _cfg
+from config import HOST, PORT, TEMPERATURE
+MODEL = getattr(_cfg, "MODEL", "")
+LLM_BASE_URL = getattr(_cfg, "LLM_BASE_URL", "http://localhost:8080/v1")
+if hasattr(_cfg, "OLLAMA_BASE_URL") and not hasattr(_cfg, "LLM_BASE_URL"):
+    print("[preflight] config.py predates the llama-server swap (has OLLAMA_BASE_URL, no "
+          "LLM_BASE_URL) — delete config.py and restart to regenerate, or port it to the "
+          f"shape of config.example.py. Using {LLM_BASE_URL} for now.")
+import paths
 
-# Preflight: warn loudly if the configured model isn't installed. Don't crash —
+# Autostart llama-server (router mode) if it isn't already up; no-op when
+# LLAMA_SERVER_EXE is "" or the server is reachable.
+_llm_exe = getattr(_cfg, "LLAMA_SERVER_EXE", "llama-server")
+if _llm_exe:
+    paths.LLAMA_SERVER_LOG.parent.mkdir(parents=True, exist_ok=True)
+    print("[preflight] " + llm_backend.ensure_running(
+        LLM_BASE_URL, _llm_exe,
+        getattr(_cfg, "LLAMA_SERVER_ARGS", ["--port", "8080", "-ngl", "99"]),
+        paths.LLAMA_SERVER_LOG))
+
+# Preflight: warn loudly if the configured model isn't available. Don't crash —
 # the UI's model picker can override via ACTIVE_MODEL_FILE.
-_installed = _list_ollama_models(OLLAMA_BASE_URL)
+_installed = llm_backend.model_names(LLM_BASE_URL)
 if _installed is None:
-    print(f"[preflight] WARNING: Ollama not reachable at {OLLAMA_BASE_URL} — start it with `ollama serve`")
+    print(f"[preflight] WARNING: llama-server not reachable at {LLM_BASE_URL} — start it "
+          f"(router mode: `llama-server --models-dir <ggufs>`) or set LLAMA_SERVER_EXE in config.py")
 elif MODEL not in _installed:
     if _installed:
         # Either MODEL is empty (config.example's default — "just use what I
-        # have") or it's stale, e.g. the model was deleted. Rather than boot
-        # against a model Ollama doesn't have, fall back to whatever's installed
-        # (same 'first installed' convention as the config-creation auto-pick).
+        # have") or it's stale, e.g. the GGUF was removed. Rather than boot
+        # against a model llama-server doesn't have, fall back to whatever's
+        # available (same 'first installed' convention as the config auto-pick).
         # The UI model picker still overrides this via ACTIVE_MODEL_FILE.
         _fallback = _installed[0]
         if MODEL:
-            print(f"[preflight] MODEL=\"{MODEL}\" not installed — falling back to \"{_fallback}\". Installed: {_installed}")
+            print(f"[preflight] MODEL=\"{MODEL}\" not available — falling back to \"{_fallback}\". Available: {_installed}")
         else:
-            print(f"[preflight] MODEL unset — using \"{_fallback}\". Installed: {_installed}")
+            print(f"[preflight] MODEL unset — using \"{_fallback}\". Available: {_installed}")
         print(f"[preflight] pin a specific one by editing config.py or using the UI model picker.")
         MODEL = _fallback
-    elif MODEL:
-        print(f"[preflight] WARNING: MODEL=\"{MODEL}\" not installed and Ollama has no models — run `ollama pull {MODEL}`")
     else:
-        print(f"[preflight] WARNING: Ollama has no models installed — run `ollama pull <model>`")
+        print(f"[preflight] WARNING: llama-server has no models — drop GGUFs in its "
+              f"--models-dir, or download one with `llama-server -hf <org/repo:quant>`")
 from tools import clear_pending_writes, clear_read_files, load_tools, pending_writes
 from core import storage
 import paths
@@ -319,7 +324,7 @@ def list_live_sessions() -> list[str]:
 _EVENT_SKIP_TYPES = {"ctx_length", "hello_ack"}
 
 app = FastAPI()
-client = AsyncOpenAI(base_url=OLLAMA_BASE_URL, api_key="ollama")
+client = AsyncOpenAI(base_url=LLM_BASE_URL, api_key="llama-server")
 
 
 @app.on_event("startup")
@@ -429,18 +434,11 @@ def delete_session(session_id: str):
 
 
 async def fetch_context_length(model: str) -> int:
-    import httpx
-    show_url = OLLAMA_BASE_URL.replace("/v1", "") + "/api/show"
-    try:
-        async with httpx.AsyncClient(timeout=5) as hc:
-            r = await hc.post(show_url, json={"name": model})
-            info = r.json().get("model_info", {})
-            for key in info:
-                if "context_length" in key:
-                    return int(info[key])
-    except Exception:
-        pass
-    return 131072
+    """Serving context length from llama-server's /props. For a model that
+    isn't loaded yet this returns the default; the ctx_length frame after the
+    first request will correct it."""
+    n = await asyncio.to_thread(llm_backend.context_length, LLM_BASE_URL, model)
+    return n or 131072
 
 
 # Project-scoped reference docs (markdown under `manual/`) have no model-facing
@@ -713,7 +711,7 @@ async def _agent_loop_impl(ws: WebSocket, user_content: str, messages: list, sta
                 messages.append({"role": "assistant", "content": stripped})
             break
 
-        # Ensure all tool calls have an ID (some models/Ollama streams omit them)
+        # Ensure all tool calls have an ID (some models/backends omit them)
         for tc in tool_calls_buf.values():
             if not tc["id"]:
                 tc["id"] = "call_" + uuid.uuid4().hex[:8]
@@ -793,8 +791,8 @@ async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_
         await _agent_loop_impl(ws, user_content, messages, state, selected_prompt, session_id, user_name)
     except asyncio.CancelledError:
         # asyncio.cancel() alone doesn't reliably kill the underlying HTTP stream
-        # to Ollama — httpx cancellation can be delayed on Windows. Force-close
-        # so the Ollama POST actually terminates instead of running to completion.
+        # to llama-server — httpx cancellation can be delayed on Windows. Force-
+        # close so the POST actually terminates instead of running to completion.
         s = state.get("stream")
         if s is not None:
             try:
@@ -828,15 +826,12 @@ async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_
 
 @app.get("/models")
 async def get_models():
-    import urllib.request
-    try:
-        url = OLLAMA_BASE_URL.replace("/v1", "/api/tags")
-        req = urllib.request.urlopen(url, timeout=5)
-        data = json.loads(req.read())
-        models = [m["name"] for m in data.get("models", [])]
-        return JSONResponse({"models": models, "current": current_model})
-    except Exception as e:
-        return JSONResponse({"models": [], "current": current_model, "error": str(e)})
+    """Every model llama-server can serve (router mode lists unloaded ones
+    too — asking for one in a chat request is what loads it)."""
+    models = await asyncio.to_thread(llm_backend.model_names, LLM_BASE_URL)
+    if models is None:
+        return JSONResponse({"models": [], "current": current_model, "error": "llama-server unreachable"})
+    return JSONResponse({"models": models, "current": current_model})
 
 
 @app.get("/api/task")
@@ -983,19 +978,17 @@ async def panel_static(name: str, file: str):
     return FileResponse(target)
 
 
-@app.get("/api/ollama/ps")
-async def get_ollama_ps():
-    """Which models Ollama currently has loaded, and their GPU/CPU split.
-    Feeds the titlebar status strip (see docs/slots.md — this used to be a
-    bento tile). Returns `{models: [...]}`; an empty list means "nothing
-    loaded" or "ollama not installed", which the strip renders identically.
+@app.get("/api/llm/status")
+async def get_llm_status():
+    """llama-server's model roster with load states ("loaded" / "loading" /
+    "unloaded" / ...). Feeds the titlebar status strip. `reachable: false`
+    means the server itself is down, which the strip renders as hidden.
 
-    Off-loop: ollama.ps() shells out, and a subprocess call can block for
-    longer than its own timeout (see core/ollama.py). Calling it inline from
-    an async endpoint froze the whole event loop, which read as every panel
-    rendering blank -- their view fetches were queued behind it."""
-    from core import ollama
-    return JSONResponse({"models": await asyncio.to_thread(ollama.ps)})
+    Off-loop via to_thread: the helper uses blocking urllib, and anything
+    blocking called inline from an async endpoint freezes the whole event
+    loop (the old ollama ps version of this froze every panel blank)."""
+    rows = await asyncio.to_thread(llm_backend.list_models, LLM_BASE_URL)
+    return JSONResponse({"reachable": rows is not None, "models": rows or []})
 
 
 @app.get("/api/layout")

@@ -244,7 +244,9 @@ All six phases landed together on 2026-08-15.
    the same day);
    `layout/presets/` and `paths.LAYOUT_PRESETS_DIR` removed with the last
    preset consumer. Ollama moved to `core/ollama.py` + `GET /api/ollama/ps`
-   + the titlebar status strip; time joined it there; slash commands became
+   + the titlebar status strip (both replaced by `core/llama_server.py` +
+   `GET /api/llm/status` in the Aug 2026 llama.cpp swap; Ollama itself is
+   gone); time joined it there; slash commands became
    a `/` typeahead in the composer (`SLASH_COMMANDS` in app.js is now the
    single table behind both the typeahead and `/help`).
 1. **Teardown contract.** ✅ `harness.onUnmount(panel, fn)`, run before

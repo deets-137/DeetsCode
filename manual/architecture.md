@@ -1,9 +1,9 @@
 # Harness architecture
 
 The harness is a local single-user agent. User types in the browser (or Discord
-via `discord_bot.py`) → FastAPI server relays to a local Ollama model
-(OpenAI-compatible API) → model emits tool calls → server executes them →
-result streams back.
+via `discord_bot.py`) → FastAPI server relays to a local llama-server model
+(llama.cpp router mode, OpenAI-compatible API) → model emits tool calls →
+server executes them → result streams back.
 
 Modes swap the system prompt AND the available tool pack together. DeetsCode
 (coding) is the only live mode — the chess/dnd/blog packs were deleted Aug
@@ -31,7 +31,7 @@ storage.py        SQLite wrapper: sessions, games, moves, events, system_log.
 discord_bot.py    Alternate frontend (dormant). Shares server-side logic.
 bot_cogs/         Bot helpers: bot_media.py per-tool media extractors,
                   notes.py, stats.py. Dormant with the bot.
-config.py         MODEL, OLLAMA_BASE_URL, HOST, PORT, TEMPERATURE, etc.
+config.py         MODEL, LLM_BASE_URL, LLAMA_SERVER_EXE/ARGS, HOST, PORT, etc.
 CLAUDE.md         Project notes for Claude sessions: paths.py rule, modes
                   status, panel-system pointers.
 prompts/          Per-mode prompt files (DeetsCode.md only today).

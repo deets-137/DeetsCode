@@ -10,7 +10,7 @@ single user, state in module globals + per-WebSocket locals + SQLite.
 | GET    | `/tree`      | `{tree: [...], root: str}` JSON of files    | `refreshTree()`     |
 | GET    | `/pending`   | `{writes: {path: content}}` (debug)         | manual curl only    |
 | GET    | `/api/prompts` | `{prompts: [name, …]}`                    | mode picker         |
-| GET    | `/models`    | Ollama model list                           | model picker        |
+| GET    | `/models`    | llama-server model list                     | model picker        |
 | GET    | `/api/events/sessions` | `{sessions: [{session_id, events, last_ts, live}]}` | bot-ops inventory panel |
 | GET    | `/api/events/{sid}`    | tail of recorded frames for a session     | bot-ops spectate panel  |
 | POST   | `/api/session/{sid}/control` | `{action, ...}` → routes to live session's control queue | bot-ops control panel, external scripts |

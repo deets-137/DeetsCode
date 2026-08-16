@@ -1803,7 +1803,7 @@ html.is-tauri .lights { display: flex; }
 
 
 /* ── Titlebar status strip ────────────────────────────────────────────── */
-/* Time + Ollama's GPU/CPU split, on the right of the titlebar. Both were
+/* Time + llama-server's loaded model, on the right of the titlebar. Both were
    bento tiles until the slot rework demoted them (docs/slots.md). Read-only
    and non-interactive by design — the titlebar is chrome, not a panel. */
 .statusstrip {
@@ -1824,25 +1824,25 @@ html.is-tauri .lights { display: flex; }
   letter-spacing: 0.3px;
 }
 
-.status-ollama {
+.status-llm {
   display: inline-flex;
   align-items: center;
   gap: 5px;
   font-variant-numeric: tabular-nums;
   opacity: 0.75;
 }
-.status-ollama[hidden] { display: none; }
-.status-ollama::before {
+.status-llm[hidden] { display: none; }
+.status-llm::before {
   content: "";
   width: 6px;
   height: 6px;
   border-radius: 50%;
   background: var(--go);
 }
-/* More CPU than GPU means the model spilled out of VRAM — worth noticing at
-   a glance, which is the only thing this strip is for. */
-.status-ollama.is-cpu-heavy { opacity: 1; }
-.status-ollama.is-cpu-heavy::before { background: var(--pause); }
+/* A model mid-load (router mode swaps take a few seconds) — worth noticing
+   at a glance, which is the only thing this strip is for. */
+.status-llm.is-loading { opacity: 1; }
+.status-llm.is-loading::before { background: var(--pause); }
 
 /* ── Composer slash typeahead ─────────────────────────────────────────── */
 /* Replaces the slash_commands panel: a list you click was strictly worse

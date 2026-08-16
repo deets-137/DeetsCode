@@ -22,7 +22,7 @@ Config (defaults in the block below; all overridable via .env):
   AUTO_APPLY        — auto-write queued files without asking Discord for confirmation
   PROMPT_MODE       — default server prompt mode
   HARNESS_WS        — WebSocket URL of the running harness
-  OLLAMA_URL        — Ollama base URL (used by /health)
+  LLM_URL           — llama-server root URL (used by /health)
 """
 
 import asyncio
@@ -92,8 +92,8 @@ PROMPT_MODE = os.environ.get("PROMPT_MODE", "DeetsCode")
 
 HARNESS_WS = os.environ.get("HARNESS_WS", "ws://localhost:8000/ws")
 
-# Ollama base URL, used only by /health.
-OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
+# llama-server root URL (no /v1), used only by /health.
+LLM_URL = os.environ.get("LLM_URL", "http://localhost:8080")
 
 # Seconds to wait on any single WS recv before giving up
 RECV_TIMEOUT = 120.0
@@ -474,7 +474,7 @@ async def _simple_ws_action(interaction: discord.Interaction, payload: dict, exp
 async def slash_reset(interaction: discord.Interaction):
     # Deliberately does NOT acquire _get_lock — reset must work even while
     # an in-flight turn is holding the lock. Fire cancel first so the server
-    # aborts any running Ollama stream, then reset to clear state.
+    # aborts any running model stream, then reset to clear state.
     cid = interaction.channel_id
     ws = _connections.get(cid)
     if ws is None:
@@ -572,7 +572,7 @@ async def slash_mode(interaction: discord.Interaction, prompt: str):
             await interaction.followup.send(f"❌ {e}")
 
 
-@bot.tree.command(name="health", description="Ping the harness and Ollama — deterministic, no model call.")
+@bot.tree.command(name="health", description="Ping the harness and llama-server — deterministic, no model call.")
 async def slash_health(interaction: discord.Interaction):
     cid = interaction.channel_id
     await interaction.response.defer(thinking=False)
@@ -589,12 +589,12 @@ async def slash_health(interaction: discord.Interaction):
     try:
         t0 = time.perf_counter()
         async with aiohttp.ClientSession() as session:
-            async with session.get(f"{OLLAMA_URL}/api/tags", timeout=aiohttp.ClientTimeout(total=5)) as r:
+            async with session.get(f"{LLM_URL}/models", timeout=aiohttp.ClientTimeout(total=5)) as r:
                 data = await r.json()
-        n_models = len(data.get("models", []))
-        lines.append(f"🟢 Ollama: {int((time.perf_counter() - t0) * 1000)} ms, {n_models} model(s) installed")
+        n_models = len(data.get("data", []))
+        lines.append(f"🟢 llama-server: {int((time.perf_counter() - t0) * 1000)} ms, {n_models} model(s) available")
     except Exception as e:
-        lines.append(f"🔴 Ollama: `{e}`")
+        lines.append(f"🔴 llama-server: `{e}`")
     await interaction.followup.send("\n".join(lines))
 
 
@@ -603,7 +603,7 @@ async def slash_health(interaction: discord.Interaction):
 # typed control frames / run subprocesses directly.
 
 _EMERGENCY_LOG = _BOT_ROOT / "emergency.log"
-_VALID_TARGETS = ("session", "ollama", "harness", "bot", "all")
+_VALID_TARGETS = ("session", "llm", "harness", "bot", "all")
 
 
 def _audit(entry: str) -> None:
@@ -631,16 +631,16 @@ async def _kill_session(cid: int, dry: bool) -> str:
         return f"session: failed ({e})"
 
 
-async def _kill_ollama(dry: bool) -> str:
+async def _kill_llm(dry: bool) -> str:
     is_win = platform.system() == "Windows"
-    cmd = ["taskkill", "/F", "/IM", "ollama.exe"] if is_win else ["pkill", "-9", "ollama"]
+    cmd = ["taskkill", "/F", "/IM", "llama-server.exe"] if is_win else ["pkill", "-9", "llama-server"]
     if dry:
-        return f"DRY ollama: would run `{' '.join(cmd)}`"
+        return f"DRY llm: would run `{' '.join(cmd)}`"
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=10, text=True)
-        return f"ollama: rc={r.returncode} {r.stdout.strip() or r.stderr.strip()}"
+        return f"llm: rc={r.returncode} {r.stdout.strip() or r.stderr.strip()}"
     except Exception as e:
-        return f"ollama: failed ({e})"
+        return f"llm: failed ({e})"
 
 
 async def _kill_harness(cid: int, dry: bool) -> str:
@@ -697,18 +697,18 @@ async def slash_emergency(
     await interaction.response.defer(thinking=True)
     results: list[str] = []
 
-    # Chain order for `all`: ollama → harness → bot, so a bot kill at the
+    # Chain order for `all`: llm → harness → bot, so a bot kill at the
     # end doesn't orphan the heavier processes.
     if tgt == "session":
         results.append(await _kill_session(cid, dry_run))
-    elif tgt == "ollama":
-        results.append(await _kill_ollama(dry_run))
+    elif tgt == "llm":
+        results.append(await _kill_llm(dry_run))
     elif tgt == "harness":
         results.append(await _kill_harness(cid, dry_run))
     elif tgt == "bot":
         results.append(await _kill_bot(dry_run))
     elif tgt == "all":
-        results.append(await _kill_ollama(dry_run))
+        results.append(await _kill_llm(dry_run))
         await asyncio.sleep(0.3)
         results.append(await _kill_harness(cid, dry_run))
         await asyncio.sleep(0.3)

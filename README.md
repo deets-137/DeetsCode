@@ -1,6 +1,6 @@
 # DeetsCode
 
-A local agent workspace for Ollama-served models, shipped as a frameless Tauri
+A local agent workspace for llama.cpp-served models, shipped as a frameless Tauri
 (Windows) app: a FastAPI server with a streaming tool-calling loop, a panel UI
 the model can rearrange through its own tool calls, and an optional Discord
 bridge that turns a phone into a remote control for local development.
@@ -66,19 +66,24 @@ output cap, and nothing else. Only point it at directories you'd hand to a shell
   without a restart.
 - **`core/storage.py`** — SQLite, 8 tables, additive-only DDL.
 
-Model resolution self-heals: if the configured model isn't installed, the server falls back
-to the first one Ollama reports rather than failing to start. UI model picks persist across
-restarts.
+Model resolution self-heals: if the configured model isn't available, the server falls back
+to the first one llama-server reports rather than failing to start. UI model picks persist
+across restarts.
 
 ## Stack
 
-Rust (Tauri 2) · Python · FastAPI · uvicorn · the `openai` SDK pointed at Ollama's
-OpenAI-compatible endpoint · WebSockets · SQLite · discord.py · vanilla ES6
+Rust (Tauri 2) · Python · FastAPI · uvicorn · the `openai` SDK pointed at llama-server's
+OpenAI-compatible endpoint (router mode, Vulkan) · WebSockets · SQLite · discord.py ·
+vanilla ES6
 
 ## Running it
 
+The harness autostarts `llama-server` in router mode if it isn't already up
+(see `LLAMA_SERVER_EXE` / `LLAMA_SERVER_ARGS` in config.py). Get llama.cpp's
+Vulkan build on PATH and either drop GGUFs in a `--models-dir` or pull one:
+
 ```bash
-ollama pull <any-tool-calling-model>   # e.g. qwen3:8b, llama3.1:8b
+llama-server -hf <org/repo:quant>      # e.g. ggml-org/Qwen3-8B-GGUF:Q4_K_M
 pip install -r requirements.txt
 cp config.example.py config.py         # port, temperature; MODEL auto-picks
 npm install                        # one-time: Tauri CLI
@@ -103,7 +108,7 @@ fill it in. Every setting is commented there; the ones you'll actually touch:
   bot is in exactly one guild; set it once it joins a second, or omit for global sync
 
 `/emergency` is a kill switch with a dry-run preview and a typed confirmation, targeting the
-session, Ollama, the harness, the bot, or all of them.
+session, llama-server, the harness, the bot, or all of them.
 
 ## Documentation
 

@@ -1499,7 +1499,7 @@ async function refreshPendingPanel() {
 
 
 // ── Titlebar status strip ─────────────────────────
-// Time and Ollama's GPU/CPU split. Both were bento tiles until the slot
+// Time and llama-server's loaded model. Both were bento tiles until the slot
 // rework; neither was ever worth a tile (docs/slots.md "Demoted out of the
 // tile system"). Read-only, so the titlebar is the right home.
 
@@ -1511,30 +1511,31 @@ function _tickClock() {
   el.title = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
 }
 
-async function _tickOllama() {
-  const el = document.getElementById("status-ollama");
+async function _tickLlm() {
+  const el = document.getElementById("status-llm");
   if (!el) return;
   try {
-    const r = await fetch("/api/ollama/ps");
+    const r = await fetch("/api/llm/status");
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
-    const { models } = await r.json();
-    if (!models || !models.length) {
-      // Nothing loaded and "ollama not installed" look the same on purpose —
-      // in both cases there is no split to report.
+    const { reachable, models } = await r.json();
+    const active = (models || []).filter(m => m.status === "loaded" || m.status === "loading");
+    if (!reachable || !active.length) {
+      // Server down and "nothing loaded yet" look the same on purpose —
+      // in both cases there is nothing resident to report.
       el.textContent = "";
       el.hidden = true;
       return;
     }
     el.hidden = false;
-    // One model is the common case; more than one, show the count and the
-    // split of the first (the strip is a glance, not a table).
-    const m = models[0];
-    const extra = models.length > 1 ? ` +${models.length - 1}` : "";
-    el.textContent = `${m.gpu_pct}% GPU${extra}`;
-    el.title = models
-      .map(x => `${x.name} ${x.size} — GPU ${x.gpu_pct}% / CPU ${x.cpu_pct}%`)
-      .join("\n");
-    el.classList.toggle("is-cpu-heavy", m.cpu_pct > m.gpu_pct);
+    // One resident model is the common case; more than one, show the count
+    // next to the first (the strip is a glance, not a table). Router-mode ids
+    // can be long HF repo paths — keep the last segment.
+    const m = active[0];
+    const short = m.name.split("/").pop();
+    const extra = active.length > 1 ? ` +${active.length - 1}` : "";
+    el.textContent = (m.status === "loading" ? `${short} …` : short) + extra;
+    el.title = (models || []).map(x => `${x.name} — ${x.status}`).join("\n");
+    el.classList.toggle("is-loading", active.some(x => x.status === "loading"));
   } catch (e) {
     el.hidden = true;
   }
@@ -1542,11 +1543,11 @@ async function _tickOllama() {
 
 function startStatusStrip() {
   _tickClock();
-  _tickOllama();
-  // Clock on the minute boundary, so it never shows a stale minute; Ollama
-  // every 5s, matching the cadence the old panel polled at.
+  _tickLlm();
+  // Clock on the minute boundary, so it never shows a stale minute; the model
+  // strip every 5s, matching the cadence the old panel polled at.
   setInterval(_tickClock, 15000);
-  setInterval(_tickOllama, 5000);
+  setInterval(_tickLlm, 5000);
 }
 
 // ── Boot ──────────────────────────────────────────

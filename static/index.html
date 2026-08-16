@@ -153,12 +153,12 @@
     <div class="drag-region" data-tauri-drag-region></div>
 
     <!-- Status strip. Both of these used to be bento tiles: a clock app and
-         an ollama_ps panel that spent a 6x1 cell on three numbers. The slot
+         a model-status panel that spent a 6x1 cell on three numbers. The slot
          rework demoted them out of the tile system (docs/slots.md) — this is
          where they landed. Purely informational, never interactive, so it
          costs no tile and no vertical space. -->
     <div class="statusstrip" id="statusstrip">
-      <span class="status-ollama" id="status-ollama" title="loaded Ollama models"></span>
+      <span class="status-llm" id="status-llm" title="llama-server models"></span>
       <span class="status-clock" id="status-clock" aria-live="off"></span>
     </div>
 
