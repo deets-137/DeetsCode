@@ -108,7 +108,7 @@ Plain curl / browser-bar friendly. All read-only unless noted.
 Both layout writes broadcast a `layout_updated` WS frame; every
 connected tab re-syncs live (no reload).
 
-### Tileflow runtime overlay
+### Model backend
 
 | Method | URL | Purpose |
 |---|---|---|
@@ -121,8 +121,10 @@ connected tab re-syncs live (no reload).
 | GET | `/api/system_log?since=&until=&instance=&kind=&limit=` | Recent UI interaction events, newest first. Timestamps unix ms; `limit` capped at 5000. |
 | GET | `/api/system_log/summary?window_ms=` | Per-(instance, kind) counts sorted by recency. Omit `window_ms` for all-time. Answers "which panels do I actually use." |
 
-Built-in `kind` values: `click`, `state`, `bin`, plus whatever panels emit
-via `harness.logInteraction`. See [panels.md § Interaction logging](panels.md#interaction-logging-system_log)
+Built-in `kind` values: `click` and `state`, plus whatever panels emit via
+`harness.logInteraction`. (Old rows may carry `bin` — Tileflow-era bin
+migrations; nothing emits it since Aug 2026.) See
+[panels.md § Interaction logging](panels.md#interaction-logging-system_log)
 for the meta shape per kind.
 
 ### Other catch-alls
@@ -148,9 +150,9 @@ for the meta shape per kind.
 
 | Table | What's in it | Helper functions |
 |---|---|---|
-| `games` | One row per game (chess, dnd, mafia). State in `state_json`. | `create_game`, `load_game`, `save_state`, `list_games`, `end_game` |
-| `moves` | Append-only move log per game. | `record_move`, `game_history` |
-| `players` | Discord display-name cache. | `upsert_player`, `get_player` |
+| `games` | One row per game. Orphaned — the game modes were removed Aug 2026; old rows remain, helpers unused. | `create_game`, `load_game`, `save_state`, `list_games`, `end_game` |
+| `moves` | Append-only move log per game. Orphaned with `games`. | `record_move`, `game_history` |
+| `players` | Discord display-name cache. Orphaned with the game modes. | `upsert_player`, `get_player` |
 | `notes` | Free-text notes. Orphaned — the `/note` cog was removed Aug 2026; the helpers remain unused. | `add_note`, `list_notes`, `set_note_status` |
 | `stats` | Per-turn duration / mode / model rollup. Still written by the Discord bridge on every turn; query it here (the `/stats` cog was removed). | `record_stat`, `stats_summary` |
 | `events` | Recorded WS frames for spectate / replay. | `record_event`, `query_events`, `list_event_sessions` |
@@ -241,6 +243,5 @@ call at the relevant DOM-mutation site.
 
 - [panels.md § Interaction logging](panels.md#interaction-logging-system_log) — the panel-author view of `system_log`.
 - [slots.md](slots.md) — the layout system these surfaces describe: the four slots, the picker, and the teardown contract the canary exists to guard.
-- [tileflow.md](tileflow.md) — the retired scored engine. Nothing in it is live; useful only for reading old commits.
 - [../CLAUDE.md](../CLAUDE.md) — project orientation. Mentions storage.db and the additive-schema discipline.
 - [core/storage.py](../core/storage.py) — every SQL table is defined in `_init_schema` with a block comment explaining its rationale.

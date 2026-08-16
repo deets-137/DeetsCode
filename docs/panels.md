@@ -668,6 +668,5 @@ Working examples in the repo:
 ## Cross-references
 
 - [slots.md](slots.md) — the layout system: the four slots, the picker, the
-  teardown contract, the summon bus, what got deleted and why.
-- [tileflow.md](tileflow.md) — the scored engine this replaced. Kept as the
-  record of what it did and why we stopped; nothing in it is live.
+  teardown contract, the summon bus. (Its predecessor, the Tileflow scored
+  engine, lives in git history — docs/tileflow.md, deleted 2026-08-16.)

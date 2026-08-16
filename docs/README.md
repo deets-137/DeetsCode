@@ -12,14 +12,9 @@ start here if you don't know which doc to read.
   modifying a panel.
 
 - **[slots.md](slots.md)** — The layout system. Four fixed slots, the
-  picker, the mount/unmount contract, the summon bus, the narrow
-  surface, and an explicit list of what Tileflow's deletion took with
-  it. Supersedes tileflow.md below.
-
-- **[tileflow.md](tileflow.md)** — **Retired.** The scored engine that
-  used to arrange the bento from per-panel state. Nothing in it is
-  live; it stays on disk as the record of what auto-arrangement did
-  and why we stopped.
+  picker, the mount/unmount contract, the summon bus, and the narrow
+  surface. (Its predecessor, Tileflow's scored auto-arrangement, lives
+  in git history: docs/tileflow.md, deleted 2026-08-16.)
 
 - **[diagnostics.md](diagnostics.md)** — Catalog of every introspection
   surface the harness exposes: DOM attributes, `window.harness.*`
@@ -38,8 +33,6 @@ start here if you don't know which doc to read.
 - **[special_thanks.md](special_thanks.md)** — Maintainers and
   projects the harness leans on.
 
-- **[reports/](reports/)** — Older review notes kept out of the root.
-
 - **[archive/](archive/)** — Executed specs kept for archaeology:
   `dev_project.md` (the original panel-system north star),
   `app_harness.md` (the apps-over-panels layer, built then removed
@@ -56,7 +49,7 @@ start here if you don't know which doc to read.
 | Flag that your panel has something new | [panels.md § Signals](panels.md#signals-and-the-mount-lifecycle) — `harness.notify`, and `requestPanel` when it's urgent |
 | Stop your panel leaking timers across a slot swap | [panels.md § Teardown](panels.md#teardown--the-one-thing-you-must-get-right) — `harness.onUnmount`, and the `_subCounts` canary |
 | Put a panel in a specific slot | [panels.md § Layout file](panels.md#layout-file-layoutpanel_layoutjson) — edit `slots` in `layout/panel_layout.json`, or pick it from the tile title |
-| Understand why the UI doesn't rearrange itself | [slots.md § Why](slots.md#why) |
+| Understand why the UI doesn't rearrange itself | [slots.md](slots.md) — intro + § Decisions (closed) |
 | Debug a panel that's misbehaving | [diagnostics.md § DOM-level](diagnostics.md#1-dom-level--visible-without-any-console) then [§ Browser console](diagnostics.md#2-browser-console--windowharness-debug-surface) |
 | Find out which panels are actually used | [diagnostics.md § HTTP endpoints — Interaction log](diagnostics.md#interaction-log-system_log) or `GET /api/system_log/summary` |
 | Add a new analytics signal | [diagnostics.md § Adding a new analytics signal](diagnostics.md#6-adding-a-new-analytics-signal) |
