@@ -72,16 +72,42 @@ def model_names(base_url: str) -> list[str] | None:
     return None if rows is None else [r["name"] for r in rows]
 
 
+def is_loaded(base_url: str, model: str) -> bool:
+    """True only if the router reports `model` as already resident."""
+    rows = list_models(base_url)
+    if not rows:
+        return False
+    return any(r["name"] == model and r["status"] == "loaded" for r in rows)
+
+
 def context_length(base_url: str, model: str) -> int | None:
-    """Serving context length for a model, from /props. Loads nothing: an
-    unloaded model just returns None and the caller keeps its default."""
+    """Serving context length for a model, from /props — but ONLY if the model
+    is already loaded.
+
+    The status gate is not an optimization, it is the whole point.
+    `/props?model=X` on an *unloaded* model does not return its metadata: the
+    router starts loading X and blocks until the load finishes. Measured
+    2026-08-16 on build 10448 — a 10 s curl against an unloaded model returned
+    nothing and left it in state "loading". (This function's docstring used to
+    claim the opposite. It was wrong.)
+
+    That made boot destructive. server.py calls this on every WS connect for
+    whatever `current_model` says, so opening the UI dragged that model into
+    VRAM whether or not the user ever sent a message — and if a *different*
+    model was already resident, the machine ended up trying to hold both.
+
+    So: no load is ever started from here. An unloaded model returns None and
+    the caller keeps its default. Router mode still loads on demand when a
+    real completion request names a model, which is the only place a load
+    should originate."""
+    if not is_loaded(base_url, model):
+        return None
     q = urllib.parse.urlencode({"model": model})
-    for url in (f"{root_url(base_url)}/props?{q}", f"{root_url(base_url)}/props"):
-        props = _get_json(url)
-        if props:
-            n_ctx = props.get("default_generation_settings", {}).get("n_ctx")
-            if n_ctx:
-                return int(n_ctx)
+    props = _get_json(f"{root_url(base_url)}/props?{q}")
+    if props:
+        n_ctx = props.get("default_generation_settings", {}).get("n_ctx")
+        if n_ctx:
+            return int(n_ctx)
     return None
 
 

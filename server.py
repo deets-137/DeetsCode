@@ -479,6 +479,25 @@ def delete_session(session_id: str):
             pass
 
 
+async def refresh_context_length(ws=None) -> int:
+    """Re-read the serving ctx length after a turn has loaded the model.
+
+    context_length() deliberately returns None while a model is unloaded (it
+    must never be the thing that triggers a load — see core/llama_server.py),
+    so the value emitted on WS connect is only the fallback. The first real
+    completion is what loads the model, so correct the usage bar here."""
+    global current_context_length
+    n = await asyncio.to_thread(llm_backend.context_length, LLM_BASE_URL, current_model)
+    if n and n != current_context_length:
+        current_context_length = n
+        if ws is not None:
+            try:
+                await ws.send_json({"type": "ctx_length", "max": n})
+            except Exception:
+                pass
+    return current_context_length
+
+
 async def fetch_context_length(model: str) -> int:
     """Serving context length from llama-server's /props. For a model that
     isn't loaded yet this returns the default; the ctx_length frame after the
@@ -885,6 +904,7 @@ async def agent_loop(ws: WebSocket, user_content: str, messages: list, selected_
             except Exception:
                 pass
         try:
+            await refresh_context_length(ws)
             if state["usage_tokens"]:
                 await ws.send_json({"type": "usage", "total": state["usage_tokens"], "max": current_context_length})
             await ws.send_json({"type": "done", "model": current_model})
