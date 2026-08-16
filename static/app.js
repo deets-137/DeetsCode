@@ -410,6 +410,12 @@ function buildOcean() {
 
     if (window.__TAURI__) {
       document.documentElement.classList.add("is-tauri");
+      // macOS keeps native decorations (tauri.macos.conf.json: Overlay
+      // titlebar) — its real traffic lights overlay our chrome top-left, so
+      // is-mac hides the painted ones and pads the titlebar clear of them.
+      if (/Mac/i.test(navigator.platform || navigator.userAgent)) {
+        document.documentElement.classList.add("is-mac");
+      }
       const win = window.__TAURI__.window.getCurrentWindow();
       document.getElementById("tl-min")?.addEventListener("click", () => win.minimize());
       document.getElementById("tl-max")?.addEventListener("click", () => win.toggleMaximize());

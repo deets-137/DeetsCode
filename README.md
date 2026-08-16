@@ -79,8 +79,9 @@ vanilla ES6
 ## Running it
 
 The harness autostarts `llama-server` in router mode if it isn't already up
-(see `LLAMA_SERVER_EXE` / `LLAMA_SERVER_ARGS` in config.py). Get llama.cpp's
-Vulkan build on PATH and either drop GGUFs in a `--models-dir` or pull one:
+(see `LLAMA_SERVER_EXE` / `LLAMA_SERVER_ARGS` in config.py). Get llama.cpp
+on PATH (Windows: the Vulkan release build; macOS: `brew install llama.cpp`,
+Metal is the default) and either drop GGUFs in a `--models-dir` or pull one:
 
 ```bash
 llama-server -hf <org/repo:quant>      # e.g. ggml-org/Qwen3-8B-GGUF:Q4_K_M

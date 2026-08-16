@@ -1818,6 +1818,10 @@ body { padding-top: var(--titlebar-h); }
 /* Traffic lights — native shell only */
 .lights { display: none; gap: var(--traffic-gap); }
 html.is-tauri .lights { display: flex; }
+/* macOS: native traffic lights (Overlay titlebar) replace the painted ones;
+   pad the titlebar so the DeetsCode menu trigger clears them top-left. */
+html.is-tauri.is-mac .lights { display: none; }
+html.is-tauri.is-mac .titlebar { padding-left: 78px; }
 
 .light {
   width: var(--traffic-size);

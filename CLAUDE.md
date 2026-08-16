@@ -33,7 +33,12 @@ were removed.
 The harness runs as a frameless Windows app: `npm run tauri dev` from the
 repo root (Tauri's `beforeDevCommand` spawns `python server.py`, waits for
 `http://127.0.0.1:8000`, then opens the WebView2 window). Shell code lives in
-`src-tauri/`; it is a bare Tauri v2 builder — no custom commands. The custom
+`src-tauri/`; it is a bare Tauri v2 builder — no custom commands. macOS uses
+native window chrome instead of the painted traffic lights:
+`src-tauri/tauri.macos.conf.json` (platform-merged by Tauri) sets an Overlay
+titlebar, and app.js adds `html.is-mac` so CSS hides `.lights` and pads the
+titlebar clear of the native buttons. Written blind on Windows, 2026-08-16 —
+untested on real macOS. The custom
 titlebar in `static/index.html` is window chrome, not a panel: always visible
 (it hosts the DeetsCode menu), while the traffic lights + drag region only
 act when app.js detects `window.__TAURI__` and adds `html.is-tauri`. The
