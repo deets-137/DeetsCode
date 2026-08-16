@@ -1367,245 +1367,175 @@ input:checked + .toggle-slider:before {
 .inv-empty { text-align: center; opacity: 0.5; padding: var(--space-3); }
 
 
-/* Toggled by applyModeVisibility (app.js) for per-mode panel hiding. */
+/* ── The slot system ──────────────────────────────────────────────────────
+   An anchored column (chat) beside a 2×2 bento of four fixed slots. There is
+   no scoring, no reflow, no tray: a slot is a rect that never moves, and
+   swapping its panel is a content change inside that rect. Nothing on this
+   page animates its own position, which is the whole point — see
+   docs/slots.md. */
+
+/* Toggled by applyModeVisibility (app.js) and applyMode (panel-shell.js). */
 .mode-hidden { display: none !important; }
 
-/* ── Panel system (phases 1+) ─────────────────────────────────────────── */
-
-/* Region = invisible layout slot. Width/flex-direction is set inline by
-   panel-shell.js from the layout config; everything else is just gap. */
-.region {
+/* ── Anchored column ───────────────────────────────────────────────────── */
+/* Chat, and only chat. It never unmounts, which is what keeps app.js's
+   direct WS→chat-DOM routing out of scope for the slot system. */
+.anchor-column {
+  flex: 0 0 var(--anchor-w, 30%);
   min-width: 0;
-  display: flex;             /* belt-and-suspenders: panel-shell sets this
-                                inline too, but keeping it here means
-                                `gap` applies even if the inline style is
-                                ever cleared by a future migration. */
-  gap: 36px;                 /* canvas-visible breathing room between
-                                stacked panels — large enough to see the
-                                blob backdrop, small enough that long
-                                columns (right region with 8 panels)
-                                still fit a typical viewport. Tray
-                                overrides to 8px. */
-  align-self: stretch;
-}
-
-/* Bounding-rect contract: panel-shell.js gives each instance a region (the
-   rect). The instance must fill that rect — it does NOT get to re-apply its
-   own width %. `.panel-instance` already declares `width: 100%`; this rule
-   is the belt-and-braces enforcement for any future bare child that lands
-   in a region (e.g. a tray icon or staging fallback). */
-.region > * { width: 100%; }
-
-/* Bento region — fixed-column CSS Grid (Tileflow stage 2). Default cols
-   come from layout.grid.cols (12 if absent); panel-shell.js sets
-   --bento-cols / --bento-row-h / --bento-gap as inline custom properties
-   on the region element so per-layout overrides flow through without
-   class explosion. Pinned instances get grid-column/row from their pin
-   rectangle; unpinned ones auto-flow into gaps via grid-auto-flow:dense.
-   Smooth resize: transition grid-* properties (note: per docs/tileflow.md,
-   true glide-to-fill needs the FLIP runner — Stage 2 step 3 — but the
-   transition shorthand at least animates the size class within a single
-   instance). */
-.region-kind-bento {
-  display: grid !important;
-  grid-template-columns: repeat(var(--bento-cols, 12), 1fr);
-  /* Strict, equal-size row tracks. Earlier we tried `minmax(120, auto)` so
-     row tracks could grow with content, but that lets a panel whose content
-     exceeds its declared row span bleed visually past its cell — overlap
-     with the panel below. Now: cells are exactly row_height_px tall;
-     panels clip to their declared span; content beyond that scrolls
-     internally via `.panel-content` (manifest declares `scroll: internal`).
-     A panel that genuinely needs more height declares a taller size class
-     and the engine reserves the rows up front. */
-  grid-auto-rows: var(--bento-row-h, 120px);
-  grid-auto-flow: dense;
-  gap: var(--bento-gap, 12px);
-  align-content: start;
-  /* Default stretch — panels fill their grid cells. Safe now that tracks
-     are strict (no sibling-stretch surprise from auto rows). */
-}
-.region-kind-bento > .panel-instance {
-  /* Bento cells own their own width via grid-column; opt out of the
-     legacy `width:100%` from `.region > *` so a 6-col span doesn't try to
-     also be 100% of the region. */
-  width: auto !important;
-  /* Override the manifest-driven `min-height` set inline by panel-shell.js.
-     In the bento, a panel's vertical footprint is determined by its grid
-     row span, not its content's natural minimum — otherwise a panel with
-     `display.min.height: 280` in a `medium` (1 row, 120px) cell would
-     muscle the track open. */
-  min-height: 0 !important;
-  /* Clip content to the declared cell. Most panels already have an inner
-     scroller (`.panel-content` with `scroll: internal`); for the rest,
-     anything past the cell edge silently disappears. flowPass picks row
-     spans that fit content so this rarely fires in practice. */
-  overflow: hidden;
-  height: 100%;
-  /* Color/border transitions only — position/size changes are driven by the
-     FLIP runner in panel-shell.js (`runFlipReflow`). Transitioning
-     `grid-column`/`grid-row` is a no-op anyway in current browsers; the
-     runner produces a real glide by inverting transforms. */
-  transition:
-    background var(--dur-theme) ease,
-    box-shadow var(--dur-theme) ease,
-    border-color var(--dur-theme) ease;
-}
-@media (max-width: 1199px) {
-  /* Narrow viewport: drop to half the column count and ignore pin coords
-     (auto-flow only). docs/tileflow.md "The grid (schema v2)". */
-  .region-kind-bento {
-    grid-template-columns: repeat(calc(var(--bento-cols, 12) / 2), 1fr);
-  }
-  .region-kind-bento > .panel-instance {
-    grid-column: auto !important;
-    grid-row: auto !important;
-  }
-}
-
-/* Tray region — narrow column of icon buttons. Children are fixed-size
-   icons, not full-width panels; opt out of the bounding-rect width rule. */
-.region-kind-tray > * { width: auto; }
-.region-kind-tray {
-  background: var(--panel-fill);
-  backdrop-filter: var(--panel-backdrop);
-  -webkit-backdrop-filter: var(--panel-backdrop);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-card);
-  box-shadow: var(--shadow-panel), var(--highlight-inset);
-  padding: 10px var(--space-1) !important;
-  /* A long tray scrolls instead of pushing past the viewport. */
-  overflow-y: auto;
-  scrollbar-width: thin;
-}
-.tray-icon {
-  width: 36px;
-  height: 36px;
-  padding: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-inner);
-  background: var(--panel-outer);
-  color: var(--text);
-  font-size: 18px;
-  line-height: 1;
-  cursor: pointer;
-  position: relative;
-  transition: transform var(--dur-fast) ease, background var(--dur-fast) ease;
-}
-.tray-icon:hover {
-  transform: scale(1.08) var(--hover-lift);
-  background: var(--surface-hover);
-}
-/* Content badge — "something arrived while you kept me trayed". */
-.tray-icon.has-badge::after {
-  content: "";
-  position: absolute;
-  top: -3px;
-  right: -3px;
-  width: 9px;
-  height: 9px;
-  border-radius: 50%;
-  background: var(--accent-2);
-  border: 1px solid var(--surface);
-}
-
-/* Tileflow state transitions — minimize/restore fade.
-   Bento↔tray swaps used to be hard remove + append; the fade keeps the
-   change legible without needing a full FLIP reflow runner (that arrives
-   with Stage 2's grid work). The "others snap into the gap" jolt is
-   intentionally left for Stage 2 to fix once panels live on a CSS grid. */
-.tileflow-entering {
-  opacity: 0;
-  transform: scale(0.9) translateY(6px);
-}
-.tileflow-enter-active {
-  opacity: 1;
-  transform: scale(1) translateY(0);
-  transition: opacity 320ms var(--ease-ui),
-              transform 320ms var(--ease-ui);
-}
-.tileflow-leaving {
-  opacity: 0;
-  transform: scale(0.9) translateY(-6px);
-  transition: opacity 220ms cubic-bezier(.4,0,.6,1),
-              transform 220ms cubic-bezier(.4,0,.6,1);
-  pointer-events: none;
-}
-/* Tray icon flourish — a touch more pop than a panel since the target is
-   tiny and benefits from the size cue. */
-.tray-icon.tileflow-entering { transform: scale(0.6); }
-.tray-icon.tileflow-enter-active { transform: scale(1); }
-
-/* Panel instance — bento tile. Glass surface owned entirely by the shell;
-   handlers never reproduce this chrome. */
-.panel-instance {
-  width: 100%;
+  min-height: 0;
   display: flex;
   flex-direction: column;
+}
+.anchor-column > .panel-instance { flex: 1 1 auto; min-height: 0; }
+
+/* ── The bento ─────────────────────────────────────────────────────────── */
+/* Two equal columns, two equal rows. Equal on purpose: a tile's size must
+   not depend on which panel is in it, or every swap would be a reflow. */
+.bento {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: var(--space-4);
+}
+
+/* A slot is a stable rect. It owns position and size; the tile inside owns
+   everything else. The tile is `position:absolute` against it so a crossfade
+   can overlap the outgoing and incoming tiles without either one nudging the
+   other. */
+.slot {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+.slot[hidden] { display: none; }
+.slot > .panel-instance {
+  position: absolute;
+  inset: 0;
+}
+
+/* Narrow surface: chat plus a single slot, stacked into one column. The
+   hidden slots are unmounted by panel-shell.js, not merely hidden — a panel
+   you can't see must not keep polling. */
+[data-surface="narrow"] .canvas { flex-direction: column; }
+[data-surface="narrow"] .anchor-column { flex: 1 1 auto; }
+[data-surface="narrow"] .bento {
+  grid-template-columns: 1fr;
+  grid-template-rows: 1fr;
+  flex: 0 0 40%;
+}
+
+/* ── Panel instance — the tile ─────────────────────────────────────────── */
+/* Glass surface owned entirely by the shell; handlers never reproduce this
+   chrome. */
+.panel-instance {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
   background: var(--panel-fill);
   backdrop-filter: var(--panel-backdrop);
   -webkit-backdrop-filter: var(--panel-backdrop);
-  /* --panel-border, not --border: at press's 0 radius a faint edge reads
-     as a rendering artifact rather than a deliberate keyline. */
+  /* --panel-border, not --border: at press's 0 radius a faint edge reads as
+     a rendering artifact rather than a deliberate keyline. */
   border: 1px solid var(--panel-border);
   box-shadow: var(--shadow-panel), var(--highlight-inset);
   border-radius: var(--radius-panel);
   padding: var(--space-3);
   gap: var(--space-2);
-  min-height: 0;
-  align-self: stretch;
-  transition: background var(--dur-theme) ease, box-shadow var(--dur-theme) ease,
+  /* Colour only. Nothing here transitions size or position: the slot rect is
+     fixed, so there is nothing to glide, and a tile that animated its own
+     geometry would be reintroducing exactly the jitter we deleted. */
+  transition: background var(--dur-theme) ease,
+              box-shadow var(--dur-theme) ease,
               border-color var(--dur-theme) ease;
 }
 
-/* Tiles are deliberately inert under the cursor — no hover lift. */
+/* Swap-in crossfade. Opacity only — see above. */
+.panel-instance.tile-entering { opacity: 0; }
+.slot > .panel-instance { transition: opacity 180ms var(--ease-ui); }
+@media (prefers-reduced-motion: reduce) {
+  .slot > .panel-instance { transition: none; }
+}
 
+/* ── Tile header ───────────────────────────────────────────────────────── */
 .panel-header {
-  position: relative; /* anchor for .panel-pill-menu */
+  position: relative;          /* anchor for .panel-picker */
   display: flex;
-  justify-content: space-between;
   align-items: center;
   gap: var(--space-2);
   font-family: var(--font-body);
   font-size: var(--fs-ui);
-  color: var(--subtext);   /* the role, not faded --text */
+  color: var(--subtext);
   padding: 0 2px;
   flex-shrink: 0;
 }
 
 .panel-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  border: none;
+  background: none;
   font-family: var(--font-title);
   font-weight: var(--fw-title);
   text-transform: uppercase;
   letter-spacing: 0.5px;
   font-size: var(--fs-small);
-  color: var(--title);     /* theme's title ink, full strength */
+  color: var(--title);         /* theme's title ink, full strength */
+  text-align: left;
 }
 
-/* App identity chip (apps-over-panels, D6): small tag after the title on
-   panels that belong to an app. Visually subordinate to the title. */
-.panel-app-chip {
-  font-size: var(--fs-tiny);
-  letter-spacing: 0.4px;
-  padding: 1px 6px;
-  border-radius: var(--radius-inner);
-  border: 1px solid var(--border);
-  background: var(--panel-inset-fill, rgba(255, 255, 255, 0.05));
-  opacity: 0.6;
-  margin-right: auto; /* hug the title, push actions right */
+/* [Title ▾] — the picker affordance. The title *is* the control; there is no
+   separate settings pill any more, because there is no per-panel state left
+   to set. */
+.panel-title.is-pickable {
+  cursor: pointer;
+  padding: 2px 6px;
+  margin: -2px -6px;
+  border-radius: var(--radius-control);
+  transition: background var(--dur-fast) var(--ease-ui);
+}
+.panel-title.is-pickable:hover { background: var(--surface-hover); }
+.panel-title.is-pickable:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--focus-glow, rgba(120, 180, 255, 0.6));
 }
 
-/* Same-app tray icons: subtle shared tint so the cluster reads as a group. */
-.tray-icon[data-app] {
-  border-style: dashed;
+.panel-title-chev {
+  font-size: 0.8em;
+  opacity: 0.5;
+  transition: opacity var(--dur-fast) var(--ease-ui);
+}
+.panel-title.is-pickable:hover .panel-title-chev,
+.panel-title[aria-expanded="true"] .panel-title-chev { opacity: 1; }
+
+/* Drilled: the title is context, not a picker, and the chevron points back.
+   Root-only picking is what makes destroy-and-remount safe. */
+.panel-title.is-drilled .panel-title-chev { opacity: 0.9; }
+
+/* Notify — "this panel has something new". The whole 4-state model collapsed
+   to this one dot (docs/slots.md "States collapse to a signal"). */
+.panel-instance.has-notify > .panel-header > .panel-title::after {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  flex: 0 0 auto;
+  margin-left: 2px;
 }
 
 .panel-actions {
   display: flex;
   gap: var(--space-1);
   align-items: center;
+  margin-left: auto;           /* hug the right edge; the title hugs the left */
 }
 
 .panel-actions button,
@@ -1621,137 +1551,87 @@ input:checked + .toggle-slider:before {
   border-radius: 4px;
   text-decoration: none;
 }
-
 .panel-actions button:hover,
 .panel-actions a:hover { opacity: 1; }
 
-/* Standardized top-right pill: settings (left) + minimize-to-tray (right).
-   Shell-rendered for every .panel-instance via panel-shell.js. The diagonal
-   seam between the two buttons is a 1px skewed pseudo-element so the
-   buttons themselves stay rectangular and reliably hit-testable.
-   Theme-aware via CSS custom properties; no per-theme JS branching. */
-.panel-pill {
-  position: relative;
-  display: inline-flex;
-  align-items: stretch;
-  height: 22px;
-  background: var(--panel-inset-fill, rgba(255, 255, 255, 0.04));
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  overflow: hidden;
-  box-shadow: var(--highlight-inset);
-  flex: 0 0 auto;
-}
-
-.panel-pill::after {
-  /* The diagonal seam. Sits between the two buttons; pointer-events off so
-     it doesn't steal clicks. */
-  content: "";
+/* ── The picker ────────────────────────────────────────────────────────── */
+/* A flyout of the pool, anchored under the title. This is the only discovery
+   surface for unplaced panels — the tray is gone. */
+.panel-picker {
   position: absolute;
-  top: 0;
-  bottom: 0;
-  left: 50%;
-  width: 1px;
-  background: var(--border);
-  transform: translateX(-0.5px) skewX(-18deg);
-  pointer-events: none;
-  opacity: 0.85;
-}
-
-.panel-pill-btn {
-  background: transparent;
-  border: none;
-  cursor: pointer;
-  color: var(--text);
-  font-family: inherit;
-  font-size: var(--fs-body);
-  line-height: 1;
-  padding: 0 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  opacity: 0.65;
-  transition: opacity 120ms ease, background-color 120ms ease, color 120ms ease;
-  /* Each button takes half the pill; clip-path matches the diagonal seam
-     so hover backgrounds also slant. */
-  min-width: 24px;
-}
-
-.panel-pill-btn.panel-pill-settings {
-  clip-path: polygon(0 0, 100% 0, calc(100% - 4px) 100%, 0 100%);
-  padding-right: var(--space-3);
-}
-
-.panel-pill-btn.panel-pill-minimize {
-  clip-path: polygon(4px 0, 100% 0, 100% 100%, 0 100%);
-  padding-left: var(--space-3);
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.panel-pill-btn:hover {
-  opacity: 1;
-  background: var(--panel-fill, rgba(255, 255, 255, 0.08));
-  color: var(--text-input, var(--text));
-}
-
-.panel-pill-btn:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 1px var(--focus-glow, rgba(120, 180, 255, 0.6));
-  opacity: 1;
-}
-
-.panel-pill-btn:active {
-  background: var(--panel-inset-fill, rgba(255, 255, 255, 0.12));
-}
-
-/* ⚙ pill popover: manual tileflow-state cycling. Anchored to the header
-   (the pill clips overflow); sits above sibling panels. */
-.panel-pill-menu {
-  position: absolute;
-  top: calc(100% + 6px);
-  right: 0;
+  top: calc(100% + 8px);
+  left: 0;
   z-index: 40;
   display: flex;
   flex-direction: column;
-  min-width: 96px;
+  min-width: 200px;
   padding: var(--space-1);
-  background: var(--panel-fill, rgba(20, 20, 28, 0.92));
-  backdrop-filter: var(--panel-backdrop);
-  -webkit-backdrop-filter: var(--panel-backdrop);
+  background: var(--menu-surface, var(--panel-fill));
+  backdrop-filter: var(--menu-backdrop, var(--panel-backdrop));
+  -webkit-backdrop-filter: var(--menu-backdrop, var(--panel-backdrop));
   border: 1px solid var(--border);
-  border-radius: var(--radius-nested);
-  box-shadow: var(--shadow-panel), var(--highlight-inset);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-menu, var(--shadow-panel)), var(--highlight-inset);
 }
 
-.panel-pill-menu-item {
+.panel-picker-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
   background: transparent;
   border: none;
   cursor: pointer;
   color: var(--text);
-  font-family: inherit;
+  font-family: var(--font-body);
   font-size: var(--fs-ui);
   text-align: left;
-  padding: 5px var(--space-2);
+  padding: 6px var(--space-2);
   border-radius: var(--radius-control);
-  opacity: 0.75;
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.panel-picker-item:hover { opacity: 1; background: var(--surface-hover); }
+.panel-picker-item:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--focus-glow, rgba(120, 180, 255, 0.6));
 }
 
-.panel-pill-menu-item:hover {
-  opacity: 1;
-  background: var(--panel-inset-fill, rgba(255, 255, 255, 0.08));
+.panel-picker-icon {
+  width: 1.25em;
+  text-align: center;
+  flex: 0 0 auto;
+  opacity: 0.85;
 }
+.panel-picker-label { flex: 1 1 auto; }
 
-.panel-pill-menu-item.is-current {
+/* The panel in this slot. */
+.panel-picker-item.is-current {
   opacity: 1;
   font-weight: 600;
   background: var(--panel-inset-fill, rgba(255, 255, 255, 0.06));
 }
+.panel-picker-item.is-current::after {
+  content: "•";
+  opacity: 0.7;
+}
+/* Placed in one of the other three slots: picking it exchanges the two, so
+   say so rather than letting the click surprise you. */
+.panel-picker-item.is-placed::after {
+  content: "⇄";
+  opacity: 0.4;
+  font-size: 0.9em;
+}
+.panel-picker-item.has-notify .panel-picker-icon::after {
+  content: "";
+  display: inline-block;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-2);
+  vertical-align: super;
+  margin-left: 1px;
+}
 
-/* Body container. Handlers' returned HTML lands here. Padding lives on the
-   .panel-instance, so .panel-content stays tight to give nested panels
-   room. flex:1 means content fills remaining vertical space; min-height:0
-   keeps overflow:auto working inside flex parents. */
 .panel-content {
   flex: 1 1 auto;
   min-height: 0;
@@ -1762,16 +1642,6 @@ input:checked + .toggle-slider:before {
   font-family: var(--font-body);
   font-size: var(--fs-body);
   color: var(--text);
-}
-
-.panel-iframe {
-  background: transparent;
-  border: 0;
-  border-radius: var(--radius-inner);
-  overflow: hidden;
-  width: 100%;
-  flex: 1 1 auto;
-  min-height: 80px;
 }
 
 /* Tier badge in dev — tiny pill in the corner of the chrome. */
@@ -1930,6 +1800,203 @@ html.is-tauri .lights { display: flex; }
   stroke-linecap: round;
   stroke-linejoin: round;
 }
+
+
+/* ── Titlebar status strip ────────────────────────────────────────────── */
+/* Time + Ollama's GPU/CPU split, on the right of the titlebar. Both were
+   bento tiles until the slot rework demoted them (docs/slots.md). Read-only
+   and non-interactive by design — the titlebar is chrome, not a panel. */
+.statusstrip {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  padding-right: var(--space-3, 12px);
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  color: var(--subtext);
+  user-select: none;
+  -webkit-user-select: none;
+  white-space: nowrap;
+}
+
+.status-clock {
+  font-variant-numeric: tabular-nums;   /* so the minute tick doesn't shift */
+  letter-spacing: 0.3px;
+}
+
+.status-ollama {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+.status-ollama[hidden] { display: none; }
+.status-ollama::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--go);
+}
+/* More CPU than GPU means the model spilled out of VRAM — worth noticing at
+   a glance, which is the only thing this strip is for. */
+.status-ollama.is-cpu-heavy { opacity: 1; }
+.status-ollama.is-cpu-heavy::before { background: var(--pause); }
+
+/* ── Composer slash typeahead ─────────────────────────────────────────── */
+/* Replaces the slash_commands panel: a list you click was strictly worse
+   than typing "/" with completion, and it cost a tile. Overlaid *below* the
+   composer — the composer sits near the top of the chat column, so the empty
+   space is downward, over the response box — and absolutely positioned so it
+   never pushes the textarea around while you type. */
+.chat-composer { position: relative; }
+
+.slash-typeahead {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  max-height: 240px;
+  overflow-y: auto;
+  padding: var(--space-1);
+  background: var(--menu-surface, var(--panel-fill));
+  backdrop-filter: var(--menu-backdrop, var(--panel-backdrop));
+  -webkit-backdrop-filter: var(--menu-backdrop, var(--panel-backdrop));
+  border: 1px solid var(--border);
+  border-radius: var(--radius-panel);
+  box-shadow: var(--shadow-menu, var(--shadow-panel)), var(--highlight-inset);
+}
+
+.slash-typeahead-item {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  padding: 5px var(--space-2);
+  border-radius: var(--radius-control);
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-small);
+  color: var(--text);
+  opacity: 0.8;
+}
+.slash-typeahead-item:hover,
+.slash-typeahead-item.is-active {
+  opacity: 1;
+  background: var(--surface-hover);
+}
+
+.slash-cmd-name { color: var(--title); font-weight: 600; flex: 0 0 auto; }
+.slash-cmd-args { opacity: 0.55; flex: 0 0 auto; }
+.slash-cmd-desc {
+  opacity: 0.6;
+  margin-left: auto;
+  font-family: var(--font-body);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* ── Files: context switch ────────────────────────────────────────────── */
+/* One browser, two contexts — "Tree" and "In context" — the merge that
+   folded in_context_files into Files (docs/slots.md "Merges"). */
+.ctx-switch {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-inner);
+  background: var(--panel-inset-fill, rgba(255, 255, 255, 0.04));
+  align-self: flex-start;
+}
+
+.ctx-switch-btn {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  color: var(--text);
+  font-family: var(--font-body);
+  font-size: var(--fs-tiny);
+  letter-spacing: 0.3px;
+  padding: 3px 10px;
+  border-radius: var(--radius-control);
+  opacity: 0.6;
+  transition: opacity var(--dur-fast) var(--ease-ui),
+              background var(--dur-fast) var(--ease-ui);
+}
+.ctx-switch-btn:hover { opacity: 0.9; }
+.ctx-switch-btn.is-on {
+  opacity: 1;
+  background: var(--panel-fill, rgba(255, 255, 255, 0.08));
+  box-shadow: var(--highlight-inset);
+}
+
+[data-files-view][hidden] { display: none; }
+
+/* ── Activity: pending-writes banner ──────────────────────────────────── */
+/* Queued writes ride *above* the tool stream as an actionable banner, not as
+   peer rows — approve/reject must never end up buried under 40 tool calls
+   (docs/slots.md "Merges"). */
+.activity-banner {
+  flex: 0 0 auto;
+  padding: var(--space-2);
+  border: 1px solid var(--accent-2);
+  border-radius: var(--radius-inner);
+  background: var(--panel-inset-fill, rgba(255, 255, 255, 0.05));
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  max-height: 45%;
+  min-height: 0;
+}
+
+.activity-banner-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.activity-banner-title {
+  font-family: var(--font-body);
+  font-size: var(--fs-small);
+  color: var(--title);
+  flex: 1 1 auto;
+}
+
+.activity-banner-acts { display: flex; gap: var(--space-1); flex: 0 0 auto; }
+
+.activity-banner .pending-panel-inner {
+  overflow-y: auto;
+  min-height: 0;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--fs-tiny);
+}
+
+/* Queue count, in the tile header. Zero collapses rather than showing "0" —
+   an empty queue is not news. */
+.activity-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent-2);
+  color: var(--canvas);
+  font-family: var(--font-body);
+  font-size: var(--fs-tiny);
+  font-weight: 600;
+}
+.activity-badge.is-empty { display: none; }
 
 /* ── Ocean layer (rolling swell behind content; skin opt-in) ── */
 /* Injected into <body> by app.js; inert unless the skin sets

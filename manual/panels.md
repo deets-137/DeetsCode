@@ -2,8 +2,8 @@
 
 > **Read this first (2026-07):** for a NEW panel, the modern path is a
 > self-contained folder under `panels/<name>/` (or an app bundle under
-> `apps/<name>/`) — see `docs/panels.md` (manifest, tiers, skeleton) and
-> `docs/apps.md`. No index.html or app.js edits needed. **This doc remains
+> `panels/<name>/`) — see `docs/panels.md` (manifest, tiers, skeleton).
+> No index.html or app.js edits needed. **This doc remains
 > the recipe for the other case:** adding a new *WebSocket message type* or
 > wiring controls inside an existing panel's view that talk to `server.py`
 > — that three-file pattern below is still exactly how chat/bot-ops work.
@@ -220,7 +220,7 @@ helper. If it's per-turn, you can't observe it from a panel.
 
 ## Rendering content
 
-Three patterns in [app.js](static/app.js), pick deliberately:
+Three patterns in [app.js](../static/app.js), pick deliberately:
 
 - **Plain strings** — use `escapeHtml()` then set `innerHTML`, or set
   `textContent` directly. Default for anything user/tool-generated:

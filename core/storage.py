@@ -125,7 +125,7 @@ def _init_schema(c: sqlite3.Connection) -> None:
         -- intentionally generic so future signal types (lifecycle, focus,
         -- scroll) can be added by emitting a new `kind` value without DDL.
         --   ts        unix ms (client-side at emission time)
-        --   instance  layout-instance id (e.g. "tool_log"), or "_shell" for
+        --   instance  panel name (e.g. "activity"), or "_shell" for
         --             non-panel events
         --   panel     manifest name (denormalized — saves a join for the
         --             common "usage by panel-type" aggregation). Nullable for

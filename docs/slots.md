@@ -1,12 +1,25 @@
 # slots.md — the four-slot bento
 
-Living design doc for the **slot system**: a fixed 2×2 bento of user-swappable
-panels, replacing Tileflow's scored auto-arrangement. Keep this current as we
-build.
+Design doc for the **slot system**: a fixed 2×2 bento of user-swappable
+panels, replacing Tileflow's scored auto-arrangement.
+
+**Status: built (2026-08-15).** Phases 0–5 all landed in one pass. The
+sections below are written in the past tense where they describe finished
+work; "Build order" is a changelog now, and "What changed in the building"
+at the bottom records the three places the implementation departed from this
+plan. Keep it current — this is still the doc you edit when the slot system
+changes.
 
 Supersedes [tileflow.md](tileflow.md), which stays on disk as the record of what
 the scored engine did and why we stopped. Siblings: [panels.md](panels.md) (the
-panel contract — unchanged by this), [apps.md](apps.md) (multi-panel bundles).
+panel contract — unchanged by this).
+
+> **Later the same day (2026-08-15):** the apps layer, the `clock` app, and the
+> tier-0 iframe tier were all deleted — no live app ever shipped on the apps
+> primitive, and `clock` was its only other consumer. Panels are now a flat
+> set of folders under `panels/`, tier 1 or tier 3. Passages below that mention
+> apps, `harness_ctx`, or `apps/clock` are kept as the record of the rework as
+> it happened; they no longer describe the code.
 
 Prior art: **DeetsMusic's card system** (`docs/SURFACES-AND-CARDS.md` in that
 repo) — anchored transport + swappable content slots, picker-as-title,
@@ -107,10 +120,9 @@ Default assignment: `{nw: activity, ne: files, sw: tasks, se: web}`, with
 
 ### Demoted out of the tile system
 
-- **`clock`** — a rounding error of information for a half-tile. Drop the *layout
-  instance*, keep `apps/clock/` on disk: [apps.md](apps.md) makes it the dogfood
-  migration for the apps layer. Time moves to the titlebar. (Same status
-  `in_context_files` holds today: on disk, no instance.)
+- **`clock`** — a rounding error of information for a half-tile. Time moves to
+  the titlebar. (Dropped its layout instance here; the app itself was deleted
+  outright later the same day, along with the apps layer it was dogfooding.)
 - **`ollama_ps`** — three numbers. Becomes a **status strip** (thin footer, or
   the right side of the custom titlebar), not a 6×1 cell.
 - **`slash_commands`** — the wrong shape. A list you click is strictly worse than
@@ -156,8 +168,8 @@ Today `renderPanelInstance` injects HTML and runs inline scripts (`runScripts`);
 nothing reverses it. Swapping demands it.
 
 We start ahead of where DeetsMusic started: **`harness._clearPanelSubs(panel)`
-already exists** (`static/panel-shell.js:283`) and drops both `_subs` and the
-app-scoped `_appSubs` for a panel — so the WS-subscription leak class, the one
+already exists** (`static/panel-shell.js:283`) and drops `_subs` for a panel
+— so the WS-subscription leak class, the one
 DeetsMusic called "the load-bearing gotcha", is already centrally solved.
 
 What's *not* solved is everything else a panel's inline script starts:
@@ -223,38 +235,62 @@ needs — one breakpoint is enough.
 
 ---
 
-## Build order
+## Build order — as built
 
-Each phase compiles and is independently testable; behaviour changes only when
-intended.
+All six phases landed together on 2026-08-15.
 
-0. **Prune.** Drop the `clock` / `ollama_ps` / `slash_commands` instances;
-   ollama → status strip; slash → composer typeahead; time → titlebar. Pure
-   subtraction, no architecture change, makes every later phase smaller.
-1. **Teardown contract.** `harness.onUnmount` + a reversible
-   `renderPanelInstance`. Zero visible change; canary the sub tables.
-2. **Merges.** Files gains contexts; pending_writes folds into Activity.
-3. **Slots.** Schema v3, four fixed slots, picker, persistence. Delete
-   tileflow-engine, the flow pass, the tray, pins, states. The big one.
-4. **Summon bus + notify badges.**
-5. **Narrow surface.**
+0. **Prune.** ✅ `slash_commands`, `ollama_ps`, `tool_log`, `pending_writes`
+   deleted; `clock`'s layout instance dropped (the app itself deleted later
+   the same day);
+   `layout/presets/` and `paths.LAYOUT_PRESETS_DIR` removed with the last
+   preset consumer. Ollama moved to `core/ollama.py` + `GET /api/ollama/ps`
+   + the titlebar status strip; time joined it there; slash commands became
+   a `/` typeahead in the composer (`SLASH_COMMANDS` in app.js is now the
+   single table behind both the typeahead and `/help`).
+1. **Teardown contract.** ✅ `harness.onUnmount(panel, fn)`, run before
+   `_clearPanelSubs` and the host clear. Shell-owned `harness.refresh`
+   timers are reversed by the shell. Canary shipped as
+   `harness._subCounts()`.
+2. **Merges.** ✅ `activity` (= tool_log + pending_writes, writes as a
+   banner + header badge), `files` gains Tree / In-context contexts,
+   `in_context_files` kept on disk with the new `"pool": false` flag,
+   `web` dropped `multi_instance`.
+3. **Slots.** ✅ Schema v3, four slots, title-as-picker, server-side
+   persistence, validating load. `static/tileflow-engine.js`, the flow
+   pass, the tray, the FLIP runner, pins, `score_overrides`, and the
+   4-state model all deleted.
+4. **Summon bus + notify.** ✅ `harness.notify` / `clearNotify` /
+   `requestPanel`, plus `POST /api/panels/<name>/summon` and the
+   `panel_summon` WS frame for the server side.
+5. **Narrow surface.** ✅ `data-surface="wide|narrow"` at 1100px; narrow
+   keeps chat + `nw` and genuinely unmounts the other three.
 
-Phases 3 and 5 change visible UI, so per CLAUDE.md they need `preview_start` +
-`preview_eval` (or a screenshot) — route-shape smoke tests via TestClient miss
-CSS/DOM regressions.
+Verified in a real browser, not just via TestClient: all four slot rects
+measure identically (1171×589 at 3432px wide), the 20-swap canary shows zero
+growth in `subs` / `unmountFns` / `refreshTimers` / `tiles`, exchange-on-pick
+works, `requestPanel` no-ops on a placed panel, and the narrow round-trip
+unmounts to 2 tiles and remounts to 5 without leaking.
 
 ---
 
-## Risks / verify
+## Risks — how they actually landed
 
-- **Inline-script teardown** — the main correctness risk. Half of it (WS subs) is
-  already centrally handled; timers and observers are not. Canary it.
-- **Drill vs picker** — without `onHeaderChange`, swapping a drilled Files strands
-  the user. Root-only is what makes destroy-and-remount safe.
-- **Chat WS coupling** — untouched *only* while chat stays anchored. Any variant
+- **Inline-script teardown** — was the main correctness risk, and it is the
+  one that needed real care. `harness.onUnmount` plus shell-owned refresh
+  timers covers it; `harness._subCounts()` is the standing guard. Files is
+  the worked example — its 3s context poll would otherwise tick forever
+  against a detached node.
+- **Drill vs picker** — shipped as `harness.setHeader(panel, {title, atRoot,
+  onBack})`, and the picker refuses to open while `atRoot: false`. Nothing
+  in the pool drills today: the file tree expands in place rather than
+  navigating, so this is a contract waiting for its first caller rather than
+  load-bearing code.
+- **Chat WS coupling** — untouched, as intended. Chat is anchored, never
+  unmounts, and `_chatBootBuffer` still covers the mount race. Any variant
   that slots chat pulls the `app.js` → chat-DOM coupling into scope.
-- **Stale persisted layout** — the validating load is what keeps a renamed or
-  removed panel from bricking the bento.
+- **Stale persisted layout** — `resolve_layout()` handles it and returns
+  `warnings`, so a fallback is visible rather than mysterious. `PUT
+  /api/layout` refuses to persist a bad sheet in the first place.
 
 ---
 
@@ -265,15 +301,43 @@ slots, swap contents, no free-form drag/resize · a panel can't occupy two slots
 (exchange on conflict) · picker = the tile title, root-only · tray **deleted**,
 the picker is the discovery surface · the 4-state model **deleted**, replaced by
 `harness.notify` · layout persisted server-side so the model can edit it ·
-clock/ollama_ps/slash_commands demoted out of the tile system, `apps/clock` stays
-on disk as the apps-layer reference · `web` loses `multi_instance` in favour of
+clock/ollama_ps/slash_commands demoted out of the tile system · `web` loses
+`multi_instance` in favour of
 internal tabs.
+
+Added in the building (2026-08-15): `requestPanel` no-ops rather than
+relocating a placed panel · app instances retired rather than ported ·
+panels can opt out of the pool with `"pool": false`.
+
+## What changed in the building
+
+Three departures from the plan above, all deliberate:
+
+1. **`requestPanel` no-ops on a placed panel** instead of exchanging it into
+   the LRU slot. The plan said exchange; in practice, summoning means "make
+   sure this is visible", and if it already is, moving it is exactly the
+   jitter this rework exists to delete. It notifies instead.
+
+2. **App instances were gone, not ported.** `POST /api/apps/<name>/instances`
+   became a summon — an app's panels were in the pool the moment discovery
+   found them, so there was nothing left to create. This turned out to be the
+   first sign the apps layer wasn't earning its keep; the whole layer was
+   deleted later the same day.
+
+3. **A `"pool": false` manifest flag** was needed and isn't in the plan.
+   `in_context_files` is a renderer with two hosts (the Files tile's second
+   context, and the title menu's Context flyout) and no business offering
+   itself a slot. Rather than special-casing it in the shell, panels can
+   now opt out of the pool.
 
 ## Open
 
-- Where exactly the status strip lives — titlebar right, or a footer bar.
-- Whether Activity's pending-writes banner needs its own notify channel separate
-  from tool calls.
-- Whether the picker should offer "unplace" (leaving a slot empty), or a slot must
-  always hold something. Leaning: always holds something — an empty slot is a
-  layout bug you can't name.
+- Whether Activity's pending-writes banner needs its own notify channel
+  separate from tool calls. Currently: a tool call notifies, a pending write
+  summons — different enough in practice that a second channel hasn't earned
+  itself yet.
+- Whether `web` wants internal tabs after all. Shipped as a single view;
+  revisit if one page at a time starts to chafe.
+- Whether the narrow surface should remember which slot you were looking at
+  rather than always showing `nw`. Fixed is predictable, which was the
+  point, but it does mean a shrink can hide what you were reading.

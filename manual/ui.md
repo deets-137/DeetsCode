@@ -2,14 +2,14 @@
 
 Single-page app. No frameworks, no build step — edit → hard-refresh.
 
-> **Scope note (2026-07):** the *outer* layout is now the panel system —
-> regions + tiles built by `static/panel-shell.js` from
-> `layout/panel_layout.json`, with the tileflow engine arranging the bento
-> (see `docs/panels.md`, `docs/tileflow.md`, `docs/apps.md`). This doc
-> remains accurate for what lives *inside* panel content (the
-> `.nested-panel` primitives, chat DOM ids, event flow in `static/app.js`)
-> — but the top-level tree below is historical: those blocks are now
-> individual panels' view content, not hardcoded index.html structure.
+> **Scope note (updated 2026-08-15):** the *outer* layout is the slot
+> system — an anchored chat column plus four fixed slots, built by
+> `static/panel-shell.js` from `layout/panel_layout.json` (see
+> `docs/slots.md`, `docs/panels.md`). This doc remains
+> accurate for what lives *inside* panel content (the `.nested-panel`
+> primitives, chat DOM ids, event flow in `static/app.js`) — but the
+> top-level tree below is historical: those blocks are individual panels'
+> view content, not hardcoded index.html structure.
 
 ## DOM layout (historical shape — now distributed across panel views)
 

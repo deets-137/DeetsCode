@@ -35,10 +35,6 @@ PANELS_DIR: Path = HARNESS_ROOT / "panels"
 PANEL_LAYOUT_FILE: Path = HARNESS_ROOT / "layout/panel_layout.json"
 # Runtime: last model picked in the UI; persists across server restarts.
 ACTIVE_MODEL_FILE: Path = RUNTIME_DIR / "active_model.txt"
-# Named layout sheets; applied wholesale via the apply_layout_preset tool
-LAYOUT_PRESETS_DIR: Path = HARNESS_ROOT / "layout/presets"
-# App bundles (apps-over-panels primitive) — one folder per app, see docs/apps.md
-APPS_DIR: Path = HARNESS_ROOT / "apps"
 # Tier-3 skin tokens (type/shape/material); parsed by /api/skins for the picker.
 SKIN_CSS: Path = HARNESS_ROOT / "static/skin.css"
 # Tier-1 raw named paints; loaded before theme.css.

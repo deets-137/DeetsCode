@@ -1,24 +1,35 @@
 {
   "schema": 1,
   "name": "files",
-  "title": "files",
+  "title": "Files",
   "tier": 3,
   "author": "host",
   "handler": "server:view",
   "permissions": {
     "network": [],
-    "reads": ["./"],
+    "reads": [
+      "./"
+    ],
     "writes": []
   },
   "display": {
     "shape": "tall",
     "aspect_ratio": null,
-    "min":       { "width": 200, "height": 150 },
-    "preferred": { "width": 320, "height": 360 },
-    "max":       { "width": null, "height": null },
+    "min": {
+      "width": 200,
+      "height": 150
+    },
+    "preferred": {
+      "width": 320,
+      "height": 360
+    },
+    "max": {
+      "width": null,
+      "height": null
+    },
     "scroll": "internal",
     "growable": false
   },
   "anchored": true,
-  "tileflow": { "icon": "📁" }
+  "icon": "📁"
 }

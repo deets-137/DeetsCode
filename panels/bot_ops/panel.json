@@ -1,7 +1,7 @@
 {
   "schema": 1,
   "name": "bot_ops",
-  "title": "bot ops",
+  "title": "Bot ops",
   "tier": 3,
   "author": "host",
   "handler": "server:view",
@@ -13,16 +13,21 @@
   "display": {
     "shape": "tall",
     "aspect_ratio": null,
-    "min":       { "width": 280, "height": 200 },
-    "preferred": { "width": 400, "height": 480 },
-    "max":       { "width": null, "height": null },
+    "min": {
+      "width": 280,
+      "height": 200
+    },
+    "preferred": {
+      "width": 400,
+      "height": 480
+    },
+    "max": {
+      "width": null,
+      "height": null
+    },
     "scroll": "internal",
     "growable": false
   },
   "anchored": true,
-  "tileflow": {
-    "default_state": "dormant",
-    "tray_when_dormant": true,
-    "icon": "🤖"
-  }
+  "icon": "🤖"
 }

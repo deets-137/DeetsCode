@@ -146,14 +146,24 @@ window.bindModelSelect = bindModelSelect;
 document.addEventListener("DOMContentLoaded", bindModelSelect);
 
 // ── Content signals ───────────────────────────────
-// Bridge WS-driven content into tileflow: panels that default to the tray
-// wake when they have something to show and return when they empty. The
-// shell owns the policy (user-minimize wins, badges, etc.) — see
-// harness.signalContent in panel-shell.js. Null-tolerant for boot races.
-function signalPanel(instance, hasContent, opts) {
-  if (window.harness && window.harness.signalContent) {
-    window.harness.signalContent(instance, hasContent, opts);
+// Bridge WS-driven content into the slot shell. The 4-state model is gone;
+// what survives is "this panel has something new" (docs/slots.md "States
+// collapse to a signal"):
+//
+//   signalPanel(name, true)                 → a dot on the picker entry
+//   signalPanel(name, true, {summon: true}) → and a slot, if it isn't placed
+//   signalPanel(name, false)                → clears the dot
+//
+// Only an approval gate earns `summon`. Null-tolerant for boot races.
+function signalPanel(panel, hasContent, opts) {
+  const h = window.harness;
+  if (!h) return;
+  if (!hasContent) {
+    if (h.clearNotify) h.clearNotify(panel);
+    return;
   }
+  if (opts && opts.summon && h.requestPanel) h.requestPanel(panel);
+  else if (h.notify) h.notify(panel);
 }
 
 // ── Task Panel ────────────────────────────────────
@@ -915,6 +925,7 @@ function sendMessage() {
   if (!text || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
 
   if (text.startsWith("/")) {
+    closeSlashMenu();
     handleSlash(text);
     box.value = "";
     return;
@@ -937,65 +948,119 @@ function sendMessage() {
   showThinking();
 }
 
-// ── Slash commands panel ─────────────────────────
-const SLASH_DEFAULTS = [
-  "/read <path> [N-M]         — read file, optional line range",
-  "/search <pattern> [glob=X] [path=Y] — regex search",
-  "/symbols <path>            — list defs/classes with line numbers",
-  "/ls [path]                 — list a directory",
-  "/tree                      — refresh the file tree panel",
-  "/compact                   — summarize + trim conversation",
-  "/help                      — this list",
-].join("\n");
-
-function renderSlashPanel() {
-  const inner = document.getElementById("slash-inner");
-  if (!inner) return;
-  const raw = localStorage.getItem("harness-slash-commands") || SLASH_DEFAULTS;
-  inner.innerHTML = "";
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) continue;
-    const div = document.createElement("div");
-    div.className = "slash-cmd-row";
-    const m = line.match(/^(.+?)\s*—\s*(.+)$/);
-    if (m) {
-      div.innerHTML = `<span class="slash-cmd-name">${escapeHtml(m[1].trim())}</span><span class="slash-cmd-sep"> — </span><span class="slash-cmd-desc">${escapeHtml(m[2].trim())}</span>`;
-    } else {
-      div.innerHTML = `<span class="slash-cmd-name">${escapeHtml(line)}</span>`;
-    }
-    inner.appendChild(div);
-  }
-}
-
-function toggleSlashEdit() {
-  const inner = document.getElementById("slash-inner");
-  const editor = document.getElementById("slash-editor");
-  const btn = document.getElementById("slash-edit-btn");
-  if (editor.style.display !== "none") {
-    localStorage.setItem("harness-slash-commands", editor.value);
-    editor.style.display = "none";
-    inner.style.display = "";
-    btn.textContent = "✎";
-    renderSlashPanel();
-  } else {
-    editor.value = localStorage.getItem("harness-slash-commands") || SLASH_DEFAULTS;
-    inner.style.display = "none";
-    editor.style.display = "";
-    btn.textContent = "✓";
-    editor.focus();
-  }
-}
-
 // ── Slash commands ────────────────────────────────
-const SLASH_HELP = [
-  "/read <path> [N-M]         — read file, optional line range",
-  "/search <pattern> [glob=X] [path=Y] — regex search",
-  "/symbols <path>            — list defs/classes with line numbers",
-  "/ls [path]                 — list a directory",
-  "/tree                      — refresh the file tree panel",
-  "/compact                   — summarize + trim conversation",
-  "/help                      — this list",
-].join("\n");
+// One table, two consumers: /help and the composer typeahead. The
+// slash_commands panel that used to hold a hand-edited copy of this list in
+// localStorage is gone — a list you click was strictly worse than typing "/"
+// with completion, and it cost a tile (docs/slots.md "Demoted out of the
+// tile system").
+const SLASH_COMMANDS = [
+  { name: "read",    args: "<path> [N-M]",                desc: "read file, optional line range" },
+  { name: "search",  args: "<pattern> [glob=X] [path=Y]", desc: "regex search" },
+  { name: "symbols", args: "<path>",                      desc: "list defs/classes with line numbers" },
+  { name: "ls",      args: "[path]",                      desc: "list a directory" },
+  { name: "tree",    args: "",                            desc: "refresh the file tree panel" },
+  { name: "compact", args: "",                            desc: "summarize + trim conversation" },
+  { name: "help",    args: "",                            desc: "this list" },
+];
+
+const SLASH_HELP = SLASH_COMMANDS
+  .map(c => `/${c.name} ${c.args}`.trimEnd().padEnd(36) + `— ${c.desc}`)
+  .join("\n");
+
+// ── Composer typeahead ────────────────────────────
+// A "/" at the start of the composer opens a filtered list under the
+// textarea: ↑/↓ to move, Tab or Enter to complete, Escape to dismiss. Enter
+// only completes while the menu is open — otherwise it sends, as always.
+const _slashMenu = {
+  el: null,
+  items: [],
+  index: 0,
+  get open() { return !!this.el; },
+};
+
+function _slashQuery(box) {
+  // Only from the very start, only on one line — a "/" mid-message is just
+  // a slash, and a multi-line draft isn't a command.
+  const v = box.value;
+  if (!v.startsWith("/") || v.includes("\n")) return null;
+  const m = /^\/([a-z?]*)$/i.exec(v);
+  return m ? m[1].toLowerCase() : null;
+}
+
+function closeSlashMenu() {
+  if (_slashMenu.el) _slashMenu.el.remove();
+  _slashMenu.el = null;
+  _slashMenu.items = [];
+  _slashMenu.index = 0;
+}
+
+function _renderSlashMenu(box, matches) {
+  if (!_slashMenu.el) {
+    const host = box.closest(".chat-input-panel") || box.parentElement;
+    if (!host) return;
+    _slashMenu.el = document.createElement("div");
+    _slashMenu.el.className = "slash-typeahead";
+    _slashMenu.el.setAttribute("role", "listbox");
+    host.appendChild(_slashMenu.el);
+  }
+  _slashMenu.el.innerHTML = "";
+  matches.forEach((c, i) => {
+    const row = document.createElement("button");
+    row.type = "button";
+    row.className = "slash-typeahead-item" + (i === _slashMenu.index ? " is-active" : "");
+    row.setAttribute("role", "option");
+    row.innerHTML =
+      `<span class="slash-cmd-name">/${escapeHtml(c.name)}</span>` +
+      (c.args ? `<span class="slash-cmd-args">${escapeHtml(c.args)}</span>` : "") +
+      `<span class="slash-cmd-desc">${escapeHtml(c.desc)}</span>`;
+    // mousedown, not click: a click would blur the composer first.
+    row.addEventListener("mousedown", (e) => {
+      e.preventDefault();
+      _applySlashCompletion(box, c);
+    });
+    _slashMenu.el.appendChild(row);
+  });
+}
+
+function _applySlashCompletion(box, cmd) {
+  box.value = `/${cmd.name}` + (cmd.args ? " " : "");
+  closeSlashMenu();
+  box.focus();
+}
+
+function updateSlashMenu(box) {
+  const q = _slashQuery(box);
+  if (q === null) { closeSlashMenu(); return; }
+  const matches = SLASH_COMMANDS.filter(c => c.name.startsWith(q));
+  if (!matches.length) { closeSlashMenu(); return; }
+  if (_slashMenu.index >= matches.length) _slashMenu.index = 0;
+  _slashMenu.items = matches;
+  _renderSlashMenu(box, matches);
+}
+
+// Returns true when it consumed the key — the caller must not also send.
+function handleSlashKey(box, e) {
+  if (!_slashMenu.open) return false;
+  const n = _slashMenu.items.length;
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    _slashMenu.index = (_slashMenu.index + (e.key === "ArrowDown" ? 1 : n - 1)) % n;
+    _renderSlashMenu(box, _slashMenu.items);
+    return true;
+  }
+  if (e.key === "Escape") { e.preventDefault(); closeSlashMenu(); return true; }
+  if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+    e.preventDefault();
+    _applySlashCompletion(box, _slashMenu.items[_slashMenu.index]);
+    return true;
+  }
+  return false;
+}
+
+window.updateSlashMenu = updateSlashMenu;
+window.handleSlashKey = handleSlashKey;
+window.closeSlashMenu = closeSlashMenu;
 
 function handleSlash(text) {
   const parts = text.trim().slice(1).split(/\s+/);
@@ -1003,10 +1068,15 @@ function handleSlash(text) {
 
   if (cmd === "help" || cmd === "?") {
     clearToolPanel();
+    // The tool stream lives in Activity, which may not be placed — summon it
+    // before writing, or /help would print into nothing.
+    if (window.harness && window.harness.requestPanel) window.harness.requestPanel("activity");
+    const inner = document.getElementById("tool-panel-inner");
+    if (!inner) { log(SLASH_HELP, "info"); return; }
     const entry = document.createElement("div");
     entry.className = "tool-entry";
     entry.innerHTML = `<div class="tool-name">/help</div><div class="tool-result">${escapeHtml(SLASH_HELP)}</div>`;
-    document.getElementById("tool-panel-inner").appendChild(entry);
+    inner.appendChild(entry);
     return;
   }
   if (cmd === "tree") { refreshTree(); log("refreshed file tree", "info"); return; }
@@ -1213,23 +1283,14 @@ function setInputEnabled(enabled) {
   if (stop) stop.disabled = enabled;
 }
 
-// ── Pending writes panel ──────────────────────────
+// ── Pending writes ────────────────────────────────
+// The queue itself is rendered server-side by the Activity panel (it reads
+// tools.pending_writes directly and re-renders on the same WS events). All
+// this has to do is decide whether the panel deserves a slot: an approval
+// gate is the one thing worth interrupting the layout for.
 function showPendingWrites(writes) {
   const files = Object.keys(writes);
-  // Approval gate: queued writes demand attention, so wake to focused.
-  signalPanel("pending_writes", files.length > 0, { wake: "focused" });
-  const inner = document.getElementById("pending-panel-inner");
-  const count = document.getElementById("pending-count");
-  if (!inner || !count) return;
-  count.textContent = String(files.length);
-  if (files.length === 0) {
-    inner.innerHTML = `<span class="pending-empty">queue is empty</span>`;
-    return;
-  }
-  inner.innerHTML = files.map(f => {
-    const bytes = writes[f] ? writes[f].length : 0;
-    return `<div class="pending-row"><span class="pending-path">${escapeHtml(f)}</span><span class="pending-bytes">${bytes.toLocaleString()} B</span></div>`;
-  }).join("");
+  signalPanel("activity", files.length > 0, { summon: true });
 }
 
 // ── Context files ─────────────────────────────────
@@ -1238,7 +1299,7 @@ const contextFiles = new Set();
 function addContextFile(path) {
   if (contextFiles.has(path)) return;
   contextFiles.add(path);
-  signalPanel("in_context_files", true);
+  signalPanel("files", true);
   // Trigger the panel to refresh from server-side tools.read_files. Direct DOM
   // poke retained for backward compat with anyone querying #context-files
   // before the new panel hydrates.
@@ -1262,7 +1323,7 @@ function updateContextBar(total, max) {
 
 function clearContextFiles() {
   contextFiles.clear();
-  signalPanel("in_context_files", false);
+  signalPanel("files", false);
   const el = document.getElementById("context-files");
   if (el) el.innerHTML = "";
 }
@@ -1329,11 +1390,11 @@ function renderToolArgs(name, args) {
   }
 }
 
-// tool_log is client-push-only (no server-side hydration), so the panel's
-// DOM is rebuilt empty on every tray round-trip. This buffer is the
-// session-long source of truth: every entry lands here, and the panel view
-// re-renders the whole log from it on mount (_flushToolLogBuffer). Capped
-// so a marathon session can't grow it unbounded.
+// The tool stream is client-push-only (no server-side hydration), and the
+// Activity panel's DOM is rebuilt empty on every slot swap. This buffer is
+// the session-long source of truth: every entry lands here, and the panel
+// view re-renders the whole log from it on mount (_flushToolLogBuffer).
+// Capped so a marathon session can't grow it unbounded.
 const _toolLogBuffer = [];
 const _TOOL_LOG_MAX = 200;
 
@@ -1358,11 +1419,11 @@ function _renderToolResult(content) {
 }
 
 function addToolEntry(name, args) {
-  signalPanel("tool_log", true);
+  signalPanel("activity", true);
   _toolLogBuffer.push({ name, args, result: undefined });
   if (_toolLogBuffer.length > _TOOL_LOG_MAX) _toolLogBuffer.shift();
   const inner = document.getElementById("tool-panel-inner");
-  if (!inner) return;  // trayed — the mount flush will render it
+  if (!inner) return;  // Activity not placed — the mount flush will render it
   const entry = _renderToolEntry(name, args);
   inner.appendChild(entry);
   inner.scrollTop = inner.scrollHeight;
@@ -1373,13 +1434,13 @@ function updateToolResult(content) {
   // The buffer record is canonical (it's what a remount re-renders from).
   const last = _toolLogBuffer[_toolLogBuffer.length - 1];
   if (last && last.result === undefined) last.result = content;
-  if (!currentToolEntry) return;  // trayed — flush renders result with entry
+  if (!currentToolEntry) return;  // not placed — flush renders result with entry
   currentToolEntry.appendChild(_renderToolResult(content));
   const inner = document.getElementById("tool-panel-inner");
   if (inner) inner.scrollTop = 999999;
 }
 
-// Called by the tool_log view's inline script on mount: re-render the whole
+// Called by the Activity view's inline script on mount: re-render the whole
 // session log into the fresh (empty) container.
 window._flushToolLogBuffer = function () {
   const inner = document.getElementById("tool-panel-inner");
@@ -1394,7 +1455,7 @@ window._flushToolLogBuffer = function () {
 };
 
 function clearToolPanel() {
-  signalPanel("tool_log", false);
+  signalPanel("activity", false);
   _toolLogBuffer.length = 0;
   const inner = document.getElementById("tool-panel-inner");
   if (inner) inner.innerHTML = "";
@@ -1436,6 +1497,58 @@ async function refreshPendingPanel() {
   } catch (e) { /* server not up yet */ }
 }
 
+
+// ── Titlebar status strip ─────────────────────────
+// Time and Ollama's GPU/CPU split. Both were bento tiles until the slot
+// rework; neither was ever worth a tile (docs/slots.md "Demoted out of the
+// tile system"). Read-only, so the titlebar is the right home.
+
+function _tickClock() {
+  const el = document.getElementById("status-clock");
+  if (!el) return;
+  const now = new Date();
+  el.textContent = now.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  el.title = now.toLocaleDateString([], { weekday: "long", month: "long", day: "numeric" });
+}
+
+async function _tickOllama() {
+  const el = document.getElementById("status-ollama");
+  if (!el) return;
+  try {
+    const r = await fetch("/api/ollama/ps");
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    const { models } = await r.json();
+    if (!models || !models.length) {
+      // Nothing loaded and "ollama not installed" look the same on purpose —
+      // in both cases there is no split to report.
+      el.textContent = "";
+      el.hidden = true;
+      return;
+    }
+    el.hidden = false;
+    // One model is the common case; more than one, show the count and the
+    // split of the first (the strip is a glance, not a table).
+    const m = models[0];
+    const extra = models.length > 1 ? ` +${models.length - 1}` : "";
+    el.textContent = `${m.gpu_pct}% GPU${extra}`;
+    el.title = models
+      .map(x => `${x.name} ${x.size} — GPU ${x.gpu_pct}% / CPU ${x.cpu_pct}%`)
+      .join("\n");
+    el.classList.toggle("is-cpu-heavy", m.cpu_pct > m.gpu_pct);
+  } catch (e) {
+    el.hidden = true;
+  }
+}
+
+function startStatusStrip() {
+  _tickClock();
+  _tickOllama();
+  // Clock on the minute boundary, so it never shows a stale minute; Ollama
+  // every 5s, matching the cadence the old panel polled at.
+  setInterval(_tickClock, 15000);
+  setInterval(_tickOllama, 5000);
+}
+
 // ── Boot ──────────────────────────────────────────
 // Enter-to-send is bound inside panels/chat/view.html now — that script
 // runs after panel-shell injects #chat-textbox, so the listener attaches
@@ -1452,8 +1565,8 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   bindSettingsControls();
+  startStatusStrip();
 
-  renderSlashPanel();
   connect();
   loadPromptModes();
 });
@@ -1463,16 +1576,19 @@ document.addEventListener("DOMContentLoaded", () => {
 
 let currentMode = "DeetsCode";
 
-// Per-instance mode-visibility. Looks up by [data-instance="..."] which
-// every panel-shell instance wrapper sets.
-// Empty since the game/blog modes were deleted (2026-08); repopulate when a
-// mode needs per-instance visibility again. Keep in sync with
-// panel-shell.js's INSTANCE_MODE_RULES.
+// Per-panel mode-visibility, looked up by [data-panel-name="..."]. Empty
+// since the game/blog modes were deleted (2026-08); repopulate when a mode
+// needs per-panel visibility again.
+//
+// This used to need keeping in sync with a second table in panel-shell.js
+// (INSTANCE_MODE_RULES, applied at hoist time to prevent a first-paint
+// flash). The slot shell mounts from a server-resolved layout and applies
+// mode_overrides in the same pass, so there is one table again — this one.
 const _PANEL_HIDE_RULES = [];
 
 function applyModeVisibility() {
   for (const r of _PANEL_HIDE_RULES) {
-    const el = document.querySelector(`[data-instance="${r.instance}"]`);
+    const el = document.querySelector(`[data-panel-name="${r.panel}"]`);
     if (!el) continue;
     let hide;
     if (r.showOnlyIn) hide = !r.showOnlyIn.includes(currentMode);
@@ -1480,8 +1596,8 @@ function applyModeVisibility() {
     else hide = false;
     el.classList.toggle("mode-hidden", hide);
   }
-  // Let the panel-shell apply layout-config mode_overrides too (region
-  // widths/visibility declared in panel_layout.json).
+  // Let the panel-shell apply layout-config mode_overrides too (per-slot
+  // visibility declared in panel_layout.json).
   if (typeof window.harnessApplyLayoutMode === "function") {
     window.harnessApplyLayoutMode(currentMode);
   }

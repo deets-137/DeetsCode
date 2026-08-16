@@ -6,7 +6,7 @@ lifetime and audience. Skim this top-to-bottom once; bookmark for the
 
 | Layer | Lifetime | Reached via | Best for |
 |---|---|---|---|
-| **DOM attributes** | live | DevTools → Inspect | "why is this panel sized like that, right now" |
+| **DOM attributes** | live | DevTools → Inspect | "which panel is in which slot, and does it think it has news" |
 | **In-memory rings** | this tab's session | browser console (`harness.*`) | "what just happened in the last minute" |
 | **SQLite tables** | forever | HTTP endpoints + `storage.py` | "is this panel ever used / what did I do last week" |
 
@@ -14,20 +14,25 @@ lifetime and audience. Skim this top-to-bottom once; bookmark for the
 
 ## 1. DOM-level — visible without any console
 
-Every panel node carries `data-tileflow-*` attributes the engine writes
-on every flow pass. Hover-inspect any `.panel-instance` to read them:
+There is much less to read than there used to be, because there is much less
+being decided: no score, no size class, no bin. Hover-inspect any
+`.panel-instance`:
 
 | Attribute | Meaning |
 |---|---|
-| `data-instance` | Layout-instance id (e.g. `tool_log`). |
-| `data-tileflow-state` | Current state: `dormant` / `idle` / `active` / `focused`. |
-| `data-tileflow-class` | Effective size class: `icon` / `small` / `medium` / `large` / `hero`. |
-| `data-tileflow-score` | Final score the engine computed for this panel this pass. |
-| `data-tileflow-order` | CSS `order` value driving grid placement (negative of score). |
-| `data-app` / `data-app-instance` | Owning app + app-instance id, on app-owned tiles and tray icons only. The `.panel-app-chip` in the header shows the same. |
-| `data-instance-config` | JSON of the layout instance's `config` dict, on `.panel-content` (tier-1 consumption path). |
+| `data-panel-name` / `data-instance` | The panel name. Identical — one panel is one instance. |
+| `data-slot` | Which slot holds it: `nw` / `ne` / `sw` / `se`. Absent on the anchored chat tile. |
+| `data-tier` | Panel tier (0/1/3). |
+| `.has-notify` (class) | This panel is flagged "has something new" — the dot on the header. |
+
+Two more live on `<html>`, alongside `data-theme` / `data-skin`:
+
+| Attribute | Meaning |
+|---|---|
+| `data-surface` | `wide` (2×2 bento) or `narrow` (chat + one slot, below 1100px). |
 
 If a panel looks wrong, this is the first place to look — no script required.
+"Why is it *there*?" has a one-word answer now: because you put it there.
 
 ---
 
@@ -36,37 +41,39 @@ If a panel looks wrong, this is the first place to look — no script required.
 Available in every tab once `static/panel-shell.js` boots. All in-memory;
 nothing persists past a page reload.
 
-### Layout & engine
+### Layout
 
 | Call | Returns | Purpose |
 |---|---|---|
-| `harness.tileflow.dump()` | array of rows | Console-table every panel's current decision (bin, class, score, natural_class, state). Sorted by score desc. |
-| `harness.tileflow.WEIGHTS` | live object | The score-weights table. Edit in place to experiment; call `recomputeLayout` after. |
-| `harness.tileflow.setWeights(partial)` | — | Shallow-merge a partial weights object; auto-recomputes. |
-| `harness.tileflow.resetWeights()` | — | Restore defaults. |
-| `harness.tileflow.flowPass(items, gridCfg)` | decisions | Pure decision function — feed synthetic inputs to predict outcomes. |
-| `harness.tileflow.naturalClass(manifest, gridCfg)` | class name | "What class would this manifest get with no state bonus?" |
-| `harness.tileflow.effectiveClass(state, naturalCls, manifest, gridCfg)` | class name | Same, with state promotion + min/max clamping applied. |
-| `harness.tileflow.score(state, cls, overrides, lastStateChangeAt, nowMs)` | int | Single panel's score in isolation. |
-| `harness.gridConfig()` | `{cols, rowPx, gapPx, colPx, bentoWidthPx}` | Live measurement of the bento grid. Useful for `setSpan` math. |
-| `harness.getState(instanceId)` | state string | Peek current state without mutating. |
-| `harness.recomputeLayout()` | — | Force a flow pass without changing state. Use after editing WEIGHTS. |
-| `harness.debugInstances()` | `{id: layoutInstance}` | Snapshot of the shell's live instance index — the fastest way to check whether a `layout_updated` re-sync actually landed (pins, floors, app fields). |
-| `harness.app.of(el)` | `{app, appInstance, instance, panel}` | Identity of the tile enclosing any element. |
+| `harness.slots()` | `{nw, ne, sw, se}` | Which panel is in which slot. The fastest way to check whether a `layout_updated` re-sync actually landed. |
+| `harness.pool()` | `[name, ...]` | Panels eligible for a slot, in picker order. If a panel you wrote isn't here, check `/api/panels` errors and its `pool` flag. |
+| `harness.requestPanel(name)` | — | Summon into the least-recently-touched slot. Handy for testing a panel without hunting for its picker entry. |
+| `harness.notify(name)` / `harness.clearNotify(name)` | — | Toggle the "has something new" dot by hand. |
 
-### Runtime cell sizing
+### Leak canary
 
-| Call | Purpose |
-|---|---|
-| `harness.setSpan(instance, {cols, rows} \| null)` | Override a panel's bento cell shape past the size-class table. Pass `null` to clear. For panels whose ideal shape depends on runtime content (e.g. matching a video's aspect ratio). |
+| Call | Returns | Purpose |
+|---|---|---|
+| `harness._subCounts()` | `{panels, subs, unmountFns, refreshTimers, tiles}` | The single most useful number in this document. Swap a slot 20× and assert **none of these grow**. A climbing `refreshTimers` or `tiles` means a panel's teardown is broken — see [panels.md § Teardown](panels.md). |
+
+```js
+// The canary, as a one-liner you can paste into any tab.
+const before = harness._subCounts();
+for (let i = 0; i < 20; i++) {
+  harness.requestPanel(i % 2 ? 'activity' : 'bot_ops');
+  await new Promise(r => setTimeout(r, 120));
+}
+await new Promise(r => setTimeout(r, 800));
+console.table([before, harness._subCounts()]);
+```
 
 ### Interaction ring (debug-side of system_log)
 
 | Call | Purpose |
 |---|---|
-| `harness.activity.dump(limit?)` | Console-table the last N (≤1000) UI events: clicks, state transitions, bin migrations, panel-emitted custom signals. |
+| `harness.activity.dump(limit?)` | Console-table the last N (≤1000) UI events: clicks, slot placements, notifies, panel-emitted custom signals. |
 | `harness.activity.flush()` | Force the debounced WS flush immediately. Mostly for tests. |
-| `harness.logInteraction(instance, kind, meta?)` | Emit a custom event from a panel script. Fire-and-forget; never throws. |
+| `harness.logInteraction(panel, kind, meta?)` | Emit a custom event from a panel script. Fire-and-forget; never throws. |
 
 ### WebSocket plumbing
 
@@ -86,7 +93,7 @@ Plain curl / browser-bar friendly. All read-only unless noted.
 
 | Method | URL | Purpose |
 |---|---|---|
-| GET | `/api/panels` | All discovered panels (name, title, tier, anchored, multi_instance, display, tileflow, url) plus a `errors` map for any that failed to load. |
+| GET | `/api/panels` | All discovered panels (name, title, tier, anchored, multi_instance, display, icon) plus an `errors` map for any that failed to load. |
 | GET | `/api/panels/{name}` | One panel's full manifest, by-alias dump. |
 | POST | `/api/panels/reload` | Rescan `panels/`. Picks up new panels and tier-1 view edits without a server restart; tier-3 modules re-import too. |
 
@@ -94,35 +101,18 @@ Plain curl / browser-bar friendly. All read-only unless noted.
 
 | Method | URL | Purpose |
 |---|---|---|
-| GET | `/api/layout` | Current layout JSON — regions, instances, pins, mode_overrides, grid config. |
-| PUT | `/api/layout` | Replace the layout (validated via Pydantic before write). |
-| POST | `/api/layout/instances/{id}/pin` body `{col, row, cols, rows}` | Pin an instance to a grid cell. |
-| DELETE | `/api/layout/instances/{id}/pin` | Unpin. |
+| GET | `/api/layout` | The resolved slot sheet: `slots`, `anchored`, `mode_overrides`, plus `pool` (what the picker offers) and `warnings` (slots that fell back because the panel they named is gone). **Check `warnings` first** when a panel you expected isn't on screen. |
+| PUT | `/api/layout` | Replace the slot sheet (validated before write). Rejects duplicates, empties, and non-pool panels with a 400 listing each problem. |
+| POST | `/api/panels/{name}/summon` | Ask every connected tab to give this panel a slot. |
 
-All three layout writes broadcast a `layout_updated` WS frame; every
+Both layout writes broadcast a `layout_updated` WS frame; every
 connected tab re-syncs live (no reload).
-
-### Apps
-
-| Method | URL | Purpose |
-|---|---|---|
-| GET | `/api/apps` | Discovered app manifests + per-app load errors. |
-| GET | `/api/apps/{name}` | One app manifest. |
-| POST | `/api/apps/reload` | Re-discover apps, then panels. |
-| POST | `/api/apps/{name}/instances` | Launch an app instance (mounts its panels live). |
-| DELETE | `/api/apps/{name}/instances/{app_instance}` | Unmount one app instance. |
-| POST | `/api/apps/{name}/update` | Bundle update from zip; `?reset_state=1` for state wipes. See [apps.md](apps.md). |
-
-App state DBs are plain sqlite at `apps/<app>/state/<app_instance>.db`
-(table `state(key, value, schema_version, updated_at)`) — open them
-directly when debugging an app's ledger.
 
 ### Tileflow runtime overlay
 
 | Method | URL | Purpose |
 |---|---|---|
-| POST | `/api/tileflow/state/{instance_id}` body `{state}` | Push a runtime state overlay. Broadcasts a `tileflow_state` WS frame to every connected tab — the bento glides on screen. |
-| DELETE | `/api/tileflow/state/{instance_id}` | Clear the overlay; broadcasts `idle` (clients fall back to manifest `default_state`). |
+| GET | `/api/ollama/ps` | Loaded Ollama models + GPU/CPU split. What the titlebar status strip polls; useful on its own for "did the model spill out of VRAM". |
 
 ### Interaction log (system_log)
 
@@ -146,14 +136,15 @@ for the meta shape per kind.
 | GET / DELETE | `/pending` | Pending writes the model has queued for approval. |
 | GET | `/api/events` | Recorded WS frames for a session (replay surface). |
 | GET | `/api/events/sessions` | List of sessions with event counts + last activity, live flag included. |
-| GET | `/api/themes` | Available theme CSS files. |
+| GET | `/api/themes` | Discovered `[data-theme]` blocks + swatch colors, parsed from `static/theme.css`. |
+| GET | `/api/skins` | Discovered `[data-skin]` blocks, parsed from `static/skin.css`. |
 
 ---
 
 ## 4. SQLite tables — direct DB access
 
 `storage.db` lives under `.harness/` (gitignored). Open it with the
-`sqlite3` CLI or via the Python helpers in [storage.py](../storage.py).
+`sqlite3` CLI or via the Python helpers in [core/storage.py](../core/storage.py).
 
 | Table | What's in it | Helper functions |
 |---|---|---|
@@ -193,7 +184,7 @@ sqlite3 .harness/storage.db "
 sqlite3 .harness/storage.db "
   SELECT datetime(ts/1000, 'unixepoch') AS when, kind, meta_json
   FROM system_log
-  WHERE instance = 'tool_log'
+  WHERE instance = 'activity'
   ORDER BY ts DESC LIMIT 50;
 "
 ```
@@ -249,6 +240,7 @@ call at the relevant DOM-mutation site.
 ## Cross-references
 
 - [panels.md § Interaction logging](panels.md#interaction-logging-system_log) — the panel-author view of `system_log`.
-- [tileflow.md § Debug surface](tileflow.md#debug-surface) — deeper coverage of `data-tileflow-*` and `harness.tileflow.dump()`.
+- [slots.md](slots.md) — the layout system these surfaces describe: the four slots, the picker, and the teardown contract the canary exists to guard.
+- [tileflow.md](tileflow.md) — the retired scored engine. Nothing in it is live; useful only for reading old commits.
 - [../CLAUDE.md](../CLAUDE.md) — project orientation. Mentions storage.db and the additive-schema discipline.
-- [../storage.py](../storage.py) — every SQL table is defined in `_init_schema` with a block comment explaining its rationale.
+- [core/storage.py](../core/storage.py) — every SQL table is defined in `_init_schema` with a block comment explaining its rationale.

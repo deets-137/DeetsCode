@@ -1,106 +1,13 @@
 {
-  "schema": 2,
-  "regions": [
-    {
-      "id": "left",
-      "anchor": "left",
-      "width": "30%",
-      "stack": "vertical",
-      "kind": "stack"
-    },
-    {
-      "id": "bento",
-      "anchor": "center",
-      "width": "auto",
-      "stack": "vertical",
-      "kind": "bento"
-    },
-    {
-      "id": "tray",
-      "anchor": "right",
-      "width": "52px",
-      "stack": "vertical",
-      "kind": "tray"
-    }
+  "schema": 3,
+  "slots": {
+    "nw": "activity",
+    "ne": "files",
+    "sw": "task_list",
+    "se": "web"
+  },
+  "anchored": [
+    "chat"
   ],
-  "instances": [
-    {
-      "instance": "chat",
-      "panel": "chat",
-      "region": "left",
-      "anchored": true,
-      "grow": true
-    },
-    {
-      "instance": "tool_log",
-      "panel": "tool_log",
-      "region": "bento",
-      "anchored": false,
-      "grow": false
-    },
-    {
-      "instance": "pending_writes",
-      "panel": "pending_writes",
-      "region": "bento",
-      "anchored": false,
-      "grow": false
-    },
-    {
-      "instance": "slash_commands",
-      "panel": "slash_commands",
-      "region": "bento",
-      "anchored": false,
-      "grow": false
-    },
-    {
-      "instance": "task_list",
-      "panel": "task_list",
-      "region": "bento",
-      "anchored": false,
-      "grow": false
-    },
-    {
-      "instance": "files",
-      "panel": "files",
-      "region": "bento",
-      "anchored": true,
-      "grow": false
-    },
-    {
-      "instance": "clock",
-      "panel": "clock",
-      "region": "bento",
-      "app": "clock",
-      "anchored": false,
-      "grow": false
-    },
-    {
-      "instance": "ollama_ps",
-      "panel": "ollama_ps",
-      "region": "bento",
-      "anchored": false,
-      "grow": false
-    },
-    {
-      "instance": "web",
-      "panel": "web",
-      "region": "bento",
-      "anchored": false,
-      "grow": false
-    },
-    {
-      "instance": "bot_ops",
-      "panel": "bot_ops",
-      "region": "bento",
-      "anchored": true,
-      "grow": false
-    }
-  ],
-  "mode_overrides": {},
-  "grid": {
-    "cols": 12,
-    "row_height_px": 120,
-    "gap_px": 12,
-    "narrow_breakpoint_px": 1200
-  }
+  "mode_overrides": {}
 }

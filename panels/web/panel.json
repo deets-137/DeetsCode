@@ -1,25 +1,36 @@
 {
   "schema": 1,
   "name": "web",
-  "title": "web",
+  "title": "Web",
   "tier": 1,
   "author": "host",
   "view": "view.html",
   "permissions": {
-    "network": ["*"],
+    "network": [
+      "*"
+    ],
     "reads": [],
     "writes": []
   },
   "display": {
     "shape": "free",
     "aspect_ratio": null,
-    "min":       { "width": 280, "height": 200 },
-    "preferred": { "width": 520, "height": 360 },
-    "max":       { "width": null, "height": null },
+    "min": {
+      "width": 280,
+      "height": 200
+    },
+    "preferred": {
+      "width": 520,
+      "height": 360
+    },
+    "max": {
+      "width": null,
+      "height": null
+    },
     "scroll": "internal",
     "growable": true
   },
   "anchored": false,
-  "multi_instance": true,
-  "tileflow": { "icon": "🌐", "default_state": "dormant" }
+  "multi_instance": false,
+  "icon": "🌐"
 }

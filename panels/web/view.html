@@ -11,10 +11,15 @@
 <div class="web-panel-wrap" style="display:flex;flex-direction:column;height:100%;min-height:200px;">
   <div class="web-panel-status" id="web-status"
        style="font-size:11px;opacity:.55;padding:4px 2px;font-family:monospace;"></div>
+  <!-- No background until something is actually loaded: a hardcoded #fff
+       renders as a white slab in every dark theme, which is most of them.
+       The `is-loaded` class (set on the first real navigation) restores it,
+       since pages do assume an opaque white canvas. -->
   <iframe id="web-frame"
           sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-presentation"
           referrerpolicy="no-referrer"
-          style="flex:1;width:100%;border:1px solid var(--glass-border,#444);border-radius:3px;background:#fff;"
+          style="flex:1;width:100%;border:1px solid var(--border,var(--glass-border,#444));
+                 border-radius:var(--radius-inner,3px);background:transparent;"
           src="about:blank"></iframe>
 </div>
 
@@ -46,6 +51,7 @@
 
   frame.addEventListener("load", () => {
     if (frame.src && frame.src !== "about:blank") {
+      frame.style.background = "#fff";
       statusEl.textContent = "loaded — sites that send X-Frame-Options/CSP frame-ancestors will appear blank";
     }
   });

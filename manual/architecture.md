@@ -26,9 +26,7 @@ tools/            Tool package (see manual/tools.md).
   coding.py         DeetsCode pack: write_file, edit_file, search,
                     list_symbols, list_context_files, run_command.
 panels/           Self-contained UI panels (see docs/panels.md); loader.py is
-                  discovery + layout schema + tier-3 rendering + harness_ctx.
-apps/             Multi-panel app bundles (see docs/apps.md); loader.py +
-                  context.py (HarnessContext). apps/hello/ is the reference.
+                  discovery + layout schema + tier-3 rendering.
 storage.py        SQLite wrapper: sessions, games, moves, events, system_log.
 discord_bot.py    Alternate frontend (dormant). Shares server-side logic.
 bot_cogs/         Bot helpers: bot_media.py per-tool media extractors,
@@ -41,13 +39,13 @@ prompts/          Per-mode prompt files (DeetsCode.md only today).
                   load_prompt_template() reads prompts/<mode>.md per turn.
 manual/           Project-scoped manual docs (this project's self-docs;
                   loaded on demand via list_manual/load_manual).
-layout/           panel_layout.json (the UI layout) + presets/ (named layout
-                  sheets for apply_layout_preset).
+layout/           panel_layout.json — the slot sheet (schema v3: which panel
+                  is in which of the four slots). See docs/slots.md.
 static/
   index.html      Single-page UI shell.
   app.js          WS singleton, chat DOM, mode switching.
-  panel-shell.js  Panel/region rendering, tileflow DOM mutations, harness.* API.
-  tileflow-engine.js  Pure scoring/placement engine.
+  panel-shell.js  The slot shell: anchor column + four slots, the picker,
+                  panel mount/unmount, harness.* API.
   style.css       Layout + glass design language.
   theme.css       Palette variables per theme.
 requirements.txt  fastapi, uvicorn[standard], openai, httpx
@@ -74,7 +72,6 @@ requirements.txt  fastapi, uvicorn[standard], openai, httpx
 - `messages: list[dict]` — per-WebSocket conversation. Cleared on `set_dir` or `reset`. **`set_prompt` (mode switch) scrubs tool artifacts** from it but keeps user/assistant text.
 - `pending_writes: dict[str, str]` — module global in `tools/core.py`. File writes queued until user Applies/Rejects.
 - `read_files: list[str]` — module global in `tools/core.py`. Tracks which files the model has read.
-- App state — per-app-instance sqlite at `apps/<app>/state/<app_instance>.db`, written via `harness_ctx.app_state` (see docs/apps.md). Survives restarts and bundle updates.
 - `selected_prompt: str` — per-WebSocket. Active mode ("DeetsCode" today).
 - `project_dir: Path` — module global in `server.py`. The project the agent is working on.
 - `state: dict` — per-turn only (created fresh in `agent_loop`). Holds the cached `file_tree` and streaming handles.

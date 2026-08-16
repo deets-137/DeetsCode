@@ -17,10 +17,10 @@ single user, state in module globals + per-WebSocket locals + SQLite.
 | WS     | `/ws`        | bidirectional JSON events                   | `app.js connect()`  |
 | GET    | `/*`         | static files under `static/`                | browser             |
 
-Panel/layout/tileflow/system_log routes (`/api/panels*`, `/api/layout*`,
-`/api/tileflow/*`, `/api/system_log*`, `/panels/<name>/view|action|static`)
-are cataloged in `docs/panels.md` § Endpoints and `docs/diagnostics.md`;
-app lifecycle routes (`/api/apps*`) in `docs/apps.md` § Endpoints.
+Panel/layout/system_log routes (`/api/panels*`, `/api/layout`,
+`/api/system_log*`, `/panels/<name>/view|action|static`) are cataloged in
+`docs/panels.md` § Endpoints and `docs/diagnostics.md`;
+panel routes in `docs/panels.md` § Endpoints.
 
 ## WebSocket protocol
 
@@ -64,10 +64,8 @@ with a `type` the client's `ws.onmessage` switches on.
 | `reset_complete` | —                                   | clear UI after a reset                           |
 | `done`           | —                                   | turn over; re-enable input                       |
 | `task_updated`   | —                                   | task panel should refresh                        |
-| `tileflow_state` | `instance, state`                   | runtime bento-state overlay (replayed on connect)|
-| `tileflow_recompute` | —                               | client re-runs its flow pass                     |
-| `layout_updated` | —                                   | persisted layout changed; client re-syncs from `/api/layout` |
-| `app_event`      | `app_id, app_instance, event_name, payload` | app-scoped panel event (see docs/apps.md) |
+| `panel_summon`   | `panel: str`                        | give this panel a slot (see docs/slots.md)       |
+| `layout_updated` | —                                   | slot sheet changed; client re-syncs from `/api/layout` |
 
 `done` is guaranteed by the `finally` block in `agent_loop`, even on cancel or
 exception. The client relies on this to un-gray the input.

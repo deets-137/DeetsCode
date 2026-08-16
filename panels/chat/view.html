@@ -19,7 +19,7 @@
   ">set</button>
 </div>
 
-<div class="chat-input-panel">
+<div class="chat-input-panel chat-composer">
   <textarea id="chat-textbox" class="chat-textbox" placeholder="Message... (Enter to send, Shift+Enter for newline)"></textarea>
   <div class="chat-actions">
     <button id="stop-btn" class="chat-action-btn" onclick="cancelRun()" disabled>stop</button>
@@ -47,11 +47,22 @@
   // Enter to send, Shift+Enter for newline. Used to live in app.js's
   // DOMContentLoaded handler — moved here because #chat-textbox doesn't
   // exist until this view injects, which happens after DOMContentLoaded.
+  //
+  // The slash typeahead gets first refusal on every keydown: while its menu
+  // is open, Enter/Tab complete the command instead of sending. It returns
+  // true when it consumed the key.
   box.addEventListener("keydown", (e) => {
+    if (typeof window.handleSlashKey === "function" && window.handleSlashKey(box, e)) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       if (typeof window.sendMessage === "function") window.sendMessage();
     }
+  });
+  box.addEventListener("input", () => {
+    if (typeof window.updateSlashMenu === "function") window.updateSlashMenu(box);
+  });
+  box.addEventListener("blur", () => {
+    if (typeof window.closeSlashMenu === "function") window.closeSlashMenu();
   });
 
   // Drain anything app.js logged before the panel mounted (e.g. the

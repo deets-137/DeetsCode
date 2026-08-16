@@ -16,9 +16,11 @@ multi-tenant or production use. · **Platform:** Tauri shell + Python server + W
 - **Context management** — tool results older than the three most recent are replaced with
   elided stubs to hold long sessions inside the context window; a manual `compact` collapses
   history into a summary.
-- **Self-arranging UI** — 9 of the 16 core tools are layout tools. The model scores and
-  repositions its own panels ([docs/tileflow.md](docs/tileflow.md)), demoting idle ones to
-  an icon tray.
+- **Slot UI** — an anchored chat column beside a 2×2 bento of four slots
+  ([docs/slots.md](docs/slots.md)). You pick what goes in each one and it stays there; the
+  layout persists server-side, so the model can rearrange it by editing one JSON file. This
+  replaced a scored engine that repositioned panels on its own — the cleverness wasn't worth
+  never knowing where anything would be.
 - **Native shell** — a Tauri v2 frameless window (`npm run tauri dev`) that spawns the
   server and draws its own chrome: the DeetsCode title menu hosts theme/skin/model/mode
   flyouts and settings; the token design system (fonts → palette → theme → skin, ported
@@ -51,12 +53,14 @@ output cap, and nothing else. Only point it at directories you'd hand to a shell
   `<think>` and `<system>` blocks out of the visible channel, including when a tag is split
   across chunks. A dev watcher broadcasts `dev_reload` when frontend sources change, so the
   open UI hot-reloads; `server.py` edits need an app restart.
-- **`static/`** — vanilla JS, no framework and no build step. Three script files, loaded
-  directly. Panels are declared in JSON with display hints and trust tiers. Styling is
+- **`static/`** — vanilla JS, no framework and no build step. Two script files
+  (`app.js`, `panel-shell.js`), loaded directly. Panels are declared in JSON with
+  display hints and trust tiers. Styling is
   three token tiers on `<html>` (`data-theme` × `data-skin`, self-registering) plus
   bundled SIL-OFL fonts, all local — the webview works offline.
-- **`panels/`** · **`apps/`** — self-contained panels; apps are multi-panel bundles with
-  per-instance SQLite state and schema versioning ([docs/app_harness.md](docs/app_harness.md)).
+- **`panels/`** — self-contained panels, one folder each: a `panel.json` manifest
+  plus either a static `view.html` (tier 1) or a `server.py` with `view()` (tier 3).
+  See [docs/panels.md](docs/panels.md).
 - **`tools/`** — the packs above, registered through a mode map that raises on name collision.
 - **`prompts/`** — one system prompt per mode, re-read from disk each turn so edits apply
   without a restart.
@@ -104,8 +108,8 @@ session, Ollama, the harness, the bot, or all of them.
 ## Documentation
 
 [manual/architecture.md](manual/architecture.md) · [manual/tools.md](manual/tools.md) ·
-[docs/panels.md](docs/panels.md) · [docs/tileflow.md](docs/tileflow.md) ·
-[docs/apps.md](docs/apps.md)
+[docs/panels.md](docs/panels.md) · [docs/slots.md](docs/slots.md) ·
+[docs/diagnostics.md](docs/diagnostics.md)
 
 ## Acknowledgements
 

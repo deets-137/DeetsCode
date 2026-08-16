@@ -1,7 +1,7 @@
 {
   "schema": 1,
-  "name": "tool_log",
-  "title": "tools",
+  "name": "activity",
+  "title": "Activity",
   "tier": 3,
   "author": "host",
   "handler": "server:view",
@@ -13,12 +13,21 @@
   "display": {
     "shape": "wide",
     "aspect_ratio": null,
-    "min":       { "width": 240, "height": 80 },
-    "preferred": { "width": 400, "height": 200 },
-    "max":       { "width": null, "height": null },
+    "min": {
+      "width": 240,
+      "height": 140
+    },
+    "preferred": {
+      "width": 480,
+      "height": 320
+    },
+    "max": {
+      "width": null,
+      "height": null
+    },
     "scroll": "internal",
     "growable": false
   },
   "anchored": false,
-  "tileflow": { "icon": "🛠", "default_state": "dormant" }
+  "icon": "🛠"
 }

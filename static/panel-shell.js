@@ -1,83 +1,69 @@
-// panel-shell.js — owns the dev UI's region grid + panel rendering.
+// panel-shell.js — the slot shell. Owns the anchored chat column, the 2×2
+// bento of four slots, the picker, and the panel mount/unmount contract.
 //
-// Boot: fetch /api/layout → build region containers → fetch /api/panels →
-// for each layout instance, build a .panel-instance (chrome + content slot),
-// drop it in its declared region, fetch its view, and let the Tileflow
-// engine score it. All panels — including chat — live under panels/<name>/.
-// The previous legacy `dom_id` hoist (chat in #legacy-staging) is gone;
-// every instance now resolves through manifest.name.
+// Boot: fetch /api/layout → build the anchor column + four slot hosts →
+// fetch /api/panels → mount the anchored panels and one pool panel per slot.
+//
+// The scored Tileflow engine this replaced decided placement at runtime from
+// a score over state, manifest sizes, and recency. Now: four fixed positions,
+// one panel each, you choose which, it persists. See docs/slots.md.
 
 (function () {
-  // Region = invisible layout slot. It owns width/height/flex-direction and
-  // nothing else — the bounding-rect contract from docs/dev_project.md says the
-  // loader gives the panel a rect and the panel fills it. Don't put chrome
-  // (glass background, padding, etc.) on the region itself; that belongs to
-  // the panel content. The only legacy concession is preserving #context-column
-  // as the region id, because app.js's mode-visibility code queries it.
-  const REGION_LEGACY = {
-    context: { id: "context-column" },
-  };
+  const SLOTS = ["nw", "ne", "sw", "se"];
+  // Below this the 2×2 falls under the tiles' manifest min widths. One
+  // breakpoint, no hysteresis — see docs/slots.md "Narrow surface".
+  const NARROW_PX = 1100;
+  // The slot that survives on a narrow surface. Fixed rather than
+  // "most-recently-touched" so the same tile is there every time you shrink
+  // the window; the picker still reaches the whole pool from it.
+  const NARROW_SLOT = "nw";
 
-  // Translate a layout `width` value into flex-basis behavior. "auto" means
-  // "share remaining space" (flex 1), anything else is a fixed basis.
-  function widthToFlex(width) {
-    if (!width || width === "auto") return { flex: "1 1 0", basis: "" };
-    return { flex: `0 0 ${width}`, basis: width };
-  }
+  let _layout = null;              // {schema, slots, anchored, mode_overrides}
+  let _pool = [];                  // panel names eligible for a slot
+  const _manifests = {};           // {panel-name: manifest}
+  const _slotEls = {};             // {slot: host element}
+  const _slotTouchedAt = {};       // {slot: ms} — drives the summon bus's LRU
+  const _unmounts = {};            // {panel: [fn]} — registered teardown
+  const _notified = {};            // {panel: true} — "has something new"
+  const _headers = {};             // {panel: {title, atRoot}} — drill state
+  let _anchorEl = null;
+  let _bentoEl = null;
 
-  function applyRegionStyle(el, region, override) {
-    const width = (override && override.width !== undefined) ? override.width : region.width;
-    const hidden = !!(override && override.hidden);
-    if (hidden) {
-      el.style.display = "none";
-      return;
-    }
-    el.style.display = "";
-    const { flex } = widthToFlex(width);
-    el.style.flex = flex;
-  }
+  // ── Chrome construction ─────────────────────────────────────────────────
 
-  function buildRegions(layout) {
+  function buildShell() {
     const grid = document.getElementById("region-grid");
     if (!grid) {
       console.error("[panel-shell] #region-grid missing");
-      return null;
+      return false;
     }
     grid.innerHTML = "";
-    // Schema v2: optional grid block. Defaults match GridConfig in
-    // panels/loader.py; bento regions inherit them via CSS custom props.
-    const gridCfg = layout.grid || { cols: 12, row_height_px: 120, gap_px: 12 };
-    const byId = {};
-    for (const region of layout.regions) {
-      const div = document.createElement("div");
-      div.dataset.region = region.id;
-      div.dataset.anchor = region.anchor || "";
-      div.dataset.kind = region.kind || "stack";
-      const legacy = REGION_LEGACY[region.id];
-      div.className = `region region-stack-${region.stack || "vertical"} region-kind-${region.kind || "stack"}`;
-      if (legacy && legacy.id) div.id = legacy.id;
-      if (region.kind === "bento") {
-        // Bento regions: CSS Grid; flex-direction is meaningless. The
-        // grid template comes from CSS using these custom properties.
-        div.style.setProperty("--bento-cols", String(gridCfg.cols || 12));
-        div.style.setProperty("--bento-row-h", `${gridCfg.row_height_px || 120}px`);
-        div.style.setProperty("--bento-gap", `${gridCfg.gap_px || 12}px`);
-      } else {
-        div.style.display = "flex";
-        div.style.flexDirection = (region.stack === "horizontal") ? "row" : "column";
-      }
-      // Tray regions get tighter gaps and centered icons.
-      if (region.kind === "tray") {
-        div.style.gap = "8px";
-        div.style.alignItems = "center";
-        div.style.paddingTop = "8px";
-      }
-      applyRegionStyle(div, region, null);
-      grid.appendChild(div);
-      byId[region.id] = { el: div, region };
+
+    _anchorEl = document.createElement("div");
+    _anchorEl.className = "anchor-column";
+    _anchorEl.id = "anchor-column";
+    grid.appendChild(_anchorEl);
+
+    _bentoEl = document.createElement("div");
+    _bentoEl.className = "bento";
+    _bentoEl.id = "bento";
+    for (const slot of SLOTS) {
+      const host = document.createElement("div");
+      host.className = "slot";
+      host.dataset.slot = slot;
+      // Capture phase so a click anywhere inside the tile — including one an
+      // inline handler swallows — still counts as "I care about this slot".
+      // Feeds requestPanel's least-recently-touched pick.
+      host.addEventListener("pointerdown", () => { _slotTouchedAt[slot] = Date.now(); }, true);
+      _slotEls[slot] = host;
+      _slotTouchedAt[slot] = 0;
+      _bentoEl.appendChild(host);
     }
-    return byId;
+    grid.appendChild(_bentoEl);
+    return true;
   }
+
+  // ── View fetch / inject ─────────────────────────────────────────────────
 
   // Re-execute scripts inside `root`. innerHTML assignment does not run
   // <script> tags; we clone each one into a fresh element so the browser
@@ -94,10 +80,10 @@
   // Hoist any [data-panel-actions] container in the freshly-injected content
   // into the chrome's .panel-actions slot. Lets panels declare buttons that
   // belong in the title bar without each rendering its own header markup.
-  function hoistActions(name, contentEl) {
+  function hoistActions(contentEl) {
     const wrap = contentEl.closest(".panel-instance");
     if (!wrap) return;
-    const slot = wrap.querySelector(`:scope > .panel-header > .panel-actions`);
+    const slot = wrap.querySelector(":scope > .panel-header > .panel-actions");
     if (!slot) return;
     slot.innerHTML = "";
     const src = contentEl.querySelector(":scope > [data-panel-actions]");
@@ -107,174 +93,415 @@
   }
 
   async function fetchAndInject(name, contentEl) {
-    // Instance-aware fetch: the server passes the id through to tier-3
-    // handlers via harness_ctx so N instances of one panel can render
-    // different content (multi-instance / apps).
-    const instanceId = contentEl && contentEl.dataset
-      ? contentEl.dataset.panelContentInstance : null;
-    const url = `/panels/${name}/view` +
-      (instanceId ? `?instance=${encodeURIComponent(instanceId)}` : "");
-    const r = await fetch(url);
-    // Clear any subscriptions registered by the prior view's script — the
-    // new view's script will re-register fresh ones. Done before the
-    // innerHTML swap so old subscribers can't see in-flight events.
+    const r = await fetch(`/panels/${name}/view?instance=${encodeURIComponent(name)}`);
+    // Clear the prior view's subscriptions before the swap so old subscribers
+    // can't see in-flight events. A *refresh* is not an unmount, but the
+    // panel's script re-registers its onUnmount fns on every render, so we
+    // drop the previous ones here too or the list would accumulate copies.
     if (window.harness && window.harness._clearPanelSubs) {
       window.harness._clearPanelSubs(name);
     }
+    delete _unmounts[name];
     if (!r.ok) {
       contentEl.innerHTML = `<div class="panel-error">panel ${name}: HTTP ${r.status}</div>`;
       return;
     }
     contentEl.innerHTML = await r.text();
-    hoistActions(name, contentEl);
+    hoistActions(contentEl);
     runScripts(contentEl);
   }
 
-  // Build a real panel instance (one declared with `panel: <name>` in layout).
-  // Tier 0 (external/untrusted URL) → iframe. Tier 1/3 (host-installed,
-  // trusted) → direct DOM injection into a `.panel-content` wrapper. The
-  // host CSS reaches into that wrapper freely (host-CSS-wins by design); the
-  // panel author writes content that fills the bounding rect, never sets
-  // its own width %. See dev_project.md decisions log 2026-05-09.
+  // ── Tile construction ───────────────────────────────────────────────────
+
+  // Build one panel's tile. `pickable` gives the title the picker affordance
+  // (slot tiles); the anchored chat tile gets a plain title. Every panel is
+  // host-rendered (tier 1/3) — the tier-0 iframe branch went with `clock`.
   //
-  // Trust note: tier 1/3 can read any harness DOM, call any /api/*, etc.
-  // That is fine in v1 because only the host installs them — same trust gate
-  // as tier-3 in-process Python. When shared-host mode lands, guest tier-1
-  // panels must be forced into iframes regardless of declared tier.
-  function renderPanelInstance(inst, manifest) {
+  // Trust note: tier 1/3 can read any harness DOM, call any /api/*, etc. That
+  // is fine while only the host installs them — the same trust gate as tier-3
+  // in-process Python.
+  function buildTile(manifest, opts) {
+    const pickable = !!(opts && opts.pickable);
+    const slot = opts && opts.slot;
+
     const wrap = document.createElement("section");
     wrap.className = "panel-instance";
-    wrap.dataset.instance = inst.instance;
+    wrap.dataset.instance = manifest.name;   // one panel = one instance
     wrap.dataset.panelName = manifest.name;
     wrap.dataset.tier = String(manifest.tier);
-    // App identity (D6): panels belonging to an app carry their app id +
-    // app-instance id on the tile so scripts (harness.app.*) and CSS can
-    // scope to them.
-    if (manifest.app) {
-      wrap.dataset.app = manifest.app;
-      wrap.dataset.appInstance = inst.app_instance || `${manifest.app}.default`;
-    }
-
-    // Chrome: title + actions slot + standardized pill. Handlers don't
-    // render headers — they optionally include a
-    // <div data-panel-actions>...</div> in their returned HTML, which
-    // hoistActions moves into the .panel-actions slot. The .panel-pill
-    // is shell-owned: every panel gets the same settings+minimize pair
-    // in the top-right.
+    if (slot) wrap.dataset.slot = slot;
     const header = document.createElement("div");
     header.className = "panel-header";
-    const title = document.createElement("span");
-    title.className = "panel-title";
-    title.textContent = manifest.title || manifest.name;
-    header.appendChild(title);
-    if (manifest.app) {
-      const chip = document.createElement("span");
-      chip.className = "panel-app-chip";
-      chip.textContent = manifest.app;
-      chip.title = `part of app: ${manifest.app}`;
-      header.appendChild(chip);
+
+    // [Title ▾] — the picker. DeetsMusic's `.panel__title.is-pickable`.
+    const title = document.createElement(pickable ? "button" : "span");
+    title.className = "panel-title" + (pickable ? " is-pickable" : "");
+    const label = document.createElement("span");
+    label.className = "panel-title-label";
+    const hdr = _headers[manifest.name];
+    label.textContent = (hdr && hdr.title) || manifest.title || manifest.name;
+    title.appendChild(label);
+    if (pickable) {
+      title.type = "button";
+      title.setAttribute("aria-haspopup", "true");
+      title.setAttribute("aria-expanded", "false");
+      const chev = document.createElement("span");
+      chev.className = "panel-title-chev";
+      chev.setAttribute("aria-hidden", "true");
+      chev.textContent = "▾";
+      title.appendChild(chev);
+      title.addEventListener("click", (e) => {
+        e.stopPropagation();
+        // Root-only: while a panel is drilled its title is context, not a
+        // picker, and the click goes back instead. This is what makes
+        // destroy-and-remount safe — a swap can never strand a drilled panel.
+        const state = _headers[manifest.name];
+        if (state && state.atRoot === false) {
+          if (typeof state.onBack === "function") state.onBack();
+          return;
+        }
+        togglePicker(header, slot, manifest.name);
+      });
     }
+    header.appendChild(title);
+
     const actions = document.createElement("div");
     actions.className = "panel-actions";
     header.appendChild(actions);
-    header.appendChild(buildPanelPill(inst.instance, manifest));
     wrap.appendChild(header);
 
-    const display = manifest.display || {};
-    const pref = display.preferred || {};
-    const minH = (display.min || {}).height;
-    const prefH = pref.height;
-
-    if (manifest.tier === 0) {
-      const iframe = document.createElement("iframe");
-      iframe.className = "panel-iframe";
-      iframe.src = manifest.url;
-      const attrs = manifest.iframe_attrs || {};
-      if (attrs.sandbox !== undefined) iframe.setAttribute("sandbox", attrs.sandbox);
-      if (attrs.allow) iframe.setAttribute("allow", attrs.allow);
-      if (prefH) iframe.style.height = `${prefH}px`;
-      if (minH) iframe.style.minHeight = `${minH}px`;
-      wrap.appendChild(iframe);
-    } else {
-      const content = document.createElement("div");
-      content.className = "panel-content";
-      content.dataset.panelContent = manifest.name;
-      content.dataset.panelContentInstance = inst.instance;
-      // Per-instance config from the layout file, readable by tier-1 view
-      // scripts (tier-3 handlers get it via harness_ctx.config instead).
-      if (inst.config) {
-        try { content.dataset.instanceConfig = JSON.stringify(inst.config); } catch (e) {}
-      }
-      // Min/preferred from manifest land on the outer instance — they
-      // describe the panel's natural footprint including chrome.
-      // A `grow: true` layout instance (stack regions only — the bento
-      // sizes by grid span) fills its region's leftover space instead of
-      // capping at preferred height.
-      if (minH) wrap.style.minHeight = `${minH}px`;
-      if (inst.grow) {
-        wrap.style.flex = "1 1 auto";
-        wrap.style.minHeight = minH ? `${minH}px` : "0";
-      } else if (prefH) {
-        content.style.maxHeight = `${prefH}px`;
-      }
-      wrap.appendChild(content);
-      // Fire and forget — the panel will replace its own `display: loading…`
-      // markup once the fetch lands. Errors render inline.
-      fetchAndInject(manifest.name, content);
-    }
+    const content = document.createElement("div");
+    content.className = "panel-content";
+    content.dataset.panelContent = manifest.name;
+    content.dataset.panelContentInstance = manifest.name;
+    wrap.appendChild(content);
+    // Fire and forget — the panel replaces its own loading markup once the
+    // fetch lands. Errors render inline.
+    fetchAndInject(manifest.name, content);
     return wrap;
   }
 
-  // Resolve a panel content node by instance id first (multi-instance
-  // friendly), falling back to panel name (single-instance back-compat:
-  // when instance.instance === panel.name the two selectors match the
-  // same node, so existing panels that pass their panel name continue to
-  // work).
-  function resolveContentEl(idOrName) {
-    return (
-      document.querySelector(`[data-panel-content-instance="${idOrName}"]`) ||
-      document.querySelector(`[data-panel-content="${idOrName}"]`)
-    );
+  // ── Mount / unmount ─────────────────────────────────────────────────────
+
+  // The teardown contract (docs/slots.md "A teardown contract"). WS
+  // subscriptions are handled centrally by _clearPanelSubs; everything else a
+  // panel's inline script starts — setInterval, ResizeObserver, document
+  // listeners — is the panel's own to reverse, via harness.onUnmount.
+  function unmountPanel(name) {
+    for (const fn of (_unmounts[name] || [])) {
+      try { fn(); } catch (e) { console.error(`[harness] onUnmount ${name}`, e); }
+    }
+    delete _unmounts[name];
+    if (harness._clearPanelSubs) harness._clearPanelSubs(name);
+    // harness.refresh timers are shell-owned, so the shell reverses them.
+    if (_refreshTimers[name]) {
+      clearInterval(_refreshTimers[name]);
+      delete _refreshTimers[name];
+    }
+    delete _headers[name];
+    const node = document.querySelector(`.panel-instance[data-panel-name="${name}"]`);
+    if (node) node.remove();
+  }
+
+  function mountSlot(slot, name, opts) {
+    const host = _slotEls[slot];
+    const manifest = _manifests[name];
+    if (!host || !manifest) return null;
+    const tile = buildTile(manifest, { pickable: true, slot });
+    if (_notified[name]) tile.classList.add("has-notify");
+    host.appendChild(tile);
+    // Crossfade in. The slot rect is fixed, so there is nothing to glide —
+    // the swap is purely a content change, and a fade reads as one.
+    if (opts && opts.animate) {
+      tile.classList.add("tile-entering");
+      requestAnimationFrame(() => tile.classList.remove("tile-entering"));
+    }
+    return tile;
+  }
+
+  function clearSlot(slot) {
+    const name = _layout && _layout.slots[slot];
+    if (name) unmountPanel(name);
+    const host = _slotEls[slot];
+    if (host) host.innerHTML = "";
+  }
+
+  // ── The picker ──────────────────────────────────────────────────────────
+  // The tile title opens a flyout of the pool. Marked entry for the panel in
+  // this slot; a dot for any panel with a pending notify. This is also the
+  // only discovery surface for unplaced panels — there is no tray.
+
+  let _openPicker = null;
+
+  function closePicker() {
+    if (!_openPicker) return;
+    const header = _openPicker.parentElement;
+    const trigger = header && header.querySelector(".panel-title.is-pickable");
+    if (trigger) trigger.setAttribute("aria-expanded", "false");
+    _openPicker.remove();
+    _openPicker = null;
+  }
+
+  function togglePicker(header, slot, currentName) {
+    if (_openPicker && _openPicker.dataset.slot === slot) { closePicker(); return; }
+    closePicker();
+
+    const menu = document.createElement("div");
+    menu.className = "panel-picker";
+    menu.dataset.slot = slot;
+    menu.setAttribute("role", "menu");
+
+    const placed = new Set(Object.values((_layout && _layout.slots) || {}));
+    for (const name of _pool) {
+      const m = _manifests[name];
+      if (!m) continue;
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "panel-picker-item";
+      b.dataset.panel = name;
+      b.setAttribute("role", "menuitem");
+      if (name === currentName) b.classList.add("is-current");
+      else if (placed.has(name)) b.classList.add("is-placed");
+      if (_notified[name]) b.classList.add("has-notify");
+
+      const icon = document.createElement("span");
+      icon.className = "panel-picker-icon";
+      icon.textContent = m.icon || (m.title || m.name).charAt(0).toUpperCase();
+      const label = document.createElement("span");
+      label.className = "panel-picker-label";
+      label.textContent = m.title || m.name;
+      b.appendChild(icon);
+      b.appendChild(label);
+      b.title = (placed.has(name) && name !== currentName)
+        ? `${m.title || m.name} — placed elsewhere; picking swaps the two`
+        : (m.title || m.name);
+
+      b.addEventListener("click", (ev) => {
+        ev.stopPropagation();
+        closePicker();
+        placePanel(slot, name);
+      });
+      menu.appendChild(b);
+    }
+
+    header.appendChild(menu);
+    const trigger = header.querySelector(".panel-title.is-pickable");
+    if (trigger) trigger.setAttribute("aria-expanded", "true");
+    _openPicker = menu;
+  }
+
+  document.addEventListener("click", closePicker);
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closePicker(); });
+
+  // ── Placement ───────────────────────────────────────────────────────────
+
+  // The slot invariants, in one function (docs/slots.md "Slot invariants"):
+  // one instance per panel; picking a panel that's in another slot exchanges
+  // the two; picking an unplaced panel replaces this slot's occupant, and the
+  // displaced one goes unplaced.
+  function placePanel(slot, name) {
+    if (!_layout || !_slotEls[slot] || !_manifests[name]) return;
+    const current = _layout.slots[slot];
+    if (current === name) return;
+
+    const otherSlot = SLOTS.find((s) => s !== slot && _layout.slots[s] === name);
+
+    // Swap = destroy + remount. Unmount both sides before mounting either:
+    // a panel moving ne→nw would otherwise briefly exist in two slots.
+    clearSlot(slot);
+    if (otherSlot) clearSlot(otherSlot);
+
+    _layout.slots[slot] = name;
+    if (otherSlot) _layout.slots[otherSlot] = current;
+
+    mountSlot(slot, name, { animate: true });
+    if (otherSlot && !_slotEls[otherSlot].hidden) {
+      mountSlot(otherSlot, current, { animate: true });
+    }
+
+    clearNotify(name);
+    _slotTouchedAt[slot] = Date.now();
+    persistLayout();
+    harness.logInteraction(name, "custom", { act: "place", slot, swappedWith: otherSlot || null });
+  }
+
+  let _persistTimer = null;
+  function persistLayout() {
+    // Server-side, not localStorage: the model reads and edits the layout,
+    // which is the harness's whole point (docs/slots.md "Schema v3").
+    // Debounced so a burst of picks is one write.
+    if (_persistTimer) clearTimeout(_persistTimer);
+    _persistTimer = setTimeout(() => {
+      _persistTimer = null;
+      fetch("/api/layout", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          schema: 3,
+          slots: _layout.slots,
+          anchored: _layout.anchored || [],
+          mode_overrides: _layout.mode_overrides || {},
+        }),
+      }).catch((e) => console.warn("[panel-shell] layout persist failed:", e));
+    }, 250);
+  }
+
+  // ── Narrow surface ──────────────────────────────────────────────────────
+  // `data-surface="wide|narrow"` on <html> — the same lever as data-theme /
+  // data-skin. Narrow keeps chat plus a single slot; the picker stays live,
+  // so the whole pool is still one click away. Hidden slots are properly
+  // unmounted, not just display:none — a hidden panel must not keep polling.
+
+  function currentSurface() {
+    return window.innerWidth < NARROW_PX ? "narrow" : "wide";
+  }
+
+  let _surface = null;
+  function applySurface() {
+    const next = currentSurface();
+    const changed = next !== _surface;
+    _surface = next;
+    document.documentElement.setAttribute("data-surface", next);
+    if (!_layout) return;
+    for (const slot of SLOTS) {
+      const host = _slotEls[slot];
+      if (!host) continue;
+      const visible = (next === "wide") || (slot === NARROW_SLOT);
+      host.hidden = !visible;
+      if (!changed) continue;
+      const name = _layout.slots[slot];
+      if (!name || !_manifests[name]) continue;
+      if (visible && !host.firstChild) mountSlot(slot, name, { animate: false });
+      else if (!visible && host.firstChild) clearSlot(slot);
+    }
   }
 
   // ── harness.* API ───────────────────────────────────────────────────────
-  // Surface that direct-DOM panels (tier 1/3) call into. Iframe-bound panels
-  // (tier 0/future-2) will get a postMessage proxy with the same shape.
+  // Surface that panels call into. Every live panel is host-rendered and
+  // reaches this directly; tier 2 (subprocess) is still unimplemented.
   const harness = window.harness || (window.harness = {});
 
-  // Re-fetch a panel's view and replace its content. Used by the panel's own
-  // inline script for polling. Guards against double-registration so a panel
-  // that calls `harness.refresh('foo', 5)` inside content that itself gets
-  // replaced won't stack intervals.
+  function resolveContentEl(name) {
+    return (
+      document.querySelector(`[data-panel-content-instance="${name}"]`) ||
+      document.querySelector(`[data-panel-content="${name}"]`)
+    );
+  }
+
+  // Poll a panel's view. Guarded against double-registration so a panel that
+  // calls harness.refresh inside content that itself gets replaced won't
+  // stack intervals; unmountPanel clears whatever is left.
   const _refreshTimers = {};
-  harness.refresh = function (idOrName, seconds) {
-    if (_refreshTimers[idOrName]) clearInterval(_refreshTimers[idOrName]);
-    _refreshTimers[idOrName] = setInterval(() => {
-      const el = resolveContentEl(idOrName);
+  harness.refresh = function (name, seconds) {
+    if (_refreshTimers[name]) clearInterval(_refreshTimers[name]);
+    _refreshTimers[name] = setInterval(() => {
+      const el = resolveContentEl(name);
       if (!el) {
-        clearInterval(_refreshTimers[idOrName]);
-        delete _refreshTimers[idOrName];
+        clearInterval(_refreshTimers[name]);
+        delete _refreshTimers[name];
         return;
       }
       fetchAndInject(el.dataset.panelContent, el);
     }, Math.max(1, seconds) * 1000);
   };
 
-  // One-shot fetch + inject. Used by event-driven panels to refresh in
-  // response to a WS message via harness.subscribe.
-  harness.refreshNow = function (idOrName) {
-    const el = resolveContentEl(idOrName);
+  harness.refreshNow = function (name) {
+    const el = resolveContentEl(name);
     if (el) fetchAndInject(el.dataset.panelContent, el);
   };
 
+  // Register teardown for a panel's inline-script side effects (timers,
+  // observers, document listeners). Called again on every render — the shell
+  // drops the previous registrations first, so the list never accumulates
+  // duplicates. WS subs are handled centrally; don't re-do them here.
+  harness.onUnmount = function (name, fn) {
+    if (typeof name !== "string" || typeof fn !== "function") return;
+    (_unmounts[name] = _unmounts[name] || []).push(fn);
+  };
+
+  // A panel that drills reports its header state. `atRoot: false` turns the
+  // picker into a back chevron; `onBack` runs when it's clicked. A panel that
+  // never drills simply never calls this and is treated as always-at-root.
+  harness.setHeader = function (name, state) {
+    const next = {
+      title: (state && state.title) || null,
+      atRoot: !state || state.atRoot !== false,
+      onBack: state && state.onBack,
+    };
+    _headers[name] = next;
+    const tile = document.querySelector(`.panel-instance[data-panel-name="${name}"]`);
+    if (!tile) return;
+    const title = tile.querySelector(":scope > .panel-header > .panel-title");
+    if (!title) return;
+    const m = _manifests[name] || {};
+    const label = title.querySelector(".panel-title-label");
+    if (label) label.textContent = next.title || m.title || name;
+    title.classList.toggle("is-drilled", !next.atRoot);
+    const chev = title.querySelector(".panel-title-chev");
+    if (chev) chev.textContent = next.atRoot ? "▾" : "‹";
+  };
+
+  // ── harness.notify — "this panel has something new" ─────────────────────
+  // What was worth keeping in the 4-state model was never the score, it was
+  // this. A dot on the picker entry, and a badge on the tile header if the
+  // panel is placed. Cleared by looking at the panel.
+  harness.notify = function (name) {
+    if (!name || !_manifests[name] || _notified[name]) return;
+    _notified[name] = true;
+    const tile = document.querySelector(`.panel-instance[data-panel-name="${name}"]`);
+    if (tile) tile.classList.add("has-notify");
+    if (_openPicker) {
+      const entry = _openPicker.querySelector(`.panel-picker-item[data-panel="${name}"]`);
+      if (entry) entry.classList.add("has-notify");
+    }
+    harness.logInteraction(name, "custom", { act: "notify" });
+  };
+
+  function clearNotify(name) {
+    if (!_notified[name]) return;
+    delete _notified[name];
+    const tile = document.querySelector(`.panel-instance[data-panel-name="${name}"]`);
+    if (tile) tile.classList.remove("has-notify");
+  }
+  harness.clearNotify = clearNotify;
+
+  // ── harness.requestPanel — the summon bus ───────────────────────────────
+  // The replacement for wake-from-dormant: on a pending write, Activity
+  // summons itself. Explicit and predictable rather than emergent from a
+  // score.
+  //
+  // Deviation from docs/slots.md, deliberate: when the panel is *already*
+  // placed we notify instead of exchanging it into the LRU slot. Summon means
+  // "make sure this is visible" — it already is, and relocating a tile the
+  // user is looking at is exactly the jitter this rework exists to remove.
+  harness.requestPanel = function (name) {
+    if (!_layout || !_manifests[name]) return;
+    if (Object.values(_layout.slots).includes(name)) {
+      harness.notify(name);
+      return;
+    }
+    // Least-recently-touched *visible* slot — the tile you care about least.
+    const candidates = SLOTS.filter((s) => !_slotEls[s].hidden);
+    if (!candidates.length) return;
+    let target = candidates[0];
+    for (const s of candidates) {
+      if ((_slotTouchedAt[s] || 0) < (_slotTouchedAt[target] || 0)) target = s;
+    }
+    placePanel(target, name);
+  };
+
+  // Read-only views, for the console and for panels that want to know
+  // whether a sibling is on screen.
+  harness.slots = function () {
+    return _layout ? JSON.parse(JSON.stringify(_layout.slots)) : {};
+  };
+  harness.pool = function () { return _pool.slice(); };
+
   // ── harness.subscribe — WS event bridge for panels ───────────────────────
-  // Panels register interest in WS message types via:
   //   harness.subscribe('my_panel', 'pending_writes', (msg) => {...})
   // app.js's ws.onmessage hooks into harness._dispatch to fan out events.
-  //
-  // Subscriptions are keyed by panel name so that a panel re-render
-  // (fetchAndInject) wipes old subscriptions before the new view's script
-  // re-registers fresh ones — no leaks across refreshes.
+  // Keyed by panel name so a re-render (fetchAndInject) wipes old
+  // subscriptions before the new view's script registers fresh ones.
   const _subs = {}; // {panel: {event: [callbacks]}}
   harness.subscribe = function (panel, event, callback) {
     const subs = (_subs[panel] = _subs[panel] || {});
@@ -282,12 +509,6 @@
   };
   harness._clearPanelSubs = function (panel) {
     delete _subs[panel];
-    // App-scoped subs are keyed per registration; drop the ones whose
-    // panel matches (coarse, like _subs — refine per-instance if a
-    // multi-instance panel ever needs it).
-    for (let i = _appSubs.length - 1; i >= 0; i--) {
-      if (_appSubs[i].panel === panel) _appSubs.splice(i, 1);
-    }
   };
   harness._dispatch = function (event, msg) {
     for (const panel in _subs) {
@@ -296,82 +517,32 @@
       }
     }
   };
-
-  // ── harness.app — app-scoped surface (apps-over-panels, Phase C) ─────────
-  // Panels belonging to an app subscribe to their app instance's events:
-  //   harness.app.subscribe("state-changed", (payload, frame) => {...})
-  // Scope (app id + app instance) is discovered from the calling script's
-  // enclosing .panel-instance — a panel can only hear its own app instance.
-  // Frames with app_instance=null (e.g. bundle "updated") reach every
-  // instance of that app.
-  const _appSubs = []; // [{app, appInstance, panel, event, cb}]
-  harness.app = {
-    // Identity of the panel instance enclosing `el` (or the calling script).
-    of(el) {
-      const node = el && el.closest ? el.closest(".panel-instance") : null;
-      if (!node) return null;
-      return {
-        app: node.dataset.app || null,
-        appInstance: node.dataset.appInstance || null,
-        instance: node.dataset.instance || null,
-        panel: node.dataset.panelName || null,
-      };
-    },
-    subscribe(eventName, cb, scopeEl) {
-      const el = scopeEl ||
-        (document.currentScript && document.currentScript.closest(".panel-instance"));
-      const id = harness.app.of(el);
-      if (!id || !id.app) {
-        console.warn("[harness.app] subscribe: caller is not inside an app panel");
-        return;
-      }
-      _appSubs.push({
-        app: id.app, appInstance: id.appInstance, panel: id.panel,
-        event: String(eventName), cb,
-      });
-    },
+  // Canary surface for the "swap a slot 20× and assert nothing grows" test in
+  // docs/slots.md. Cheap enough to ship.
+  harness._subCounts = function () {
+    let subs = 0;
+    for (const p in _subs) for (const e in _subs[p]) subs += _subs[p][e].length;
+    let unmountFns = 0;
+    for (const p in _unmounts) unmountFns += _unmounts[p].length;
+    return {
+      panels: Object.keys(_subs).length,
+      subs,
+      unmountFns,
+      refreshTimers: Object.keys(_refreshTimers).length,
+      tiles: document.querySelectorAll(".panel-instance").length,
+    };
   };
 
-  // Fan incoming app_event frames out to matching app subscriptions. The
-  // synthetic "_shell" panel name is never cleared by panel re-renders.
-  harness.subscribe("_shell", "app_event", (msg) => {
-    if (!msg || !msg.app_id || !msg.event_name) return;
-    for (const s of _appSubs) {
-      if (s.app !== msg.app_id) continue;
-      if (msg.app_instance && s.appInstance !== msg.app_instance) continue;
-      if (s.event !== msg.event_name) continue;
-      try { s.cb(msg.payload || {}, msg); }
-      catch (e) { console.error(`[harness.app] subscriber ${s.app}/${s.event}`, e); }
-    }
-  });
-
-  // ── Tileflow state engine ───────────────────────────────────────────────
-  // Per-instance state: dormant | idle | active | focused. Routing (bento
-  // vs tray) and size class are decided by `runFlowPass`, which delegates
-  // to tileflow-engine.js. This module owns the DOM mutations.
-  const _instanceStates = {};       // {instance: state}
-  const _lastStateChangeAt = {};    // {instance: ms timestamp — drives recency decay}
-  const _spanOverrides = {};        // {instance: {cols, rows}} — panel-set, beats class table
-  const _userSticky = {};           // {instance: state} — explicit user pick (pill/minimize);
-                                    //   content signals must not override it
-  const _contentBadges = {};        // {instance: true} — trayed panel has content waiting
-  const _instances = {};            // {instance: layoutInstanceObj}
-  const _manifests = {};            // {panel-name: manifest} — populated at boot
-  let _trayRegionEl = null;
-  let _bentoRegionEl = null;
-
   // ── system_log: client-side interaction stream ──────────────────────────
-  // Every click / state transition / bin migration / panel-emitted custom
-  // event flows through harness.logInteraction → in-memory ring (debug) +
-  // debounced WS flush (analytics → storage.system_log via server.py). See
-  // docs/panels.md for the contract.
+  // Clicks, placements, notifies, and panel-emitted custom events flow
+  // through harness.logInteraction → in-memory ring (debug) + debounced WS
+  // flush (analytics → storage.system_log). See docs/diagnostics.md.
   //
-  // Ring is bounded (1000 entries) so a runaway emitter can't OOM the tab.
-  // Flush cadence: every 500ms while events accumulate, or immediately when
-  // the page unloads (so we don't lose the tail).
-  const _activityRing = [];               // {ts, instance, panel, kind, meta}
+  // Ring is bounded so a runaway emitter can't OOM the tab; flush every
+  // 500ms while events accumulate, or immediately on unload.
+  const _activityRing = [];
   const _ACTIVITY_RING_MAX = 1000;
-  const _activityFlushQueue = [];         // events awaiting WS send
+  const _activityFlushQueue = [];
   let _activityFlushTimer = null;
   const _ACTIVITY_FLUSH_MS = 500;
 
@@ -396,514 +567,23 @@
     try {
       ws.send(JSON.stringify({ type: "system_log", events: batch }));
     } catch (e) {
-      // Send failed — put the batch back at the head and try again later.
-      // Best-effort; we don't want analytics to throw at the call site.
+      // Send failed — put the batch back at the head and retry later.
       _activityFlushQueue.unshift(...batch);
       _activityFlushTimer = setTimeout(_flushActivity, _ACTIVITY_FLUSH_MS * 2);
     }
   }
 
-  // Best-effort flush on page unload — uses sendBeacon if the WS is gone.
-  // No JSON parse on the server side for beacons; we keep the same shape.
   window.addEventListener("beforeunload", () => {
     if (_activityFlushQueue.length) _flushActivity();
   });
 
-  function tileflowConfig(manifest) {
-    const t = (manifest && manifest.tileflow) || {};
-    const title = (manifest && manifest.title) || (manifest && manifest.name) || "?";
-    return {
-      default_state:     t.default_state     || "idle",
-      tray_when_dormant: t.tray_when_dormant !== false,
-      bubble_on_active:  t.bubble_on_active  === true,
-      bubble_on_focused: t.bubble_on_focused !== false,
-      icon:              t.icon              || title.charAt(0).toUpperCase(),
-      priority:          (typeof t.priority === "number") ? t.priority : 0,
-    };
-  }
-
-  // Live measurement of the bento grid — column width depends on viewport,
-  // so we read it whenever flowPass needs to decide spans. Falls back to
-  // sensible defaults when the bento isn't mounted yet (boot ordering).
-  function currentGridConfig() {
-    const layoutGrid = (_layoutCache && _layoutCache.grid) || {};
-    const cols = layoutGrid.cols || 12;
-    const rowPx = layoutGrid.row_height_px || 120;
-    const gapPx = layoutGrid.gap_px || 12;
-    let bentoWidth = 0;
-    if (_bentoRegionEl) {
-      const r = _bentoRegionEl.getBoundingClientRect();
-      bentoWidth = r.width;
-    }
-    // Each col gets (totalWidth − (cols-1)*gap) / cols.
-    const colPx = bentoWidth > 0
-      ? Math.max(40, (bentoWidth - (cols - 1) * gapPx) / cols)
-      : 91; // pre-mount fallback (12 cols at ~1230px bento)
-    return { cols, rowPx, gapPx, colPx, bentoWidthPx: bentoWidth };
-  }
-
-  // Standardized top-right pill: dummy settings (left) + minimize-to-tray
-  // (right). Two real buttons inside a skinned container; the diagonal seam
-  // is a skewed 1px pseudo-element from style.css. Theme-aware via CSS
-  // custom properties — no per-theme JS branching.
-  function buildPanelPill(instanceId, manifest) {
-    const pill = document.createElement("div");
-    pill.className = "panel-pill";
-    pill.dataset.instance = instanceId;
-
-    const settingsBtn = document.createElement("button");
-    settingsBtn.type = "button";
-    settingsBtn.className = "panel-pill-btn panel-pill-settings";
-    settingsBtn.title = "panel settings";
-    settingsBtn.setAttribute("aria-label", `${manifest.title || manifest.name} settings`);
-    settingsBtn.textContent = "⚙";
-    settingsBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      togglePillMenu(pill, instanceId);
-    });
-
-    const minimizeBtn = document.createElement("button");
-    minimizeBtn.type = "button";
-    minimizeBtn.className = "panel-pill-btn panel-pill-minimize";
-    minimizeBtn.title = "minimize to tray";
-    minimizeBtn.setAttribute("aria-label", `minimize ${manifest.title || manifest.name} to tray`);
-    minimizeBtn.textContent = "−";
-    minimizeBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      // Explicit user intent: content signals may badge the tray icon but
-      // must not pull the panel back out until the user reopens it.
-      _userSticky[instanceId] = "dormant";
-      harness.setState(instanceId, "dormant");
-    });
-
-    pill.appendChild(settingsBtn);
-    pill.appendChild(minimizeBtn);
-    return pill;
-  }
-
-  // ── ⚙ pill menu — manual state cycling ──────────────────────────────────
-  // Small popover under the pill with the four tileflow states. Lets the
-  // user (or a tester) drive state transitions without the JS console.
-  // One menu open at a time; any outside click closes it. The menu anchors
-  // to the .panel-header (the pill itself clips overflow).
-  const TILEFLOW_STATES = ["dormant", "idle", "active", "focused"];
-  let _openPillMenu = null;
-
-  function closePillMenu() {
-    if (_openPillMenu) {
-      _openPillMenu.remove();
-      _openPillMenu = null;
-    }
-  }
-
-  function togglePillMenu(pill, instanceId) {
-    if (_openPillMenu && _openPillMenu.dataset.instance === instanceId) {
-      closePillMenu();
-      return;
-    }
-    closePillMenu();
-    const menu = document.createElement("div");
-    menu.className = "panel-pill-menu";
-    menu.dataset.instance = instanceId;
-    menu.setAttribute("data-flip-skip", "");
-    const current = harness.getState(instanceId);
-    for (const st of TILEFLOW_STATES) {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "panel-pill-menu-item" + (st === current ? " is-current" : "");
-      b.textContent = st;
-      b.addEventListener("click", (ev) => {
-        ev.stopPropagation();
-        closePillMenu();
-        _userSticky[instanceId] = st;
-        harness.logInteraction(instanceId, "custom", { act: "pill-state", to: st });
-        harness.setState(instanceId, st);
-      });
-      menu.appendChild(b);
-    }
-    const header = pill.closest(".panel-header") || pill.parentElement;
-    (header || pill).appendChild(menu);
-    _openPillMenu = menu;
-  }
-
-  document.addEventListener("click", () => closePillMenu());
-
-  function buildTrayIcon(inst, manifest) {
-    const cfg = tileflowConfig(manifest);
-    const btn = document.createElement("button");
-    btn.className = "tray-icon";
-    btn.dataset.instance = inst.instance;
-    btn.dataset.panelName = manifest.name;
-    btn.title = manifest.title || manifest.name;
-    // Rudimentary app grouping (D6): same-app icons cluster together at the
-    // end of the tray via a shared order key; CSS tints them via [data-app].
-    if (manifest.app) {
-      btn.dataset.app = manifest.app;
-      let h = 0;
-      for (const c of manifest.app) h = (h * 31 + c.charCodeAt(0)) % 97;
-      btn.style.order = String(1000 + h);
-      btn.title = `${btn.title} (${manifest.app})`;
-    }
-    btn.textContent = cfg.icon;
-    // Styling lives in style.css (.tray-icon) so themes/skins apply — no
-    // inline paints here. Badge dot = "content arrived while you kept me
-    // trayed"; survives node rebuilds via _contentBadges.
-    if (_contentBadges[inst.instance]) btn.classList.add("has-badge");
-    btn.addEventListener("click", () => {
-      // Reopening clears the user's minimize pin and any waiting badge.
-      delete _userSticky[inst.instance];
-      _setTrayBadge(inst.instance, false);
-      harness.setState(inst.instance, "idle");
-    });
-    return btn;
-  }
-
-  // Toggle the content badge on a trayed instance's icon (and remember it
-  // for rebuilds — tray icons are rebuilt on every bin migration).
-  function _setTrayBadge(instanceId, on) {
-    if (!!_contentBadges[instanceId] === !!on) return;
-    if (on) _contentBadges[instanceId] = true;
-    else delete _contentBadges[instanceId];
-    const node = document.querySelector(`.tray-icon[data-instance="${instanceId}"]`);
-    if (node) node.classList.toggle("has-badge", !!on);
-    harness.logInteraction(instanceId, "custom", { act: "tray-badge", on: !!on });
-  }
-
-  // ── FLIP runner ─────────────────────────────────────────────────────────
-  // First-Last-Invert-Play. CSS Grid does not natively animate grid-column /
-  // grid-row line changes (the transition is a no-op), and remove-then-append
-  // shifts peers instantly. The FLIP technique fixes both: measure each
-  // tile's rect before the DOM mutation, apply the mutation, measure again,
-  // then for any tile that moved/resized, snap it back to its old position
-  // via `transform` and animate the transform to identity. The browser sees
-  // a smooth glide; the layout sees an instant mutation.
-  //
-  // Selector covers every tile that participates in layout: bento panels
-  // and tray icons. Skipped: the changing instance itself (animated via
-  // enter/leave classes), and any element with `data-flip-skip`.
-  const FLIP_DURATION = 260;
-  const FLIP_EASING = "cubic-bezier(.2,.8,.2,1)";
-
-  function captureLayoutRects() {
-    const rects = new Map();
-    const els = document.querySelectorAll(
-      ".region-kind-bento > .panel-instance, .region-kind-tray > .tray-icon"
-    );
-    for (const el of els) {
-      rects.set(el, el.getBoundingClientRect());
-    }
-    return rects;
-  }
-
-  function playFlip(beforeRects, skipEls) {
-    const skip = skipEls instanceof Set ? skipEls : new Set(skipEls || []);
-    for (const [el, before] of beforeRects) {
-      if (skip.has(el)) continue;
-      if (!el.isConnected) continue;  // element was removed; nothing to glide
-      const after = el.getBoundingClientRect();
-      const dx = before.left - after.left;
-      const dy = before.top - after.top;
-      // Scale deltas — guard against zero width/height (mode-hidden peers).
-      const sx = after.width  > 0 ? before.width  / after.width  : 1;
-      const sy = after.height > 0 ? before.height / after.height : 1;
-      const moved = Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5
-        || Math.abs(1 - sx) > 0.01 || Math.abs(1 - sy) > 0.01;
-      if (!moved) continue;
-      // Invert: pre-position the element where it used to be, no transition.
-      el.style.transformOrigin = "top left";
-      el.style.transition = "none";
-      el.style.transform = `translate(${dx}px, ${dy}px) scale(${sx}, ${sy})`;
-      // Force a style flush so the browser registers the inverted position
-      // before we kick off the animation back to identity.
-      // eslint-disable-next-line no-unused-expressions
-      el.getBoundingClientRect();
-      // Play: next frame, transition transform back to none.
-      requestAnimationFrame(() => {
-        el.style.transition = `transform ${FLIP_DURATION}ms ${FLIP_EASING}`;
-        el.style.transform = "";
-        const cleanup = (e) => {
-          if (e && e.propertyName && e.propertyName !== "transform") return;
-          el.style.transition = "";
-          el.style.transform = "";
-          el.style.transformOrigin = "";
-          el.removeEventListener("transitionend", cleanup);
-        };
-        el.addEventListener("transitionend", cleanup);
-        // Safety net for cases where transitionend never fires (display:none
-        // sibling, interrupted by another FLIP, etc.).
-        setTimeout(cleanup, FLIP_DURATION + 100);
-      });
-    }
-  }
-
-  // Wrap a layout-mutating callback so peers glide instead of snap. The
-  // callback is responsible for: (a) removing/inserting the affected tile,
-  // (b) returning the *new* element (so we can animate its entrance and
-  // skip it from the peer-glide set). May return null when nothing new is
-  // entering (pure removal — peers still need to glide).
-  function runFlipReflow(mutate) {
-    const before = captureLayoutRects();
-    const result = mutate();
-    const newEl = result && result.nodeType ? result : null;
-    // Skip the newly-inserted element from FLIP (it has no before-rect and
-    // animates via the entering/active classes instead).
-    playFlip(before, newEl ? [newEl] : []);
-    return newEl;
-  }
-
-  // ── Node builders (no placement decisions — flowPass owns those) ────────
-  // Build the DOM node for an instance in the form it should take given its
-  // current bin (bento panel vs tray icon). flowPass decides which bin; this
-  // function just produces the matching node.
-  function buildNodeForBin(inst, manifest, bin, state, mode) {
-    let node;
-    if (bin === "tray") {
-      node = buildTrayIcon(inst, manifest);
-    } else {
-      node = renderPanelInstance(inst, manifest);
-    }
-    node.dataset.tileflowState = state;
-    if (shouldHideForMode(inst.instance, mode)) node.classList.add("mode-hidden");
-    return node;
-  }
-
-  // Apply a flowPass decision to an instance's DOM node: place in the right
-  // region, set grid span (bento) or just append (tray), tag with order so
-  // CSS Grid's auto-flow sorts visually by score. Doesn't build new nodes
-  // unless the bin changed — see runFlowPass for the migration path.
-  function applyDecision(node, decision, regionMap, instLayoutDef) {
-    if (!node) return;
-    // Visual order: higher score → lower `order` → earlier in the flow.
-    // CSS Grid honors `order` for dense packing without DOM reordering, so
-    // iframes (and their playing media) stay intact across reflows.
-    // Exception: app-owned tray icons keep their app-group order key
-    // (assigned in buildTrayIcon) so same-app icons stay clustered.
-    if (!(decision.bin === "tray" && node.dataset.app)) {
-      node.style.order = String(-decision.score);
-    }
-    // Debug surface: visible in DevTools Inspect Element, so the score/
-    // class/order behind any tile's position is one click away — no need
-    // to mentally reconcile source vs visual order.
-    node.dataset.tileflowScore = String(decision.score);
-    node.dataset.tileflowClass = decision.cls;
-    node.dataset.tileflowOrder = String(-decision.score);
-    if (decision.bin === "bento" && decision.span) {
-      // Panel-controlled span override (harness.setSpan). Lets a panel grow
-      // to fit its own content (e.g. matching an embed's aspect ratio) past
-      // the class table. Falls back to the engine's class span otherwise.
-      const override = _spanOverrides[decision.instance];
-      const span = override || decision.span;
-      const pin = instLayoutDef && instLayoutDef.pin;
-      if (pin) {
-        // Pin is a floor: state-driven span can grow past pin.cols/rows but
-        // never shrinks the origin. Auto-flow respects the start cell.
-        node.style.gridColumn = `${pin.col} / span ${Math.max(span.cols, pin.cols)}`;
-        node.style.gridRow    = `${pin.row} / span ${Math.max(span.rows, pin.rows)}`;
-      } else {
-        node.style.gridColumn = `span ${span.cols}`;
-        node.style.gridRow    = `span ${span.rows}`;
-      }
-    } else if (decision.bin === "tray") {
-      // Tray icons don't claim grid cells; clear any leftover span style.
-      node.style.gridColumn = "";
-      node.style.gridRow = "";
-    }
-  }
-
-  // The single mutation point. Reads state, calls the engine, then walks
-  // decisions: bin migrations (build/swap node), in-place updates (order +
-  // span), and tray reorder. Wrapped in `runFlipReflow` so peers glide.
-  let _flowScheduled = false;
-  function scheduleFlowPass(animate) {
-    if (_flowScheduled) return;
-    _flowScheduled = true;
-    const run = () => {
-      _flowScheduled = false;
-      runFlowPass(animate !== false);
-    };
-    // Chrome suspends rAF in hidden tabs — a wedged _flowScheduled would
-    // then swallow every later pass. Model/tool-driven layout changes must
-    // land even when the tab is backgrounded, so fall back to a timeout.
-    if (document.hidden) setTimeout(run, 0);
-    else requestAnimationFrame(run);
-  }
-
-  function runFlowPass(animate) {
-    if (!_layoutCache || !_regionMapCache) return;
-    const engine = (window.harness && window.harness.tileflow) || null;
-    if (!engine || typeof engine.flowPass !== "function") return;
-    const mode = bootMode();
-    const gridCfg = currentGridConfig();
-    // Build the items list flowPass needs.
-    const items = [];
-    for (const id in _instances) {
-      const inst = _instances[id];
-      // Defensive: every layout instance now declares a panel. Skip silently
-      // if a stray legacy entry slips through without one rather than crash.
-      if (!inst.panel) continue;
-      const manifest = _manifests[inst.panel];
-      if (!manifest) continue;
-      const cfg = tileflowConfig(manifest);
-      const state = _instanceStates[id] || cfg.default_state;
-      _instanceStates[id] = state;
-      const overrides = inst.score_overrides || {};
-      if (typeof overrides.priority !== "number") overrides.priority = cfg.priority;
-      items.push({
-        instance: id,
-        manifest,
-        state,
-        overrides,
-        tileflow: inst.tileflow || null,
-        lastStateChangeAt: _lastStateChangeAt[id] || 0,
-      });
-    }
-    const result = engine.flowPass(items, gridCfg);
-    const decisionsById = {};
-    for (const d of result.decisions) decisionsById[d.instance] = d;
-
-    // Mutate inside FLIP so peers glide to their new positions/sizes.
-    const mutate = () => {
-      let entered = null;
-      for (const d of result.decisions) {
-        const inst = _instances[d.instance];
-        if (!inst) continue;
-        const manifest = _manifests[inst.panel];
-        const state = _instanceStates[d.instance];
-        const node = document.querySelector(`[data-instance="${d.instance}"]`);
-        const currentBin = node && node.classList.contains("tray-icon") ? "tray" : (node ? "bento" : null);
-        if (currentBin === d.bin && node) {
-          // Same bin: in-place update. State changes may have promoted
-          // size class without changing bin.
-          node.dataset.tileflowState = state;
-          applyDecision(node, d, _regionMapCache, inst);
-        } else {
-          // Bin migration: build new node, drop old. The freshly-built node
-          // gets the entering animation; FLIP handles peers around it.
-          const targetRegionEl = d.bin === "tray"
-            ? _trayRegionEl
-            : (_regionMapCache[inst.region] && _regionMapCache[inst.region].el);
-          if (!targetRegionEl) continue;
-          if (node) node.remove();
-          const fresh = buildNodeForBin(inst, manifest, d.bin, state, mode);
-          applyDecision(fresh, d, _regionMapCache, inst);
-          targetRegionEl.appendChild(fresh);
-          // Log only when an existing node actually moved bins. First-mount
-          // (no prior node) shouldn't count as a migration — it'll get a
-          // dedicated "mount" event in the lifecycle expansion later.
-          if (currentBin) {
-            harness.logInteraction(d.instance, "bin", { from: currentBin, to: d.bin });
-          }
-          // Only flag entry animation for the user-driven change, not for
-          // panels that happened to re-order. Heuristic: the panel whose
-          // state changed most recently within this frame.
-          if (!entered || (_lastStateChangeAt[d.instance] || 0) > (_lastStateChangeAt[entered.dataset.instance] || 0)) {
-            entered = fresh;
-          }
-        }
-      }
-      return entered;
-    };
-
-    if (animate) {
-      const entered = runFlipReflow(mutate);
-      if (entered) {
-        entered.classList.add("tileflow-entering");
-        requestAnimationFrame(() => {
-          entered.classList.remove("tileflow-entering");
-          entered.classList.add("tileflow-enter-active");
-          setTimeout(() => entered.classList.remove("tileflow-enter-active"), 380);
-        });
-      }
-    } else {
-      mutate();
-    }
-  }
-
-  // Public API: declare a state change. Updates the per-instance recency
-  // timestamp (which feeds into engine score), then schedules a single
-  // coalesced reflow on the next frame. Multiple setState calls within the
-  // same tick fire one flow pass.
-  harness.setState = function (instanceId, state) {
-    const inst = _instances[instanceId];
-    if (!inst || !inst.panel) {
-      console.warn(`[tileflow] setState: unknown instance "${instanceId}"`);
-      return;
-    }
-    const manifest = _manifests[inst.panel];
-    if (!manifest) {
-      console.warn(`[tileflow] setState: panel "${inst.panel}" not registered`);
-      return;
-    }
-    if (_instanceStates[instanceId] === state) return;
-    const prev = _instanceStates[instanceId] || null;
-    _instanceStates[instanceId] = state;
-    _lastStateChangeAt[instanceId] = Date.now();
-    // Log every real transition (the no-op early-return above filters
-    // synthetic same-state calls so we don't spam the stream during a
-    // flow pass that revisits unchanged panels).
-    harness.logInteraction(instanceId, "state", { from: prev, to: state });
-    if (!_layoutCache || !_regionMapCache) return;
-    scheduleFlowPass(true);
-  };
-
-  harness.getState = function (instanceId) {
-    return _instanceStates[instanceId] || null;
-  };
-
-  // ── harness.signalContent — content-aware wake/sleep ────────────────────
-  // The bridge between "this panel has something to show" and tileflow
-  // state. Panels (or app.js's WS handlers on their behalf) call this
-  // instead of setState so user intent is respected:
-  //
-  //   signalContent(id, true)  — dormant panel wakes into the bento
-  //     (`active`, or the `wake` option e.g. "focused" for approval gates).
-  //     EXCEPT when the user explicitly minimized it: then the tray icon
-  //     gets a badge dot and the panel stays put until the user reopens it.
-  //   signalContent(id, false) — panel emptied. Auto-woken panels return to
-  //     dormant; a state the user picked by hand is left alone. Badges clear.
-  //
-  // Idempotent and cheap — WS handlers can call it on every refresh.
-  harness.signalContent = function (instanceId, hasContent, opts) {
-    const inst = _instances[instanceId];
-    if (!inst || !inst.panel) return;
-    const cur = _instanceStates[instanceId] || null;
-    if (hasContent) {
-      if (_userSticky[instanceId] === "dormant") {
-        // User pinned it shut — badge, don't bubble.
-        if (cur === "dormant") _setTrayBadge(instanceId, true);
-        return;
-      }
-      if (cur === "dormant" || cur === null) {
-        harness.setState(instanceId, (opts && opts.wake) || "active");
-      }
-    } else {
-      _setTrayBadge(instanceId, false);
-      // Only auto-sleep panels the system is driving. A hand-picked state
-      // (pill menu, tray-icon reopen → sticky cleared counts as system)
-      // stays until the user changes it.
-      if (cur && cur !== "dormant" && _userSticky[instanceId] === undefined) {
-        harness.setState(instanceId, "dormant");
-      }
-    }
-  };
-
-  // ── harness.logInteraction — emit a system_log event ────────────────────
-  // Called by the shell's auto-instrument (click / state / bin) and by
-  // panel scripts that want to record a finer-grained signal (e.g. video
-  // play, search-submit). `kind` is free-form but consumers will assume the
-  // shell-emitted set ("click", "state", "bin", "custom") exists; pick a
-  // new tag if you're adding a category we'd want to aggregate separately.
-  //
-  // The call is fire-and-forget: queued into the ring + debounced WS flush.
-  // Never throws — analytics failures must not break user interactions.
-  harness.logInteraction = function (instance, kind, meta) {
-    if (typeof instance !== "string" || typeof kind !== "string") return;
+  // Fire-and-forget; never throws — analytics must not break interactions.
+  harness.logInteraction = function (panel, kind, meta) {
+    if (typeof panel !== "string" || typeof kind !== "string") return;
     try {
-      const inst = _instances[instance];
-      const panel = inst && inst.panel ? inst.panel : null;
       _enqueueActivity({
         ts: Date.now(),
-        instance,
+        instance: panel,     // one panel = one instance; the column stays
         panel,
         kind,
         meta: (meta && typeof meta === "object") ? meta : {},
@@ -911,177 +591,40 @@
     } catch (e) { /* swallow */ }
   };
 
-  // ── harness.activity.* — debug surface ──────────────────────────────────
-  // Pure in-memory; the SQL-backed query lives at GET /api/system_log.
   const activity = (harness.activity = harness.activity || {});
   activity.dump = function (limit) {
     const n = Math.min(limit || 50, _activityRing.length);
-    const start = _activityRing.length - n;
-    const rows = _activityRing.slice(start);
+    const rows = _activityRing.slice(_activityRing.length - n);
     if (console.table) console.table(rows.map(r => ({
       ts: new Date(r.ts).toISOString().slice(11, 23),
-      instance: r.instance, panel: r.panel, kind: r.kind,
-      meta: JSON.stringify(r.meta),
+      panel: r.panel, kind: r.kind, meta: JSON.stringify(r.meta),
     })));
     return rows;
   };
   activity.flush = _flushActivity;   // force-flush, mostly for tests
 
-  // Panel-controlled grid span. Pass `{cols, rows}` to claim a custom-sized
-  // bento cell that ignores the class table; pass null/undefined to release
-  // the override and fall back to the engine's decision. Used by panels
-  // whose ideal shape depends on runtime content (e.g. matching an
-  // embed's aspect ratio).
-  harness.setSpan = function (instanceId, span) {
-    if (!_instances[instanceId]) return;
-    if (span && typeof span.cols === "number" && typeof span.rows === "number") {
-      _spanOverrides[instanceId] = {
-        cols: Math.max(1, Math.min(12, Math.round(span.cols))),
-        rows: Math.max(1, Math.min(8, Math.round(span.rows))),
-      };
-    } else {
-      delete _spanOverrides[instanceId];
-    }
-    if (!_layoutCache || !_regionMapCache) return;
-    scheduleFlowPass(true);
-  };
-
-  // Read-only view of the current grid config (cols, rowPx, gapPx, colPx,
-  // bentoWidthPx). Panels use this to convert an aspect ratio into a span.
-  harness.gridConfig = function () { return currentGridConfig(); };
-
-  // ── Tier-0 postMessage bridge ────────────────────────────────────────────
-  // Sandboxed iframe panels can't reach window.harness, so they were locked
-  // to their manifest default_state. This listener lets any embedded panel
-  // participate in tileflow by posting:
-  //   parent.postMessage({ type: "tileflow.setState", state: "focused" }, "*")
-  // The sender is identified by its contentWindow — no instance id in the
-  // message, so a panel can't spoof state for a sibling. See docs/panels.md.
-  window.addEventListener("message", (e) => {
-    const data = e.data;
-    if (!data || typeof data !== "object" || data.type !== "tileflow.setState") return;
-    if (!TILEFLOW_STATES.includes(data.state)) return;
-    for (const iframe of document.querySelectorAll(".panel-instance > .panel-iframe")) {
-      if (iframe.contentWindow === e.source) {
-        const wrap = iframe.closest(".panel-instance");
-        const instanceId = wrap && wrap.dataset.instance;
-        if (instanceId) harness.setState(instanceId, data.state);
-        return;
-      }
-    }
-  });
-
-  // Exposed so tools/console can force a fresh flow pass (e.g. after a
-  // weights change via the future settings panel) without nudging state.
-  harness.recomputeLayout = function () { scheduleFlowPass(true); };
-
-  // Debug: read-only snapshot of the live instance index (post layout
-  // re-syncs). Complements harness.tileflow.dump() which reads the DOM.
-  harness.debugInstances = function () {
-    return JSON.parse(JSON.stringify(_instances));
-  };
-
-  // Per-instance mode visibility, mirrored from app.js's _PANEL_HIDE_RULES.
-  // Defined here so panel-shell can hide-by-default at render time, before
-  // app.js's applyModeVisibility runs (prevents mode-hidden panels from
-  // flashing visible during boot).
-  // Empty since the game/blog modes were deleted (2026-08); repopulate when
-  // a mode needs per-instance visibility again. Keep in sync with app.js's
-  // _PANEL_HIDE_RULES.
-  const INSTANCE_MODE_RULES = {};
-
-  function shouldHideForMode(instance, mode) {
-    const r = INSTANCE_MODE_RULES[instance];
-    if (!r) return false;
-    if (r.showOnlyIn) return !r.showOnlyIn.includes(mode);
-    if (r.hideIn) return r.hideIn.includes(mode);
-    return false;
-  }
-
+  // ── Mode visibility ─────────────────────────────────────────────────────
+  // Empty since the game/blog modes were deleted (2026-08); the schema stays
+  // for future modes. DeetsCode is the only mode today.
   function bootMode() {
     try { return localStorage.getItem("harness-mode") || "DeetsCode"; }
     catch (_) { return "DeetsCode"; }
   }
 
-  function hoistInstances(layout, regionMap, panelManifests) {
-    const mode = bootMode();
-    // Locate tray + bento regions so Tileflow can route into them and
-    // currentGridConfig() can measure live column widths.
-    _trayRegionEl = null;
-    _bentoRegionEl = null;
-    for (const region of layout.regions) {
-      const entry = regionMap[region.id];
-      if (!entry) continue;
-      if (region.kind === "tray" && !_trayRegionEl) _trayRegionEl = entry.el;
-      if (region.kind === "bento" && !_bentoRegionEl) _bentoRegionEl = entry.el;
-    }
-    // Index instances + manifests for harness.setState.
-    for (const inst of layout.instances) {
-      _instances[inst.instance] = inst;
-    }
-    for (const name in panelManifests) _manifests[name] = panelManifests[name];
-
-    // Pre-seed state from manifest defaults. flowPass will read these.
-    for (const inst of layout.instances) {
-      if (!inst.panel) continue;
-      const m = panelManifests[inst.panel];
-      if (!m) continue;
-      const cfg = tileflowConfig(m);
-      if (!_instanceStates[inst.instance]) {
-        _instanceStates[inst.instance] = cfg.default_state;
-      }
-    }
-
-    // Initial node creation. Panels get built into their *declared* region
-    // first (bento or otherwise); flowPass then re-bins to tray if the
-    // initial state demands it.
-    for (const inst of layout.instances) {
-      const target = regionMap[inst.region];
-      if (!target) {
-        console.warn(`[panel-shell] instance "${inst.instance}": region "${inst.region}" not declared`);
-        continue;
-      }
-      if (!inst.panel) {
-        console.warn(`[panel-shell] instance "${inst.instance}": no panel declared`);
-        continue;
-      }
-      const m = panelManifests[inst.panel];
-      if (!m) {
-        console.warn(`[panel-shell] instance "${inst.instance}": panel "${inst.panel}" not in registry`);
-        continue;
-      }
-      const state = _instanceStates[inst.instance];
-      const node = renderPanelInstance(inst, m);
-      node.dataset.tileflowState = state;
-      if (shouldHideForMode(inst.instance, mode)) node.classList.add("mode-hidden");
-      target.el.appendChild(node);
-    }
-  }
-
-  // Apply mode_overrides for the active mode. Called once at boot (no mode
-  // active yet) and re-called by app.js whenever the prompt changes via
-  // window.harnessApplyLayoutMode.
-  let _layoutCache = null;
-  let _regionMapCache = null;
   function applyMode(mode) {
-    if (!_layoutCache || !_regionMapCache) return;
-    const overrides = (_layoutCache.mode_overrides || {})[mode] || {};
-    const regionOverrides = overrides.regions || {};
-    for (const region of _layoutCache.regions) {
-      const entry = _regionMapCache[region.id];
-      if (!entry) continue;
-      applyRegionStyle(entry.el, region, regionOverrides[region.id]);
-    }
-    const instOverrides = overrides.instances || {};
-    for (const inst of _layoutCache.instances) {
-      const node = document.querySelector(`[data-instance="${inst.instance}"]`);
-      if (!node) continue;
-      const ov = instOverrides[inst.instance];
-      if (ov && ov.hidden) node.style.display = "none";
-      else node.style.display = "";
+    if (!_layout) return;
+    const overrides = (_layout.mode_overrides || {})[mode] || {};
+    const slotOverrides = overrides.slots || {};
+    for (const slot of SLOTS) {
+      const host = _slotEls[slot];
+      if (!host) continue;
+      const ov = slotOverrides[slot];
+      host.classList.toggle("mode-hidden", !!(ov && ov.hidden));
     }
   }
   window.harnessApplyLayoutMode = applyMode;
+
+  // ── Boot ────────────────────────────────────────────────────────────────
 
   async function fetchPanelManifests() {
     try {
@@ -1092,7 +635,7 @@
       for (const m of (body.panels || [])) out[m.name] = m;
       return out;
     } catch (e) {
-      console.warn("[panel-shell] /api/panels unavailable, real-panel instances will be skipped:", e);
+      console.warn("[panel-shell] /api/panels unavailable:", e);
       return {};
     }
   }
@@ -1104,84 +647,74 @@
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
       layout = await r.json();
     } catch (e) {
-      console.error("[panel-shell] failed to load /api/layout:", e);
-      // Hard failure now: with chat migrated, there's no legacy fallback to
+      // Hard failure: with chat mounted as a panel there is no fallback UI to
       // show. The console error is the user-visible signal.
+      console.error("[panel-shell] failed to load /api/layout:", e);
       return;
     }
-    const panelManifests = await fetchPanelManifests();
-    const regionMap = buildRegions(layout);
-    if (!regionMap) return;
-    hoistInstances(layout, regionMap, panelManifests);
-    _layoutCache = layout;
-    _regionMapCache = regionMap;
-    // Initial mode unknown — app.js will call back once /api/prompts resolves.
+    const manifests = await fetchPanelManifests();
+    for (const name in manifests) _manifests[name] = manifests[name];
+    if (!buildShell()) return;
 
-    // Initial layout flow. Snap (no animation) so the first paint settles
-    // immediately rather than gliding from declared positions.
-    runFlowPass(false);
+    _layout = layout;
+    _pool = (layout.pool || []).filter((n) => _manifests[n]);
+    if ((layout.warnings || []).length) {
+      console.warn("[panel-shell] layout fell back:", layout.warnings.join("; "));
+    }
 
-    // Recompute when the engine's tunable weights change (settings panel,
-    // tools/console). Reads through to harness.tileflow.setWeights/resetWeights.
-    const engine = window.harness && window.harness.tileflow;
-    if (engine) engine._onWeightsChanged = () => scheduleFlowPass(true);
+    // Anchored panels first — chat must exist before app.js's WS frames start
+    // arriving. Its boot buffer covers the gap, but a shorter gap is better.
+    for (const name of (layout.anchored || [])) {
+      const m = _manifests[name];
+      if (!m) { console.warn(`[panel-shell] anchored panel "${name}" not registered`); continue; }
+      _anchorEl.appendChild(buildTile(m, { pickable: false }));
+    }
 
-    // Viewport-class crossings (12 ↔ 6 col breakpoint) and ordinary resize
-    // both want a recompute: column widths change → min-width clamps may
-    // promote/demote classes. Debounce so dragging the window edge doesn't
-    // thrash. RAF coalescing inside scheduleFlowPass guards the inner loop.
+    _surface = currentSurface();
+    document.documentElement.setAttribute("data-surface", _surface);
+    for (const slot of SLOTS) {
+      const host = _slotEls[slot];
+      const visible = (_surface === "wide") || (slot === NARROW_SLOT);
+      host.hidden = !visible;
+      const name = layout.slots[slot];
+      if (visible && name && _manifests[name]) mountSlot(slot, name, { animate: false });
+    }
+    applyMode(bootMode());
+
+    // One breakpoint, so only a crossing matters. Debounced: dragging the
+    // window edge must not thrash mount/unmount.
     let _resizeTimer = null;
     window.addEventListener("resize", () => {
       if (_resizeTimer) clearTimeout(_resizeTimer);
-      _resizeTimer = setTimeout(() => { _resizeTimer = null; scheduleFlowPass(false); }, 120);
+      _resizeTimer = setTimeout(() => { _resizeTimer = null; applySurface(); }, 120);
     });
 
-    // ── Auto-instrument: clicks on any panel-instance or tray-icon ────────
-    // Capture phase so this fires before any inline handler stops propagation.
-    // We log the panel-instance's id from the closest ancestor with
-    // [data-instance]; clicks outside any panel are ignored (no instance to
-    // attribute them to). `tag` carries the click target's element name so
-    // analytics can tell button-clicks from background clicks.
+    // Auto-instrument clicks. Capture phase so this fires before any inline
+    // handler stops propagation. Looking at a tile clears its notify.
     document.addEventListener("click", (e) => {
       const target = e.target;
       if (!target || !(target instanceof Element)) return;
-      const node = target.closest("[data-instance]");
-      if (!node) return;
-      const instance = node.dataset.instance;
-      if (!instance) return;
-      const isTray = node.classList && node.classList.contains("tray-icon");
-      harness.logInteraction(instance, "click", {
+      const node = target.closest(".panel-instance");
+      if (!node || !node.dataset.panelName) return;
+      clearNotify(node.dataset.panelName);
+      harness.logInteraction(node.dataset.panelName, "click", {
         tag: target.tagName ? target.tagName.toLowerCase() : null,
-        bin: isTray ? "tray" : "bento",
+        slot: node.dataset.slot || null,
       });
     }, true);
 
-    // ── Runtime overlay subscriber ────────────────────────────────────────
-    // The server pushes `{type: "tileflow_state", instance, state}` whenever
-    // the `set_instance_state` tool fires (from the model) or anyone hits
-    // POST /api/tileflow/state/:id. Funnel straight into the existing
-    // setState path so the FLIP runner does its thing. The synthetic
-    // "_shell" panel name never matches a real panel, so this subscription
-    // is never cleared by panel re-renders.
-    harness.subscribe("_shell", "tileflow_state", (msg) => {
-      if (!msg || !msg.instance || !msg.state) return;
-      harness.setState(msg.instance, msg.state);
+    // Server-side layout edits (the model rewriting panel_layout.json).
+    harness.subscribe("_shell", "layout_updated", syncLayoutFromServer);
+    // Server-side summon, e.g. an app launcher asking for its panel.
+    harness.subscribe("_shell", "panel_summon", (msg) => {
+      if (msg && msg.panel) harness.requestPanel(msg.panel);
     });
-    // Force-recompute frame from the `recompute_layout` tool. No-op on state;
-    // just bumps the engine to re-rank and re-apply.
-    harness.subscribe("_shell", "tileflow_recompute", () => scheduleFlowPass(true));
-
-    // ── Layout re-sync ────────────────────────────────────────────────────
-    // `layout_updated` fires whenever the persisted layout sheet changes
-    // server-side (pin/unpin/floor tools, presets, app instance launches).
-    // Reconcile instead of rebooting: update the instance index, mount new
-    // instances, drop removed ones, leave everything else in place (anchored
-    // panels like chat must never re-inject — the boot buffer would replay).
-    // Region additions/removals are NOT handled — those need a reload.
-    harness.subscribe("_shell", "layout_updated", refreshLayoutFromServer);
   }
 
-  async function refreshLayoutFromServer() {
+  // Reconcile a server-side layout change without rebooting: remount only the
+  // slots whose panel actually changed, so an unrelated edit never discards
+  // the scroll position of a tile you're reading.
+  async function syncLayoutFromServer() {
     let layout;
     try {
       const r = await fetch("/api/layout");
@@ -1191,52 +724,29 @@
       console.warn("[panel-shell] layout re-sync failed:", e);
       return;
     }
-    // Manifests may have changed too (apps installed / panels reloaded).
     const manifests = await fetchPanelManifests();
     for (const name in manifests) _manifests[name] = manifests[name];
+    _pool = (layout.pool || []).filter((n) => _manifests[n]);
 
-    _layoutCache = layout;
-    const mode = bootMode();
-    const newIds = new Set();
-    for (const inst of layout.instances) {
-      newIds.add(inst.instance);
-      _instances[inst.instance] = inst; // picks up new pins/floors in place
-    }
-    // Drop instances that left the layout.
-    for (const id of Object.keys(_instances)) {
-      if (newIds.has(id)) continue;
-      const node = document.querySelector(
-        `section[data-instance="${id}"], .tray-icon[data-instance="${id}"]`
-      );
-      if (node) node.remove();
-      delete _instances[id];
-      delete _instanceStates[id];
-      delete _lastStateChangeAt[id];
-    }
-    // Mount instances that are new to the layout.
-    for (const inst of layout.instances) {
-      if (!inst.panel) continue;
-      const m = _manifests[inst.panel];
-      if (!m) continue;
-      const existing = document.querySelector(
-        `section[data-instance="${inst.instance}"], .tray-icon[data-instance="${inst.instance}"]`
-      );
-      if (existing) continue;
-      const target = _regionMapCache[inst.region];
-      if (!target) continue;
-      if (!_instanceStates[inst.instance]) {
-        _instanceStates[inst.instance] = tileflowConfig(m).default_state;
+    const before = (_layout && _layout.slots) || {};
+    const changed = SLOTS.filter((s) => before[s] !== layout.slots[s]);
+    // Unmount every changed slot before mounting any of them: a panel moving
+    // nw→ne would otherwise briefly occupy two slots.
+    for (const slot of changed) clearSlot(slot);
+    _layout.slots = layout.slots;
+    _layout.anchored = layout.anchored || _layout.anchored;
+    _layout.mode_overrides = layout.mode_overrides || {};
+    for (const slot of changed) {
+      const name = layout.slots[slot];
+      if (name && _manifests[name] && !_slotEls[slot].hidden) {
+        mountSlot(slot, name, { animate: true });
       }
-      const node = renderPanelInstance(inst, m);
-      node.dataset.tileflowState = _instanceStates[inst.instance];
-      if (shouldHideForMode(inst.instance, mode)) node.classList.add("mode-hidden");
-      target.el.appendChild(node);
     }
-    scheduleFlowPass(true);
+    applyMode(bootMode());
   }
 
-  // panel-shell.js is loaded before app.js but DOMContentLoaded may have
-  // already fired if scripts load late; guard either way.
+  // panel-shell.js loads before app.js but DOMContentLoaded may already have
+  // fired if scripts load late; guard either way.
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", boot);
   } else {

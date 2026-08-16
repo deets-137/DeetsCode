@@ -1,8 +1,23 @@
-# tileflow.md — dynamic bento engine
+# tileflow.md — dynamic bento engine (RETIRED)
 
-Living design doc for Tileflow: the layout engine that sits on top of the
-panel system and decides, at runtime, where each panel goes and how big it
-is. Keep this current as we build.
+> **Nothing in this document is live.** Tileflow was deleted in August 2026
+> and replaced by the four-slot system — see [slots.md](slots.md), which is
+> the current design doc, and which opens with why we stopped.
+>
+> This file stays on disk as the record of what the scored engine did: the
+> score formula, the size-class derivation, the state model, the tray, the
+> FLIP runner, the pin grid. If you are wondering why the harness *doesn't*
+> auto-arrange panels, the answer is here — it used to, and the layout was
+> never where you left it. Read it as an argument that lost, not as
+> instructions.
+>
+> Code: `static/tileflow-engine.js`, the flow pass in `static/panel-shell.js`,
+> and the v2 layout schema in `panels/loader.py` are all gone from the working
+> tree; `git log` has their last state.
+
+Living design doc for Tileflow: the layout engine that sat on top of the
+panel system and decided, at runtime, where each panel went and how big it
+was.
 
 The panel system gives us **what** to render. Tileflow decides **how to
 arrange it**. The two are deliberately separate — a panel author never
@@ -841,7 +856,7 @@ current priorities live in the build docket.)*
 ## Scoring + flow engine (2026-05-12)
 
 Auto-arrange is driven by a per-instance score. Lives in
-[static/tileflow-engine.js](../static/tileflow-engine.js) as a pure module
+`static/tileflow-engine.js` (deleted 2026-08-15) as a pure module
 that exposes `window.harness.tileflow.{score, naturalClass, effectiveClass,
 flowPass, WEIGHTS, setWeights, resetWeights}`. The shell calls `flowPass()`
 on every `setState`, on boot, after a viewport resize, and on a

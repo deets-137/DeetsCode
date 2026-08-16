@@ -9,7 +9,7 @@ Keep these in mind when changing the harness.
 - **No auto-reload on the server.** Edit `server.py` or any file under `tools/`, restart uvicorn.
 - **`prompts/<mode>.md` is hot.** Re-read every turn — no restart needed for prompt tweaks.
 - **Manual docs are hot.** `list_manual` scans the folder per call. Bodies are not in the standing prompt — the model pulls them via `load_manual` on demand.
-- **Panels/layout are hot-ish.** `POST /api/panels/reload` (or `/api/apps/reload`) rescans without a restart; any layout write broadcasts `layout_updated` and every tab re-syncs live.
+- **Panels/layout are hot-ish.** `POST /api/panels/reload` rescans without a restart; any layout write broadcasts `layout_updated` and every tab re-syncs live.
 - **Tool schema is hot-per-turn.** `load_tools(mode)` is called at the top of every agent-loop iteration, so `/mode` switches pick up a new schema without a restart.
 
 ## Security guards that must stay
